@@ -1,0 +1,361 @@
+# demoparser2 — working notes (CS2-AimAudit)
+
+> This file is a "crash course" for any new session: everything you need to
+> know about the CS2 demo parser to start working on the project right away.
+> Sources: the LaihoE/demoparser repository README (read fully),
+> documentation/python/README.md (read fully), examples/ — almost all read
+> (see section 8).
+
+## 1. What it is and how it's built
+
+- Repository: https://github.com/LaihoE/demoparser
+- Heavy lifting in Rust, wrappers: Python (`pip install demoparser2`, py>=3.8),
+  NodeJS (`@laihoe/demoparser2`), WASM.
+- Philosophy: NOT streaming events — "query the demo like a database".
+- Performance: 50 demos (4.6 GB, MM+Faceit+HLTV) in ~6–14 s (749/328 MB/s).
+- Author's Discord: https://discord.gg/rNUjS4vfnX
+- Other parsers (for reference): demoinfocs-golang (Go), demofile-net (C#), awpy (Python), clarity (Java).
+
+## 2. Python API — signatures (official docs, verbatim)
+
+```python
+from demoparser2 import DemoParser
+
+parser = DemoParser("path_to_demo.dem")
+
+parser.parse_header() -> Dict[str, str]
+parser.parse_convars() -> Dict[str, str]
+parser.Sequence_game_events() -> List[str]
+parser.parse_chat_messages() -> pd.DataFrame
+parser.parse_player_info() -> pd.DataFrame
+parser.parse_item_drops() -> pd.DataFrame
+parser.parse_skins() -> pd.DataFrame
+parser.parse_grenades(extra: Optional[Sequence[str]] = None, grenades: bool = True) -> pd.DataFrame
+parser.parse_weapons(extra: Optional[Sequence[str]] = None, ticks: Optional[Sequence[int]] = None) -> pd.DataFrame
+parser.parse_event(event_name: str, player: Optional[Sequence[str]] = None, other: Optional[Sequence[str]] = None) -> pd.DataFrame
+parser.parse_events(event_name: Sequence[str], player=None, other=None) -> List[Tuple[str, pd.DataFrame]]
+parser.parse_voice() -> Dict[str, bytes]
+parser.parse_ticks(wanted_props: Sequence[str], player: Optional[Sequence[int]] = None, ticks: Optional[Sequence[int]] = None) -> pd.DataFrame
+parser.list_game_events() -> List[str]   # roughly as slow as parse_event
+```
+
+### parse_event / parse_events
+
+- Returns a DataFrame of events of the given type.
+- `player=["X", "Y"]` — "player" props are added to the event with the
+  participant prefix: for `bomb_planted` you get `user_X`, `user_Y`.
+- `other=["total_rounds_played"]` — GAME state (only game-state props are
+  valid in `other`!). Our core.py calls
+  `parse_events(["player_death", "weapon_fire", "player_hurt"], other=["total_rounds_played"])`
+  — this is correct usage: `total_rounds_played` = m_totalRoundsPlayed.
+- `parse_events([...])` returns a list of `(event_name, df)` tuples —
+  we turn it into `dict(...)`. The order of events in the list is not
+  guaranteed by the docs — so we look up by key, not by index.
+
+### parse_ticks
+
+- Per-player props per tick. `ticks=[983]` — which ticks; without the arg —
+  all ticks.
+- `player=[steamid:int, ...]` — player filter (int!). We pass
+  `players=[int(me)]` in timeline_data.
+- Always returns columns `tick`, `steamid`, `name` + the requested props.
+- IMPORTANT (our experience, not from the docs): UInt64 columns with nulls
+  turn steamid into float64, and SteamID64 (>2^53) gets ROUNDED — we fix it
+  via a lookup from parse_player_info (core.fix_ids).
+
+### parse_player_info
+
+Example output:
+
+```
+steamid          name     team_number
+76561111111111111 player1  2          # 2 = T, 3 = CT
+```
+
+Updating the steamid field in parse_ticks — see above (fix_ids).
+
+### parse_header
+
+Fields: `addons, server_name, demo_file_stamp, network_protocol, map_name,
+fullpackets_version, allow_clientside_entities, allow_clientside_particles,
+demo_version_name, demo_version_guid, client_name, game_directory`.
+We use `map_name`. May throw — we wrap it in try.
+
+### parse_grenades
+
+All coordinates of all grenades + thrower info. `entity_id` distinguishes
+grenades of the same type from the same player.
+
+### parse_weapons
+
+WEAPONS ON THE GROUND (dropped, off corpses, not picked up). Weapons in hands
+are NOT here — use `inventory` / `active_weapon_name` in parse_ticks.
+`m_nDropTick` is a server tick (demo tick + constant); only compare it with
+other m_n\*Tick values.
+
+## 3. Player props (parse_ticks / player= in events)
+
+### Position / movement / view — used in core.py (POS)
+
+- `X, Y, Z` (m_vec + m_cell), `pitch, yaw` (m_angEyeAngles[0]/[1])
+- `velocity, velocity_X, velocity_Y, velocity_Z` — ⚠️ COMPUTED BY THE PARSER
+  FROM POSITIONS, NOT the real server velocity. Semantics (sources,
+  second_pass/collect_data.rs::velocity_from_history):
+  `velocity_X[i] = (pos[i-1] - pos[i-2]) * 64`, where i-1/i-2 are the TWO
+  PREVIOUS REQUESTED rows of the same player (lagged by one row!), and the
+  64 multiplier always assumes "1 tick between rows". With sparse ticks=
+  (only shot ticks, gaps of 5–5000 ticks) real speed is inflated N-fold
+  (N = real gap), and spawn/respawn teleports yield 30 000–47 000 u/s.
+  CONCLUSION: with sparse ticks= NEVER use them; compute speed ourselves:
+  parse shot ticks AND t-1, speed = |Δpos|\*64 (core.\_add_speed).
+  Edge case: > 600 u/s = artifact → NaN.
+- `max_speed` (m_flMaxspeed), `duck_amount` (m_flDuckAmount), `ducked`,
+  `ducking`, `in_crouch`, `jump_velo`, `fall_velo`, `is_airborne`
+  (m_hGroundEntity), `is_strafing` (m_bStrafing)
+
+### Survival / team / connection
+
+- `health, armor_value (m_ArmorValue), is_alive (m_bPawnIsAlive),
+life_state, team_num (m_iTeamNum), pending_team_num`
+  ✅ We now request `is_alive` in core.py: we use it to filter speed (a dead
+  pawn = garbage positions) and to cut the timeline at the moment of death —
+  key presses and the "speed" of a dead body in the demo are NOT real
+  player input.
+- `player_name, player_steamid (m_steamID), user_id, entity_id, ping`
+
+### Aim/shooting state — CANDIDATES for project improvements
+
+- `is_scoped (m_bIsScoped)`, `is_walking (m_bIsWalking)`,
+  `flash_duration (m_flFlashDuration)` — blindness in ticks!
+- `aim_punch_angle` (CCSPlayerPawn.m_aimPunchAngle) — RECOIL ANGLE.
+  Our angle_err() currently IGNORES recoil; can be improved: subtract/account
+  for the punch angle when computing aim error.
+- `velo_modifier` (m_flVelocityModifier) — slow on hit (player takes damage →
+  speed drops). Useful as a "they were just shot" indicator.
+- `shots_fired (m_iShotsFired)` — can be cross-checked with weapon_fire.
+- `active_weapon (m_hActiveWeapon)`, `active_weapon_name` — active weapon,
+  `inventory`, `inventory_as_ids` — inventory.
+- `has_helmet, has_defuser, is_defusing, in_bomb_zone, in_buy_zone,
+spotted (m_bSpotted), approximate_spotted_by`
+
+### Economy/service
+
+`balance, cash_spent_this_round, total_cash_spent, start_balance,
+round_start_equip_value, current_equip_value, rank, comp_wins, score, mvps,
+crosshair_code, player_color, fov, viewmodel_*`
+
+## 4. Buttons (m_nButtonDownMaskPrev) — IMPORTANT: A BUG WE FOUND IN OUR core.py
+
+### Named props (README):
+
+`FORWARD, LEFT, RIGHT, BACK, FIRE, RIGHTCLICK, RELOAD, INSPECT, USE, ZOOM,
+SCOREBOARD, WALK` (+ raw `buttons` = the u64 bitmask itself).
+**DUCK and JUMP are NOT named props!**
+
+### Bitmask bit map of `buttons` (from examples/buttons_bitfield/main.py):
+
+```
+IN_ATTACK      = 1 << 0    # FIRE
+IN_JUMP        = 1 << 1    # JUMP — no named prop
+IN_DUCK        = 1 << 2    # DUCK (crouch) — no named prop
+IN_FORWARD     = 1 << 3    # FORWARD
+IN_BACK        = 1 << 4    # BACK
+IN_USE         = 1 << 5
+IN_CANCEL      = 1 << 6
+IN_TURNLEFT    = 1 << 7    # (turn, not strafe)
+IN_TURNRIGHT   = 1 << 8
+IN_MOVELEFT    = 1 << 9    # LEFT (strafe A)
+IN_MOVERIGHT   = 1 << 10   # RIGHT (strafe D)
+IN_ATTACK2     = 1 << 11   # RIGHTCLICK
+IN_RELOAD      = 1 << 13   # RELOAD
+IN_ALT1        = 1 << 14
+IN_ALT2        = 1 << 15
+IN_SPEED       = 1 << 16   # (shift-sprint)
+IN_WALK        = 1 << 17   # WALK (shift-walk)
+IN_ZOOM        = 1 << 18
+IN_WEAPON1     = 1 << 19
+IN_WEAPON2     = 1 << 20
+IN_BULLRUSH    = 1 << 21
+IN_GRENADE1    = 1 << 22
+IN_GRENADE2    = 1 << 23
+IN_ATTACK3     = 1 << 24
+IN_SCORE       = 1 << 33
+IN_INSPECT     = 1 << 35
+```
+
+### CONSEQUENCE FOR OUR PROJECT (the bug!)
+
+Our core.BUTTONS = [..., "DUCK", "JUMP", ...] asks parse_ticks for named
+props that don't exist. If the parser throws on an unknown prop — the whole
+POS + BUTTONS call fails, the fallback to POS-without-buttons kicks in and we
+lose ALL buttons (FIRE and WASD too).
+
+**Fix** (applied in core.py): request only documented named props + raw
+`buttons`, and decode DUCK/JUMP from the bitmask ourselves:
+`df["DUCK"] = buttons & (1<<2) != 0`, `df["JUMP"] = buttons & (1<<1) != 0`.
+Bitmask values are ≤ 2^35, so float64 conversion (the SteamID problem) is
+harmless for the bitmask.
+
+In JS the bitmask comes as a STRING (no u64) — keep in mind when porting.
+
+## 5. Game state (for other= in events)
+
+- `total_rounds_played (m_totalRoundsPlayed)` — we use it (0-based).
+- `is_freeze_period, is_warmup_period` — FILTER: warmup/freeze shots can be
+  excluded (we currently do NOT filter — the user may have "extra" shots in
+  stats due to warmup!).
+- `is_bomb_planted, round_start_time, round_win_status, round_win_reason,
+game_phase, is_match_started, is_matchmaking, match_making_mode`
+- Team props: `team_rounds_total, team_name, team_score_first_half,
+team_score_second_half, team_clan_name`
+
+## 6. Weapons / usercommands / aggregates
+
+### Weapons (player props)
+
+`active_weapon_name, active_weapon_ammo (m_iClip1), total_ammo_left,
+weapon_mode, accuracy_penalty (m_fAccuracyPenalty!), i_recoil_idx,
+is_in_reload, zoom_lvl, needs_bolt_action, iron_sight_mode, weapon_float,
+weapon_paint_seed, weapon_stickers` etc.
+`accuracy_penalty` — another candidate: the real accumulated accuracy
+penalty.
+
+### usercommands (a subset is available in parse_ticks!)
+
+`usercmd_viewangle_x/y/z, usercmd_buttonstate_1/2/3,
+usercmd_forward_move, usercmd_left_move, usercmd_impulse,
+usercmd_mouse_dx, usercmd_mouse_dy (!), usercmd_weapon_select,
+usercmd_input_history, usercmd_subtick_moves, usercmd_consumed_server_angle_changes`
+
+`usercmd_mouse_dx/dy` — REAL MOUSE MOVEMENT per tick.
+The app guide says "mouse movement isn't in demos" — that's NOT entirely
+true: mouse deltas are available via usercmd. Top candidate for testing and
+adding to the timeline (reaction time, mouse-flick size).
+
+### Aggregates (updated once per round)
+
+`kills_total, deaths_total, assists_total, alive_time_total,
+headshot_kills_total, ace/4k/3k_rounds_total, damage_total,
+utility_damage_total, enemies_flashed_total, equipment_value_total,
+money_saved_total, kill_reward_total, cash_earned_total`
+— can be used to cross-check our stats against the "official" ones (data_checks!).
+
+## 7. Events used by our core.py
+
+- `weapon_fire`: columns `tick, user_steamid, user_name, weapon`.
+  Our load_demo: is_gun filter, norm_weapon, fix_ids(user_steamid).
+- `player_hurt`: `attacker_steamid, user_steamid, weapon, hitgroup (int),
+dmg_health, dmg_armor...`. hitgroup: 1=head, 2=chest, 3=stomach, 4=left_arm,
+  5=right_arm, 6=left_leg, 7=right_leg, 8=neck (our HITGROUPS map).
+- `player_death`: `attacker_steamid, user_steamid, weapon, headshot,
+distance?, noscope, thrusmoke, attackerblind, penetrated, assistedflash...`
+  We take fields via getattr with fallbacks — some fields are missing in
+  different demo versions.
+
+## 8. Examples (examples/) — summary of what was read
+
+- **analyse_aim/main.py**: for each player_hurt takes the attacker's
+  pitch/yaw for 300 ticks (~5 s) before the event:
+  `df[(df["tick"].between(t-300, t)) & (df["steamid"] == int(attacker))]`.
+  Confirms: steamid in parse_ticks is compared as int; the attacker can be
+  None (C4 damage etc.).
+- **buttons_bitfield/main.py**: the bit map (section 4) +
+  `extract_buttons(buttons)` decoder iterating KEY_MAPPING.
+- **kills_per_round/main.py**: `parse_event("player_death",
+player=["last_place_name", "team_name"], other=["total_rounds_played",
+"is_warmup_period"])` → teamkill filter via `attacker_team_name !=
+user_team_name` and warmup filter via `is_warmup_period == False`.
+  A TEMPLATE for our warmup/teamkill filter "in one query".
+- **get_all_events/main.py**: `list_game_events()` — event names;
+  `parse_events(["all"])` — ALL events in one call (the author calls it a
+  "cursed solution" — works, but unofficial).
+- **scoreboard/main.py**: `max_tick = parse_event("round_end")["tick"].max()`
+  → `parse_ticks(["kills_total", "deaths_total", ...], ticks=[max_tick])` —
+  final scoreboard for cross-checking in data_checks.
+- **round_time/main.py**: `parse_event("player_death", other=["game_time",
+"round_start_time"])` → death time in round = game_time −
+  round_start_time. A ready-made way to get "round second" for each duel
+  (early/late peeks).
+- **kda_per_zone/main.py**: `player=["last_place_name"]` → map zones
+  (attacker_last_place_name / user_last_place_name) — K/D by map zone.
+- **find_bomb_site/main.py**: bomb_planted + player=["last_place_name"] →
+  "BombsiteA"/"BombsiteB" (the site field gives an int).
+- **chicken_kills/main.py**: other_death event, othertype == "chicken".
+- **util_dmg/main.py**: HE damage via weapon == "hegrenade", molotov —
+  "molotov" | "inferno" (the molotov fire itself = a separate entity).
+- Not read (conversion errors/limit): 1vX, equipment_value_freeze_end,
+  crosshair_codes, voice_to_wav, WASM. Irrelevant to our project.
+
+## 9. Gotchas we've already collected (NOT from the docs)
+
+1. **SteamID float64**: polars→pandas conversion turns UInt64-with-nulls into
+   float64 → SteamID64 rounding. Fix: {float: str} lookup from
+   parse_player_info (core.fix_ids).
+2. **players= expects int-steamid** (int(me)), not a string.
+3. **parse_ticks without ticks=** reads the WHOLE demo (slow). We always pass
+   a tick list.
+4. **total_rounds_played is 0-based**: "round 1" = 0. We add 1 in the UI.
+5. **Missing event columns** (distance, noscope etc. in old demos) — always
+   getattr with a default.
+6. `parse_events` returns a list of tuples — wrap in dict().
+7. Buttons may be missing entirely (old demos/versions) — we have
+   missing-mechanism in timeline_data.
+8. **⚠️⚠️ velocity_X/Y with sparse ticks=** (details in section 3): position
+   delta of two previous REQUESTED rows × 64, lagged by a row and ignoring
+   the real tick gap. Real speed of 191 u/s in a spray became 1146 (×6),
+   respawn teleport — 35 261 (= 551 units × 64). Fix: own speeds from
+   Δpos(t-1 → t) (core.\_add_speed); we don't request velocity props at all.
+   Confirmed by Rust sources + user data.
+9. **⚠️⚠️ fix_ids: NEVER convert steamid via Int64 → str.**
+   Rounded float values arrive (16-grid) in NON-float dtypes (object /
+   nullable): to_numeric → Int64 → str "bakes in" the rounding, and only
+   players with sid ≡ 0 (mod 16) survive. In a real match exactly one of ten
+   players survived (76561199129512544) — he had all the "hits", the rest 0.
+   Fix: map any dtype through an flookup float64 key (keys built from
+   parse_player_info round the same way — always match), collisions (two sids
+   in one grid cell) resolved by name, else NA.
+10. **hit matching fire↔hurt**: player_hurt usually lands in the same tick
+    as weapon_fire, but sometimes ±1–2. A naive merge on (tick, sid, weapon)
+    or a ±window set loses hits or marks extra burst shots as hits.
+    Fix: assign each hurt to the LAST shot of the same weapon with
+    tick ≤ hurt_tick within 3 ticks (core.\_match_hits, HIT_WINDOW=3).
+11. **events after death**: a dead player has NO weapon_fire (verified on a
+    real demo: shot at tick 29288 — death at 29295). But a dead pawn's buttons
+    (m_nButtonDownMaskPrev) and positions are stale garbage: we cut the
+    timeline by is_alive, speed of dead rows = NaN.
+
+## 10. How this maps onto our project (improvement candidates)
+
+| Feature                               | Prop/API                                                | What it gives                                                                                                   | Status                                             |
+| ------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **BUG: DUCK/JUMP**                    | raw `buttons`, bits 1<<1/1<<2                           | without the fix the fallback could kill ALL buttons in the timeline                                             | ✅ fixed                                           |
+| **BUG: SteamID collision in float64** | names (`user_name`/`name`) for disambiguation           | two SteamIDs differing in trailing digits collapse into one float — old lookup lost a player                    | ✅ fixed (fix_ids + build_id_lookup)               |
+| **BUG pandas: empty-df mask**         | guards in load_demo/shots_table/weapon_stats            | a boolean filter on an already-empty df loses ALL columns → KeyError on demos without player_hurt / from warmup | ✅ fixed                                           |
+| Warmup filter                         | `is_warmup_period` in other= (per kills_per_round)      | cleans extra warmup shots                                                                                       | ✅ implemented (counter in debug report)           |
+| Recoil in aim error                   | `aim_punch_angle` in POS in parse_ticks                 | err is now "where the bullet could go", not just pre-recoil crosshair                                           | ✅ implemented (with fallback and 3 formats)       |
+| Distance risk model                   | own calculations (dist to nearest living enemy)         | "risky shots" accounting for distance                                                                           | ✅ implemented                                     |
+| Debug report                          | `data_checks` + `debug_report` (JSON)                   | user sends the JSON — we can see where data/logic lies                                                          | ✅ implemented                                     |
+| Stats cross-check                     | `round_end` + `*_total` aggregates (scoreboard)         | data_checks: our stats vs game stats                                                                            | candidate                                          |
+| Blindness by ticks                    | `flash_duration`                                        | not just attackerblind on kills                                                                                 | candidate                                          |
+| Mouse reaction                        | `usercmd_mouse_dx/dy`                                   | reaction time and mouse flicks                                                                                  | candidate (risky, not in all demos)                |
+| **BUG: velocity with sparse ticks=**  | own Δpos(t-1→t)×64, is_alive, 600 cap                   | speed lied N-fold (N=tick gap), teleports = 35k+ u/s                                                            | ✅ fixed (confirmed by Rust sources and user data) |
+| **BUG: fix_ids Int64→str**            | flookup-float key for any dtype                         | "hits" only for the player with sid divisible by 16                                                             | ✅ fixed (reproduced 1/10 → 10/10)                 |
+| Hit matching with window              | \_match_hits: last shot ≤ hurt_tick ± 3 ticks           | off-by-one protection without false hits in bursts                                                              | ✅ implemented                                     |
+| Is the enemy alive — exactly          | `is_alive` in parse_ticks                               | instead of reconstructing from deaths                                                                           | ✅ partial (speed + timeline cut at death)         |
+| Crouch in head height                 | `duck_amount`                                           | refine angle_err                                                                                                | candidate                                          |
+| Duel round second                     | `game_time` − `round_start_time` in other= (round_time) | context: early peek or late retake                                                                              | candidate                                          |
+| K/D by map zone                       | `player=["last_place_name"]` (kda_per_zone)             | "where do I die most"                                                                                           | candidate                                          |
+| Accuracy penalty                      | `accuracy_penalty`                                      | direct metric instead of heuristic                                                                              | candidate                                          |
+| Damage slow                           | `velo_modifier`                                         | duel context                                                                                                    | candidate                                          |
+
+## 11. Tests
+
+- `tests/test_core.py` — 97 checks on a synthetic demo (mocked demoparser2):
+  warmup filter, teamkills, SteamID collision+names, REGRESSION of the
+  "Heylaurens bug" (rounded floats in object dtype: 1/10 → 10/10), distances
+  to living enemies, hit matching with tolerance window, own speeds
+  (Δpos t-1→t, teleport cap, dead rows), risks, punch (3 formats + fallback),
+  buttons (DUCK/JUMP from bitmask, partial rejections, is_alive), data_checks,
+  debug_report, missing events.
+- `tests/check_ui.py` — cross-checks t() keys in app.py ↔ i18n en/ru,
+  format placeholders, presence of all core.\* and columns.

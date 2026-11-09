@@ -1,0 +1,10 @@
+[theme]
+base = "dark"
+primaryColor = "#f5a623"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#171c26"
+textColor = "#e8eaed"
+
+[server]
+# CS2 match demos can be large; the default upload limit is 1024 MB
+maxUploadSize = 1024

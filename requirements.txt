@@ -1,0 +1,6 @@
+# streamlit>=1.49: st.dataframe / st.plotly_chart accept width="stretch"
+streamlit>=1.49
+demoparser2>=0.42.1
+pandas>=2.0
+numpy>=1.26
+plotly>=5.24

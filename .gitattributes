@@ -1,0 +1,9 @@
+* text=auto
+*.py text
+*.md text
+*.toml text
+*.yml text
+*.txt text
+*.dem binary
+*.png binary
+*.jpg binary

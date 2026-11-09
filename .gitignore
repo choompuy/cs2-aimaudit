@@ -1,0 +1,35 @@
+# --- Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# --- Virtual environments
+.venv/
+venv/
+env/
+
+# --- Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Streamlit
+.streamlit/secrets.toml
+
+# --- Demos and app exports: large and personal, never commit them
+*.dem
+*.dem.info
+cs2_aimaudit_debug_*.json
+cs2lab_debug_*.json
+
+# --- OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
