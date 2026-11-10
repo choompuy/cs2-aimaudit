@@ -152,7 +152,7 @@ STR = {
         "wc_lmg": "LMGs",
         "wc_other": "Other",
         "du_title": "Duels",
-        "du_caption": "A duel is one kill (or death) plus the shots both players fired in the window before it. If you shot a different enemy during that window, the metrics for that duel are noisy.",
+        "du_caption": "A duel is one kill (or death) plus the window shots both players fired *at each other* (crosshair within ~30° of that opponent; shots at someone else are not counted, and duels with mixed targets get a “mixed targets” note). If a shot has no position data it still counts.",
         "f_result": "Result",
         "f_weapon": "Weapon",
         "all": "All",
@@ -178,7 +178,9 @@ STR = {
         "flag_thrusmoke": "through smoke",
         "flag_attackerblind": "blinded",
         "flag_penetrated": "wallbang",
+        "flag_lowconf": "⚠ mixed targets",
         "du_none": "No duels found for this player.",
+        "du_click_hint": "Click a row, then open the Timeline tab — that duel will be preselected there.",
         # timeline
         "tl_title": "Duel timeline",
         "tl_pick": "Pick a duel",
@@ -191,6 +193,15 @@ STR = {
         "tl_empty": "No tick data for this moment (the player may have been dead).",
         "tl_dead_cut": "The chart is cut at the moment of death: key presses and the “speed” of a dead player’s body after it are demo-parser artifacts, not real input.",
         "tl_loading": "Reading ticks around this duel…",
+        "tl_mark_shots": "your shots",
+        "tl_mark_hits": "hits on the opponent",
+        "tl_v_dist": "the duel was at {dist} units",
+        "tl_v_moved": "you were moving at {speed} u/s at your first shot",
+        "tl_v_stood": "you were (almost) standing at your first shot",
+        "tl_v_stopped_cs": "you stopped exactly on this shot — with a counter-strafe tap",
+        "tl_v_stopped_nocs": "you stopped exactly on this shot — but without a counter-strafe tap",
+        "tl_v_first_me": "you fired first",
+        "tl_v_first_opp": "the opponent fired first",
         "ch_speed": "Speed",
         "ch_yaw": "Yaw (horizontal aim)",
         "ch_pitch": "Pitch (vertical aim)",
@@ -257,7 +268,7 @@ STR = {
 ### Limitations
 - Mouse movement, sensitivity, FPS and ping are not in demos. Reaction time includes network delay.
 - Aim error is approximate (eye/head height offsets, crouch-aware when the demo stores duck_amount; recoil punch is included when the parser provides it).
-- A duel is detected by time window, not by line of sight.
+- A duel's shots are the window shots aimed at that opponent (crosshair within ~30°); duels with shots at several targets are flagged "mixed targets" instead of hiding the problem.
 - Warmup shots/kills/damage are excluded automatically.
 """,
     },
@@ -403,7 +414,7 @@ STR = {
         "wc_lmg": "Пулемёты",
         "wc_other": "Другое",
         "du_title": "Дуэли",
-        "du_caption": "Дуэль: один килл (или смерть) плюс выстрелы обоих игроков в окне перед ним. Если ты стрелял в другого врага в этом окне, метрики дуэли шумят.",
+        "du_caption": "Дуэль: один килл (или смерть) плюс выстрелы обоих игроков в окне перед ним, сделанные *друг в друга* (прицел в пределах ~30° от этого противника; выстрелы в кого-то другого не считаются, а дуэли с несколькими целями получают пометку «⚠ несколько целей»). Выстрел без данных позиции всё равно считается.",
         "f_result": "Результат",
         "f_weapon": "Оружие",
         "all": "Все",
@@ -429,7 +440,9 @@ STR = {
         "flag_thrusmoke": "через смок",
         "flag_attackerblind": "ослеплён",
         "flag_penetrated": "вэллбенг",
+        "flag_lowconf": "⚠ несколько целей",
         "du_none": "Для этого игрока дуэлей не найдено.",
+        "du_click_hint": "Кликни по строке и открой вкладку «Таймлайн» — эта дуэль будет там выбрана.",
         "tl_title": "Таймлайн дуэли",
         "tl_pick": "Выбери дуэль",
         "tl_label": "R{round} · {result} · {weapon} · {opp}",
@@ -441,6 +454,15 @@ STR = {
         "tl_empty": "Нет тик-данных для этого момента (возможно, игрок был мёртв).",
         "tl_dead_cut": "График обрезан в момент смерти: нажатия клавиш и «скорость» тела мёртвого игрока после неё — артефакты парсера, а не реальные действия.",
         "tl_loading": "Читаем тики вокруг этой дуэли…",
+        "tl_mark_shots": "твои выстрелы",
+        "tl_mark_hits": "попадания в противника",
+        "tl_v_dist": "дуэль была на дистанции {dist}",
+        "tl_v_moved": "на первом выстреле ты двигался со скоростью {speed} u/s",
+        "tl_v_stood": "на первом выстреле ты (почти) стоял",
+        "tl_v_stopped_cs": "ты остановился ровно на этом выстреле — с тапом контр-стрейфа",
+        "tl_v_stopped_nocs": "ты остановился ровно на этом выстреле — но без тапа контр-стрейфа",
+        "tl_v_first_me": "первым выстрелил ты",
+        "tl_v_first_opp": "первым выстрелил противник",
         "ch_speed": "Скорость",
         "ch_yaw": "Yaw (горизонтальный прицел)",
         "ch_pitch": "Pitch (вертикальный прицел)",
@@ -504,7 +526,7 @@ STR = {
 ### Ограничения
 - Движения мыши, сенса, FPS и пинг в демках не хранятся. Время реакции включает сетевую задержку.
 - Ошибка прицела приблизительная (высоты глаз/головы — приблизительные, присед учитывается, если демка хранит duck_amount; отдача учитывается, если парсер её отдаёт).
-- Дуэль определяется по окну времени, а не по линии видимости.
+- Выстрелами дуэли считаются выстрелы окна, направленные в этого противника (прицел в пределах ~30°); дуэли с выстрелами в несколько целей помечаются «⚠ несколько целей», а не прячутся.
 - Выстрелы/килы/урон из вармапа исключаются автоматически.
 """,
     },

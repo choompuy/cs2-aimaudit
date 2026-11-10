@@ -112,7 +112,17 @@ for lang in ("en", "ru"):
     t("flt_n_all", shots=1, duels=1)
     t("rank_part", name="x", pos=1, n=2)
     t("rank_line", parts="x")
-    t("ci_line", acc="a", n_shots=1, hs="h", n_hits=1, first="f", n_duels=1, hw="w", n_hw=1)
+    t(
+        "ci_line",
+        acc="a",
+        n_shots=1,
+        hs="h",
+        n_hits=1,
+        first="f",
+        n_duels=1,
+        hw="w",
+        n_hw=1,
+    )
     t("small_sample", shots=10, duels=5)
 bad("t() smoke formatting", True)
 
@@ -164,6 +174,9 @@ for fn, cols in {
         "first",
         "my_shots",
         "opp_shots",
+        "my_shots_raw",
+        "opp_shots_raw",
+        "low_conf",
         "duration_s",
         "my_speed",
         "my_err",

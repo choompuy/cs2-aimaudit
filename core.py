@@ -1279,14 +1279,55 @@ def add_risk(
     return out
 
 
-def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
-    """One row per enemy kill. 'Duel' = shots of both players in the window before the kill."""
+def build_duels(
+    demo: Demo, window_s: float = 3.0, aim_deg: float = 30.0
+) -> pd.DataFrame:
+    """
+    One row per enemy kill. 'Duel' = the shots both players fired in the
+    window before the kill *aimed at each other*: a shot counts only when
+    the shooter's crosshair was within `aim_deg` degrees of that opponent
+    (removes the noise of shooting someone else inside the window). Shots
+    without position data keep the old keep-them behaviour. `low_conf` marks
+    duels where either player also aimed at a different enemy in the window.
+    """
+
     win = int(window_s * demo.tickrate)
     rows, names, teams = demo.rows, demo.names, demo.teams
     fires_by = {
         k: g["tick"].astype(int).to_numpy()
         for k, g in demo.fires.groupby("user_steamid")
     }
+    enemies_of = {
+        sid: [
+            o
+            for o in names
+            if o != sid and teams.get(o) not in (None, "?") and teams.get(o) != teams.get(sid)
+        ]
+        for sid in names
+    }
+
+    def _aimed_at(ts: int, sh: str, opp: str) -> bool:
+        ra, ro = rows.get((ts, sh)), rows.get((ts, opp))
+        if ra is None or ro is None:
+            return True  # no data -> keep the shot (old behaviour)
+        e = angle_err(ra, ro)
+        return not np.isfinite(e) or e <= aim_deg
+
+    def _aimed_elsewhere(ts: int, sh: str, opp: str) -> bool:
+        ra = rows.get((ts, sh))
+        if ra is None:
+            return False
+        for other in enemies_of.get(sh, []):
+            if other == opp:
+                continue
+            ro = rows.get((ts, other))
+            if ro is None:
+                continue
+            e = angle_err(ra, ro)
+            if np.isfinite(e) and e <= aim_deg:
+                return True
+        return False
+
     d = demo.deaths
     if not len(d) or "attacker_steamid" not in d.columns:
         return pd.DataFrame()
@@ -1305,9 +1346,14 @@ def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
             a = fires_by.get(s, np.array([], dtype=int))
             return a[(a > t - win) & (a <= t)]
 
-        kw, vw = in_win(k), in_win(v)
+        kw_raw, vw_raw = in_win(k), in_win(v)
+        kw = np.array([int(ts) for ts in kw_raw if _aimed_at(int(ts), k, v)], dtype=int)
+        vw = np.array([int(ts) for ts in vw_raw if _aimed_at(int(ts), v, k)], dtype=int)
         kf = int(kw.min()) if len(kw) else None
         vf = int(vw.min()) if len(vw) else None
+        low_conf = any(_aimed_elsewhere(int(ts), k, v) for ts in kw_raw) or any(
+            _aimed_elsewhere(int(ts), v, k) for ts in vw_raw
+        )
 
         def _duel_dist(r, fa, fb, f_tick) -> float:
             """Distance for head-size maths: the game value, else positions."""
@@ -1369,6 +1415,9 @@ def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
                 "first": first,
                 "killer_shots": len(kw),
                 "victim_shots": len(vw),
+                "killer_shots_raw": len(kw_raw),
+                "victim_shots_raw": len(vw_raw),
+                "low_conf": bool(low_conf),
                 "killer_first_tick": kf,
                 "victim_first_tick": vf,
                 "duration_s": round((t - start) / demo.tickrate, 2),
@@ -1431,6 +1480,9 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
                     ),
                     "my_shots": df[f"{mine}_shots"],
                     "opp_shots": df[f"{opp}_shots"],
+                    "my_shots_raw": df[f"{mine}_shots_raw"],
+                    "opp_shots_raw": df[f"{opp}_shots_raw"],
+                    "low_conf": df["low_conf"],
                     "duration_s": df["duration_s"],
                     "my_speed": df[f"{mine}_speed"],
                     "my_err": df[f"{mine}_err"],

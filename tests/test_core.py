@@ -1149,6 +1149,129 @@ s1_nb = shots_nb[shots_nb["sid"] == S1].set_index("tick")
 check("no buttons: stop classes ok", s1_nb.loc[120, "stop"] == "moving")
 check("no buttons: tap False", not bool(s1_nb.loc[120, "counter_strafe"]))
 
+# ------------------------------------- duel detection by crosshair proximity
+print("== duel shots by crosshair proximity ==")
+
+
+def make_match_aim(s4_pos=(0.0, 800.0)):
+    """S1 (T) kills S3 (CT) at tick 200. In the window S1 fires:
+    t=100 aimed at S3 (yaw 0), t=150 aimed 90 deg away (yaw 90 - at S4
+    when S4 sits north, at empty space otherwise), t=160 aimed at S3
+    again. S3 fires t=120 at S1 and t=130 without a position row."""
+    player_info = pd.DataFrame(
+        {
+            "steamid": [int(s) for s in IDS],
+            "name": ["Alpha", "Bravo", "Charlie", "Delta"],
+            "team_number": [2, 2, 3, 3],
+        }
+    )
+    fires = pd.DataFrame(
+        {
+            "tick": [100, 150, 160, 120, 130],
+            "user_steamid": pd.array(
+                [int(S1)] * 3 + [int(S3)] * 2, dtype="uint64"
+            ),
+            "user_name": ["Alpha"] * 3 + ["Charlie"] * 2,
+            "weapon": ["weapon_ak47"] * 5,
+            "total_rounds_played": [0] * 5,
+            "is_warmup_period": [False] * 5,
+        }
+    )
+    deaths = pd.DataFrame(
+        {
+            "tick": [200],
+            "attacker_steamid": pd.array([int(S1)], dtype="float64"),
+            "attacker_name": ["Alpha"],
+            "user_steamid": pd.array([int(S3)], dtype="float64"),
+            "user_name": ["Charlie"],
+            "weapon": ["weapon_ak47"],
+            "headshot": [False],
+            "distance": [800],
+            "total_rounds_played": [0],
+            "is_warmup_period": [False],
+        }
+    )
+    # S2 is kept far off every sightline so it never trips the mixed-target check
+    pos = {S1: (0.0, 0.0), S2: (0.0, 1200.0), S3: (800.0, 0.0), S4: s4_pos}
+    yaw_at = {100: 0.0, 150: 90.0, 160: 0.0}  # S1's yaw per fire tick
+    rows = []
+    for t in sorted({99, 100, 119, 120, 129, 130, 149, 150, 159, 160}):
+        for sid in IDS:
+            x, y = pos[sid]
+            rows.append(
+                {
+                    "tick": t,
+                    "steamid": f64_sid(sid),
+                    "name": {S1: "Alpha", S2: "Bravo", S3: "Charlie", S4: "Delta"}[sid],
+                    "X": x,
+                    "Y": y,
+                    "Z": 0.0,
+                    "pitch": 0.0,
+                    "yaw": yaw_at.get(t, 180.0) if sid == S1 else 180.0,
+                    "is_alive": True,
+                    "aim_punch_angle": "0 0 0",
+                    "team_num": 2 if sid in (S1, S2) else 3,
+                }
+            )
+    # drop S3's rows at 130/129: the shot without position data must be kept
+    ticks = pd.DataFrame(rows)
+    ticks = ticks[~((ticks["steamid"] == f64_sid(S3)) & (ticks["tick"].isin([129, 130])))]
+    return {
+        "player_info": player_info,
+        "header": {"map_name": "de_mirage"},
+        "events": {
+            "weapon_fire": fires,
+            "player_hurt": pd.DataFrame(),
+            "player_death": deaths,
+        },
+        "ticks": ticks,
+        "unsupported": set(),
+    }
+
+
+FakeParser.demos["aim.dem"] = make_match_aim(s4_pos=(0.0, 800.0))
+demo_a = core.load_demo("aim.dem")
+duels_a = core.build_duels(demo_a, 3.0)
+check("one duel", len(duels_a) == 1)
+da = duels_a.iloc[0]
+check(
+    "shots aimed at the opponent count (100,160)",
+    da["killer_shots"] == 2,
+    (da["killer_shots"], da["killer_shots_raw"]),
+)
+check("raw counts keep everything", da["killer_shots_raw"] == 3)
+check(
+    "no-data shot kept for the victim",
+    da["victim_shots"] == 2 and da["victim_shots_raw"] == 2,
+    (da["victim_shots"], da["victim_shots_raw"]),
+)
+check("first from filtered shots", da["first"] == "killer")
+check("low_conf when a shot went at another enemy", bool(da["low_conf"]), da["low_conf"])
+check(
+    "first tick = first AIMED shot",
+    da["killer_first_tick"] == 100,
+    da["killer_first_tick"],
+)
+
+# S4 far away from the stray shot direction -> clean duel, no flag
+FakeParser.demos["aim2.dem"] = make_match_aim(s4_pos=(400.0, -400.0))
+demo_a2 = core.load_demo("aim2.dem")
+duels_a2 = core.build_duels(demo_a2, 3.0)
+check(
+    "stray shot still excluded from duel shots",
+    duels_a2.iloc[0]["killer_shots"] == 2,
+)
+check("no second target -> low_conf False", not bool(duels_a2.iloc[0]["low_conf"]))
+
+# the plain synthetic match: every shot is aimed at the opponent -> unchanged
+check(
+    "plain match duel unchanged",
+    duels.iloc[0]["killer_shots"] == 3
+    and duels.iloc[0]["killer_shots_raw"] == 3
+    and not bool(duels.iloc[0]["low_conf"]),
+    duels.iloc[0][["killer_shots", "killer_shots_raw", "low_conf"]].to_dict(),
+)
+
 # ------------------------------------------------------------ no_events
 print("== no player_hurt event at all ==")
 m8 = make_match()

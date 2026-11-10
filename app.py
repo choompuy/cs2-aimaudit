@@ -715,6 +715,8 @@ with tab_du:
         flags = []
         for r in ddf.itertuples():
             fl = []
+            if r.low_conf:
+                fl.append(t("flag_lowconf"))
             if r.noscope:
                 fl.append(t("flag_noscope"))
             if r.thrusmoke:
@@ -744,7 +746,19 @@ with tab_du:
                 t("col_flags"): flags,
             }
         )
-        st.dataframe(disp, hide_index=True, width="stretch")
+        du_sel = st.dataframe(
+            disp,
+            hide_index=True,
+            width="stretch",
+            on_select="rerun",
+            selection_mode="single-row",
+            key="du_table",
+        )
+        st.caption(t("du_click_hint"))
+        sel_rows = list(du_sel.selection.rows or [])
+        if sel_rows and 0 <= sel_rows[0] < len(my_duels):
+            # preselect this duel on the Timeline tab (row order == my_duels)
+            st.session_state["tl_duel"] = int(sel_rows[0])
 
 # ------------------------------------------------------------- timeline
 with tab_tl:
@@ -752,6 +766,10 @@ with tab_tl:
     if not len(my_duels):
         st.info(t("du_none"))
     else:
+        if not isinstance(st.session_state.get("tl_duel"), int) or not (
+            0 <= st.session_state["tl_duel"] < len(my_duels)
+        ):
+            st.session_state["tl_duel"] = 0
         labels = [duel_label(my_duels.iloc[i]) for i in range(len(my_duels))]
         i = st.selectbox(
             t("tl_pick"),
@@ -776,6 +794,34 @@ with tab_tl:
                 dur=r["duration_s"],
             )
         )
+
+        # auto verdict in plain words
+        verdict = []
+        if pd.notna(r["distance"]):
+            verdict.append(t("tl_v_dist", dist=num(r["distance"], 0)))
+        if pd.notna(r["my_speed"]):
+            if r["my_speed"] > thr:
+                verdict.append(t("tl_v_moved", speed=num(r["my_speed"], 0)))
+            else:
+                verdict.append(t("tl_v_stood"))
+        if pd.notna(r["my_first_tick"]):
+            fs_row = shots_f[
+                (shots_f["sid"] == me) & (shots_f["tick"] == int(r["my_first_tick"]))
+            ]
+            if len(fs_row) and fs_row.iloc[0]["stop"] == "stopped":
+                verdict.append(
+                    t(
+                        "tl_v_stopped_cs"
+                        if bool(fs_row.iloc[0]["counter_strafe"])
+                        else "tl_v_stopped_nocs"
+                    )
+                )
+        if r["first"] == "me":
+            verdict.append(t("tl_v_first_me"))
+        elif r["first"] == "opponent":
+            verdict.append(t("tl_v_first_opp"))
+        if verdict:
+            st.caption(" · ".join(verdict))
         if tdf is None or tdf.empty:
             st.info(t("tl_empty"))
         else:
@@ -832,6 +878,54 @@ with tab_tl:
             fig.add_trace(go.Scatter(x=x, y=speed, mode="lines"), row=1, col=1)
             fig.add_trace(go.Scatter(x=x, y=yaw, mode="lines"), row=2, col=1)
             fig.add_trace(go.Scatter(x=x, y=pitch, mode="lines"), row=3, col=1)
+            # shot / hit markers on the speed chart (within the shown window)
+            w_lo, w_hi = int(tdf["tick"].min()), int(tdf["tick"].max())
+            sp_by_tick = dict(zip(tdf["tick"].astype(int), tdf["speed"]))
+            my_fire = shots_f[
+                (shots_f["sid"] == me) & shots_f["tick"].between(w_lo, w_hi)
+            ]
+            fire_pts = [
+                ((int(tk) - tick) / demo.tickrate, sp_by_tick.get(int(tk)))
+                for tk in my_fire["tick"]
+                if pd.notna(sp_by_tick.get(int(tk)))
+            ]
+            if len(hurts_f) and "user_steamid" in hurts_f.columns:
+                my_hits = hurts_f[
+                    (hurts_f["attacker_steamid"] == me)
+                    & (hurts_f["user_steamid"] == r["opponent"])
+                    & hurts_f["tick"].between(w_lo, w_hi)
+                ]
+                hit_pts = [
+                    ((int(tk) - tick) / demo.tickrate, sp_by_tick.get(int(tk)))
+                    for tk in my_hits["tick"]
+                    if pd.notna(sp_by_tick.get(int(tk)))
+                ]
+            else:
+                hit_pts = []
+            if hit_pts:
+                fig.add_trace(
+                    go.Scatter(
+                        x=[p[0] for p in hit_pts],
+                        y=[p[1] for p in hit_pts],
+                        mode="markers",
+                        name=t("tl_mark_hits"),
+                        marker=dict(symbol="star", size=11, color="#e15759"),
+                    ),
+                    row=1,
+                    col=1,
+                )
+            if fire_pts:
+                fig.add_trace(
+                    go.Scatter(
+                        x=[p[0] for p in fire_pts],
+                        y=[p[1] for p in fire_pts],
+                        mode="markers",
+                        name=t("tl_mark_shots"),
+                        marker=dict(symbol="triangle-up", size=9, color="#4daf4a"),
+                    ),
+                    row=1,
+                    col=1,
+                )
             if btn_cols:
                 for k, b in enumerate(btn_cols):
                     on = (tdf[b].fillna(0) != 0).to_numpy()
@@ -864,7 +958,12 @@ with tab_tl:
                 else:
                     fig.add_vline(x=0, line_dash="dash", row=row_i, col=1)
             fig.update_xaxes(title_text=t("ch_x"), row=rows_n, col=1)
-            fig.update_layout(height=760, showlegend=False, margin=dict(t=40))
+            fig.update_layout(
+                height=760,
+                showlegend=bool(fire_pts or hit_pts),
+                legend=dict(orientation="h", y=1.06),
+                margin=dict(t=60),
+            )
             st.plotly_chart(fig, width="stretch")
 
 # ---------------------------------------------------------------- guide
