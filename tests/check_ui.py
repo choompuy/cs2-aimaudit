@@ -108,6 +108,12 @@ for lang in ("en", "ru"):
     t("tl_first", speed="1", err="1")
     t("err_path_missing", path="x")
     t("chk_sides", n=1, pct=1.0)
+    t("flt_n", shots=1, duels=1)
+    t("flt_n_all", shots=1, duels=1)
+    t("rank_part", name="x", pos=1, n=2)
+    t("rank_line", parts="x")
+    t("ci_line", acc="a", n_shots=1, hs="h", n_hits=1, first="f", n_duels=1)
+    t("small_sample", shots=10, duels=5)
 bad("t() smoke formatting", True)
 
 # ---- 6. columns produced by core vs consumed by app
@@ -115,7 +121,17 @@ import pandas as pd  # noqa: E402
 
 demo = core.load_demo  # symbol check only
 for fn, cols in {
-    "shots_table": ["tick", "sid", "weapon", "round", "speed", "dist", "hit", "side"],
+    "shots_table": [
+        "tick",
+        "sid",
+        "weapon",
+        "round",
+        "speed",
+        "dist",
+        "hit",
+        "side",
+        "weapon_class",
+    ],
     "player_summary": [
         "player",
         "sid",
@@ -140,6 +156,7 @@ for fn, cols in {
         "result",
         "opponent",
         "weapon",
+        "weapon_class",
         "my_side",
         "opp_side",
         "headshot",

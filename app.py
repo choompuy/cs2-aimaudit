@@ -3,6 +3,7 @@ CS2-AimAudit — local CS2 demo analysis. Run: streamlit run app.py
 Analysis logic lives in core.py, translations in i18n.py. Only UI here.
 """
 
+import base64
 import json
 import os
 import tempfile
@@ -17,6 +18,44 @@ import core
 import i18n
 
 st.set_page_config(page_title="CS2-AimAudit", layout="wide")
+
+# ------------------------------------------------- shareable view in the URL
+# The whole view (language, player, filters) is packed into ?f=<b64 json>
+# so a filtered tab can be bookmarked, restored or sent to a teammate.
+_URL_KEYS = (
+    ("lang", "lang"),
+    ("me", "me"),
+    ("weapons", "flt_weapons"),
+    ("classes", "flt_classes"),
+    ("rounds", "flt_rounds"),
+    ("preset", "flt_preset"),
+    ("side", "flt_side"),
+    ("res", "flt_res"),
+)
+
+
+def _url_pack(d: dict) -> str:
+    return base64.urlsafe_b64encode(
+        json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+
+
+def _url_unpack(s: str) -> dict | None:
+    try:
+        pad = "=" * (-len(s) % 4)
+        d = json.loads(base64.urlsafe_b64decode(s + pad).decode())
+        return d if isinstance(d, dict) else None
+    except Exception:  # noqa: BLE001 - a bad link must not break the app
+        return None
+
+
+if "url_state_loaded" not in st.session_state:
+    st.session_state["url_state_loaded"] = True
+    saved = _url_unpack(st.query_params.get("f", ""))
+    if saved:
+        for k, sk in _URL_KEYS:
+            if saved.get(k) is not None:
+                st.session_state[sk] = saved[k]
 
 HG_ORDER = [
     "head",
@@ -187,7 +226,6 @@ if not rec or rec[0] != src:
 status.update(label=t("step_metrics"))
 shots = core.add_risk(core.shots_table(demo), thr, safe_dist, strict_dist)
 duels_all = core.build_duels(demo, window_s)
-summary = core.player_summary(demo, duels_all, shots, thr, safe_dist, strict_dist)
 
 info = []
 if demo.header.get("map_name"):
@@ -222,9 +260,6 @@ if state.get("last_player") != me:
     state["last_player"] = me
     core.save_state(state)
 
-my_duels = core.duels_for(duels_all, me) if len(duels_all) else pd.DataFrame()
-status.update(label=t("loaded"), state="complete")
-
 
 # -------------------------------------------------------------- helpers
 def fmt_result(v: str) -> str:
@@ -238,6 +273,165 @@ def fmt_first(v: str) -> str:
         "simultaneous": t("first_simultaneous"),
         "none": t("first_none"),
     }.get(v, str(v))
+
+
+# ------------------------------------------------------ global filter bar
+# One bar under the player selector that every tab reads from: all metrics
+# below are computed on the FILTERED frames.
+with st.container(border=True):
+    st.markdown(f"**{t('flt_title')}**")
+    demo_weapons = sorted(shots["weapon"].astype(str).unique())
+    present_classes = sorted({core.weapon_class(w) for w in demo_weapons})
+    n_rounds = int(shots["round"].max()) if len(shots) else 0
+    has_sides = bool(demo.sides)
+    # drop selections that do not exist in this demo (e.g. from another file
+    # or from a shared URL of another match)
+    if "flt_weapons" in st.session_state:
+        st.session_state["flt_weapons"] = [
+            w for w in st.session_state["flt_weapons"] if w in set(demo_weapons)
+        ]
+    if "flt_classes" in st.session_state:
+        st.session_state["flt_classes"] = [
+            c for c in st.session_state["flt_classes"] if c in set(present_classes)
+        ]
+    preset_opts = ["all"] + (["pistols"] if n_rounds >= 2 else [])
+    if n_rounds >= 2 * core.ROUNDS_PER_HALF + 1:
+        preset_opts = ["all", "first", "second", "ot", "pistols"]
+    elif n_rounds >= core.ROUNDS_PER_HALF + 1:
+        preset_opts = ["all", "first", "second", "pistols"]
+    if st.session_state.get("flt_preset") not in preset_opts:
+        st.session_state["flt_preset"] = "all"
+    if st.session_state.get("flt_side") not in ("all", "T", "CT"):
+        st.session_state["flt_side"] = "all"
+    if n_rounds >= 1:
+        rv = st.session_state.get("flt_rounds") or (1, n_rounds)
+        try:
+            lo_r = max(1, min(int(rv[0]), n_rounds))
+            hi_r = max(lo_r, min(int(rv[1]), n_rounds))
+            st.session_state["flt_rounds"] = (lo_r, hi_r)
+        except (TypeError, ValueError, IndexError):
+            st.session_state["flt_rounds"] = (1, n_rounds)
+
+    fc1, fc2, fc3 = st.columns([3, 3, 2])
+    fc1.multiselect(
+        t("flt_weapons"),
+        demo_weapons,
+        key="flt_weapons",
+        help=t("flt_weapons_help"),
+    )
+    fc2.multiselect(
+        t("flt_classes"),
+        present_classes,
+        format_func=lambda c: t(f"wc_{c}"),
+        key="flt_classes",
+        help=t("flt_classes_help"),
+    )
+    fc3.caption("")  # keeps the n-report below aligned with the widgets
+
+    def _apply_preset():
+        p = st.session_state.get("flt_preset", "all")
+        if p == "pistols":
+            st.session_state["flt_rounds"] = (1, max(n_rounds, 1))
+        else:
+            st.session_state["flt_rounds"] = core.round_bounds(n_rounds, p)
+
+    def _slider_custom():
+        # manual range -> the preset label no longer applies
+        st.session_state["flt_preset"] = "all"
+
+    fr1, fr2, fr3, fr4 = st.columns([3, 2, 2, 2])
+    if n_rounds >= 1:
+        fr1.slider(
+            t("flt_rounds"),
+            1,
+            n_rounds,
+            key="flt_rounds",
+            help=t("flt_rounds_help"),
+            on_change=_slider_custom,
+        )
+    fr2.selectbox(
+        t("flt_preset"),
+        preset_opts,
+        format_func=lambda p: t(f"fp_{p}"),
+        key="flt_preset",
+        on_change=_apply_preset,
+    )
+    if has_sides:
+        fr3.selectbox(
+            t("flt_side"),
+            ["all", "T", "CT"],
+            format_func=lambda v: t("all") if v == "all" else v,
+            key="flt_side",
+            help=t("flt_side_help"),
+        )
+    fr4.multiselect(
+        t("flt_res"),
+        ["kill", "death"],
+        format_func=fmt_result,
+        key="flt_res",
+        help=t("flt_res_help"),
+    )
+
+    preset = st.session_state.get("flt_preset", "all")
+    round_kwargs: dict = {}
+    if preset == "pistols":
+        round_kwargs["rounds_set"] = core.pistol_rounds(n_rounds)
+    elif n_rounds >= 1:
+        rv = tuple(st.session_state.get("flt_rounds") or (1, n_rounds))
+        if rv != (1, n_rounds):
+            round_kwargs["rounds"] = rv
+    filters = core.Filters(
+        weapons=set(st.session_state.get("flt_weapons") or []) or None,
+        classes=set(st.session_state.get("flt_classes") or []) or None,
+        side=(
+            st.session_state.get("flt_side")
+            if has_sides and st.session_state.get("flt_side") != "all"
+            else None
+        ),
+        **round_kwargs,
+    )
+    shots_f, duels_f, hurts_f = core.apply_filters(shots, duels_all, demo.hurts, filters)
+    res_sel = set(st.session_state.get("flt_res") or [])
+    fc3.caption(
+        t("flt_n", shots=len(shots_f), duels=len(duels_f))
+        + ("  \n" + t("flt_n_all", shots=len(shots), duels=len(duels_all)) if not filters.empty() else "")
+    )
+
+    # keep the URL in sync so the view can be bookmarked / shared
+    url_view = {
+        "lang": st.session_state.get("lang"),
+        "me": me,
+        "weapons": st.session_state.get("flt_weapons") or [],
+        "classes": st.session_state.get("flt_classes") or [],
+        "rounds": list(st.session_state.get("flt_rounds") or ()),
+        "preset": preset,
+        "side": st.session_state.get("flt_side", "all"),
+        "res": st.session_state.get("flt_res") or [],
+    }
+    non_default = (
+        url_view["weapons"]
+        or url_view["classes"]
+        or url_view["res"]
+        or url_view["side"] != "all"
+        or url_view["preset"] != "all"
+        or (url_view["rounds"] and tuple(url_view["rounds"]) != (1, n_rounds))
+    )
+    if non_default:
+        st.query_params["f"] = _url_pack(url_view)
+        fc3.caption(t("flt_share"))
+    elif "f" in st.query_params:
+        del st.query_params["f"]
+
+summary = core.player_summary(
+    demo, duels_f, shots_f, thr, safe_dist, strict_dist, hurts=hurts_f
+)
+
+my_duels = core.duels_for(duels_f, me) if len(duels_f) else pd.DataFrame()
+# kill/death filter is a per-player concept: it applies to the selected
+# player's duels on every tab (the all-players Overview keeps both)
+if res_sel and len(my_duels):
+    my_duels = my_duels[my_duels["result"].isin(res_sel)]
+status.update(label=t("loaded"), state="complete")
 
 
 def duel_label(r) -> str:
@@ -302,8 +496,8 @@ with tab_ov:
 
 # -------------------------------------------------------------- shooting
 with tab_sh:
-    sh_me = shots[shots["sid"] == me]
-    hg_me = core.hitgroup_counts(demo, me)
+    sh_me = shots_f[shots_f["sid"] == me]
+    hg_me = core.hitgroup_counts(demo, me, hurts_f)
     dd = my_duels
     kills = int((dd["result"] == "kill").sum()) if len(dd) else 0
     dths = int((dd["result"] == "death").sum()) if len(dd) else 0
@@ -334,6 +528,36 @@ with tab_sh:
     c[2].metric(t("m_err"), num(err, 1), help=t("m_err_help"))
     c[3].metric(t("m_speed"), num(spd, 0), help=t("m_speed_help"))
     c[4].metric(t("m_first"), pct(first_pct), help=t("m_first_help"))
+
+    # honesty block: n, Wilson 95% CIs and lobby ranks for the rates above
+    def _ci(k, n):
+        lo, hi = core.wilson_ci(k, n)
+        return "—" if pd.isna(lo) else f"{lo:.0f}–{hi:.0f}%"
+
+    st.caption(
+        t(
+            "ci_line",
+            acc=_ci(hits_n, len(sh_me)),
+            n_shots=len(sh_me),
+            hs=_ci(hg_me.get("head", 0), hits_n),
+            n_hits=hits_n,
+            first=_ci(int((fs["first"] == "me").sum()), len(fs)) if len(fs) else "—",
+            n_duels=len(fs),
+        )
+    )
+    if len(sh_me) < core.MIN_N_SHOTS or len(dd) < core.MIN_N_DUELS:
+        st.caption(t("small_sample", shots=core.MIN_N_SHOTS, duels=core.MIN_N_DUELS))
+    parts = []
+    for col, key, best in (
+        ("accuracy", "rk_acc", "high"),
+        ("first_shot", "rk_first", "high"),
+        ("risky", "rk_risky", "low"),
+    ):
+        rk = core.rank_in_lobby(summary, me, col, best)
+        if rk:
+            parts.append(t("rank_part", name=t(key), pos=rk[0], n=rk[1]))
+    if parts:
+        st.caption(t("rank_line", parts=" · ".join(parts)))
 
     if len(dd):
         k_err = dd.loc[dd["result"] == "kill", "my_err"].median()
@@ -440,7 +664,7 @@ with tab_sh:
         st.plotly_chart(fig, width="stretch")
 
     st.markdown(f"**{t('weapons')}**")
-    w = core.weapon_stats(demo, shots, me, thr, safe_dist, strict_dist)
+    w = core.weapon_stats(demo, shots_f, me, thr, safe_dist, strict_dist, hurts=hurts_f)
     if len(w):
         w = w.rename(
             columns={
@@ -464,60 +688,39 @@ with tab_du:
     if not len(my_duels):
         st.info(t("du_none"))
     else:
-        fc = st.columns(2)
-        res_f = fc[0].selectbox(
-            t("f_result"),
-            ["all", "kill", "death"],
-            format_func=lambda v: t("all") if v == "all" else fmt_result(v),
-            key="du_res",
-        )
-        weapons = ["all"] + sorted(my_duels["weapon"].unique().tolist())
-        w_f = fc[1].selectbox(
-            t("f_weapon"),
-            weapons,
-            format_func=lambda v: t("all") if v == "all" else v,
-            key="du_weapon",
-        )
         ddf = my_duels
-        if res_f != "all":
-            ddf = ddf[ddf["result"] == res_f]
-        if w_f != "all":
-            ddf = ddf[ddf["weapon"] == w_f]
-        if not len(ddf):
-            st.info(t("du_none"))
-        else:
-            flags = []
-            for r in ddf.itertuples():
-                fl = []
-                if r.noscope:
-                    fl.append(t("flag_noscope"))
-                if r.thrusmoke:
-                    fl.append(t("flag_thrusmoke"))
-                if r.attackerblind:
-                    fl.append(t("flag_attackerblind"))
-                if r.penetrated:
-                    fl.append(t("flag_penetrated"))
-                flags.append(", ".join(fl))
-            disp = pd.DataFrame(
-                {
-                    t("col_round"): ddf["round"].to_numpy(),
-                    "tick": ddf["tick"].to_numpy(),
-                    t("col_result"): [fmt_result(v) for v in ddf["result"]],
-                    t("col_opponent"): [name_of.get(s, s) for s in ddf["opponent"]],
-                    t("col_side"): ddf["my_side"].to_numpy(),
-                    t("col_weapon"): ddf["weapon"].to_numpy(),
-                    t("col_hs"): ["✓" if v else "" for v in ddf["headshot"]],
-                    t("col_distance"): ddf["distance"].round(0).to_numpy(),
-                    t("col_first"): [fmt_first(v) for v in ddf["first"]],
-                    t("col_my_shots"): ddf["my_shots"].to_numpy(),
-                    t("col_opp_shots"): ddf["opp_shots"].to_numpy(),
-                    t("col_duration"): ddf["duration_s"].to_numpy(),
-                    t("col_speed"): ddf["my_speed"].round(0).to_numpy(),
-                    t("col_err"): ddf["my_err"].round(1).to_numpy(),
-                    t("col_flags"): flags,
-                }
-            )
-            st.dataframe(disp, hide_index=True, width="stretch")
+        flags = []
+        for r in ddf.itertuples():
+            fl = []
+            if r.noscope:
+                fl.append(t("flag_noscope"))
+            if r.thrusmoke:
+                fl.append(t("flag_thrusmoke"))
+            if r.attackerblind:
+                fl.append(t("flag_attackerblind"))
+            if r.penetrated:
+                fl.append(t("flag_penetrated"))
+            flags.append(", ".join(fl))
+        disp = pd.DataFrame(
+            {
+                t("col_round"): ddf["round"].to_numpy(),
+                "tick": ddf["tick"].to_numpy(),
+                t("col_result"): [fmt_result(v) for v in ddf["result"]],
+                t("col_opponent"): [name_of.get(s, s) for s in ddf["opponent"]],
+                t("col_side"): ddf["my_side"].to_numpy(),
+                t("col_weapon"): ddf["weapon"].to_numpy(),
+                t("col_hs"): ["✓" if v else "" for v in ddf["headshot"]],
+                t("col_distance"): ddf["distance"].round(0).to_numpy(),
+                t("col_first"): [fmt_first(v) for v in ddf["first"]],
+                t("col_my_shots"): ddf["my_shots"].to_numpy(),
+                t("col_opp_shots"): ddf["opp_shots"].to_numpy(),
+                t("col_duration"): ddf["duration_s"].to_numpy(),
+                t("col_speed"): ddf["my_speed"].round(0).to_numpy(),
+                t("col_err"): ddf["my_err"].round(1).to_numpy(),
+                t("col_flags"): flags,
+            }
+        )
+        st.dataframe(disp, hide_index=True, width="stretch")
 
 # ------------------------------------------------------------- timeline
 with tab_tl:

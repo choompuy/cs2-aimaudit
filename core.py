@@ -48,6 +48,30 @@ HITGROUPS = {
     7: "right_leg",
     8: "neck",
 }
+# Weapon classes (CS2 internal names after norm_weapon). Lets "all rifles"
+# be one click instead of seven. Everything unmapped is "other".
+WEAPON_CLASSES: dict[str, set[str]] = {
+    "rifle": {"ak47", "m4a1", "m4a1_silencer", "famas", "galilar", "aug", "sg556"},
+    "sniper": {"awp", "ssg08", "scar20", "g3sg1"},
+    "smg": {"mac10", "mp9", "mp7", "mp5sd", "ump45", "p90", "bizon"},
+    "pistol": {
+        "glock",
+        "hkp2000",
+        "usp_silencer",
+        "p250",
+        "fiveseven",
+        "tec9",
+        "cz75a",
+        "deagle",
+        "elite",
+        "revolver",
+    },
+    "shotgun": {"nova", "xm1014", "mag7", "sawedoff"},
+    "lmg": {"m249", "negev"},
+}
+WEAPON_TO_CLASS: dict[str, str] = {
+    w: c for c, ws in WEAPON_CLASSES.items() for w in ws
+}
 # ------------------------------------------------------------- buttons
 # Named button props actually supported by demoparser2 (README props table).
 # LEFT/RIGHT are strafe A/D (IN_MOVELEFT/IN_MOVERIGHT), TURNLEFT/RIGHT are not
@@ -113,6 +137,188 @@ MAX_SPEED = 600.0
 # (absorbs off-by-one/two without flagging earlier shots of the same burst).
 HIT_WINDOW = 3
 MAX_DUEL_DIST = 10000.0
+# Below these counts a rate is noise: the UI shows a small-sample hint
+# instead of pretending the number means something.
+MIN_N_SHOTS = 10
+MIN_N_DUELS = 5
+
+
+def wilson_ci(k: float, n: float, z: float = 1.96) -> tuple[float, float]:
+    """
+    Wilson score interval (in %) for a binomial rate k/n.
+
+    With 8 duels a '62%' means almost nothing; a rate is honest only next
+    to its uncertainty. Returns (nan, nan) when n <= 0.
+    """
+
+    if n is None or k is None or n <= 0 or pd.isna(n) or pd.isna(k):
+        return (float("nan"), float("nan"))
+    k = float(k)
+    n = float(n)
+    p = min(1.0, max(0.0, k / n))  # k > n is possible (e.g. pellets vs shots)
+    z2 = z * z
+    denom = 1 + z2 / n
+    center = (p + z2 / (2 * n)) / denom
+    half = z * np.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / denom
+    return (max(0.0, (center - half) * 100), min(100.0, (center + half) * 100))
+
+
+def rank_in_lobby(
+    summary: pd.DataFrame, sid: str, col: str, best: str = "high"
+) -> tuple[int, int] | None:
+    """
+    (position, n) of player `sid` in a summary column, 1 = best.
+
+    best='high' -> the largest value is the best (accuracy), best='low' ->
+    the smallest wins (risky shots). Players with NaN in `col` are skipped;
+    None when the player or the column is not there or nothing to compare.
+    """
+
+    if summary is None or col not in getattr(summary, "columns", []) or not len(summary):
+        return None
+    vals = summary[["sid", col]].dropna()
+    if sid not in set(vals["sid"]) or len(vals) < 2:
+        return None
+    order = vals.sort_values(col, ascending=(best == "low"), kind="stable")
+    pos = int((order["sid"] == sid).to_numpy().nonzero()[0][0]) + 1
+    return pos, len(vals)
+
+
+@dataclass
+class Filters:
+    """Global filter applied to shots/duels/hurts before any metric."""
+
+    weapons: set[str] | None = None  # exact weapon names (norm_weapon form)
+    classes: set[str] | None = None  # rifle, sniper, smg, pistol, ...
+    rounds: tuple[int, int] | None = None  # inclusive 1-based round range
+    rounds_set: set[int] | None = None  # exact rounds (pistol rounds preset)
+    side: str | None = None  # "T" / "CT" (the player's side in that round)
+    results: set[str] | None = None  # {"kill", "death"} (duels_for frames)
+    dist: tuple[float, float] | None = None  # inclusive distance range
+
+    def empty(self) -> bool:
+        return not any(
+            (
+                self.weapons,
+                self.classes,
+                self.rounds,
+                self.rounds_set,
+                self.side,
+                self.results,
+                self.dist,
+            )
+        )
+
+
+def weapon_class(w) -> str:
+    """Class of a weapon name ('rifle', 'sniper', ..., 'other')."""
+    return WEAPON_TO_CLASS.get(norm_weapon(w), "other")
+
+
+# MR12 (current CS2): halves of 12 rounds, overtime starts at round 25.
+ROUNDS_PER_HALF = 12
+
+
+def round_bounds(n_rounds: int, preset: str) -> tuple[int, int]:
+    """
+    Inclusive 1-based round range of a preset for a match of `n_rounds`
+    rounds ('all', 'first', 'second', 'ot'). MR12 assumption: first half
+    1-12, second 13-24, overtime 25+. A preset beyond the match gives an
+    empty range (lo > hi) on purpose - the UI simply does not offer it.
+    """
+
+    n = max(int(n_rounds), 1)
+    if preset == "first":
+        lo, hi = 1, ROUNDS_PER_HALF
+    elif preset == "second":
+        lo, hi = ROUNDS_PER_HALF + 1, 2 * ROUNDS_PER_HALF
+    elif preset == "ot":
+        lo, hi = 2 * ROUNDS_PER_HALF + 1, max(n, 2 * ROUNDS_PER_HALF + 1)
+    else:  # 'all' / anything unknown
+        lo, hi = 1, n
+    hi = max(lo, min(hi, n))
+    return (lo, hi)
+
+
+def pistol_rounds(n_rounds: int) -> set[int]:
+    """First round of each half incl. overtime halves (MR12: 1, 13, 25, ...)."""
+    return {r for r in range(1, max(int(n_rounds), 1) + 1) if (r - 1) % ROUNDS_PER_HALF == 0}
+
+
+def apply_filters(
+    shots: pd.DataFrame,
+    duels: pd.DataFrame,
+    hurts: pd.DataFrame | None = None,
+    f: Filters | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
+    """
+    Boolean-index shots / duels / hurts by the global filter (copies back).
+
+    Every selection is optional: None/empty means 'no constraint'. Works on
+    the raw frames (shots_table / build_duels / demo.hurts) and on
+    duels_for() frames - 'my_side' and 'result' columns are used when
+    present; raw duels keep a row for the side filter when EITHER role
+    matches (each player's kills/deaths then keep the correct rows).
+    """
+
+    if f is None or f.empty():
+        return (
+            shots.copy(),
+            duels.copy() if duels is not None else pd.DataFrame(),
+            hurts.copy() if hurts is not None else None,
+        )
+
+    def _weapon_mask(df: pd.DataFrame) -> pd.Series | None:
+        if "weapon" not in df.columns or not len(df):
+            return None
+        # weapons and classes combine as a UNION: picking "rifles" plus a
+        # specific AWP shows both, not their intersection.
+        parts: list[pd.Series] = []
+        if f.weapons:
+            parts.append(df["weapon"].isin(f.weapons))
+        if f.classes:
+            parts.append(df["weapon"].map(weapon_class).isin(f.classes))
+        if not parts:
+            return None
+        m = parts[0]
+        for p in parts[1:]:
+            m = m | p
+        return m
+
+    def _apply(df: pd.DataFrame | None) -> pd.DataFrame | None:
+        if df is None or not len(df):
+            return df.copy() if df is not None else None
+        out = df
+        wm = _weapon_mask(out)
+        if wm is not None:
+            out = out[wm]
+        if f.rounds is not None and "round" in out.columns and len(out):
+            lo, hi = f.rounds
+            out = out[(out["round"] >= lo) & (out["round"] <= hi)]
+        if f.rounds_set and "round" in out.columns and len(out):
+            out = out[out["round"].isin(f.rounds_set)]
+        if f.side is not None and len(out):
+            if "my_side" in out.columns:
+                out = out[out["my_side"] == f.side]
+            elif {"killer_side", "victim_side"}.issubset(out.columns):
+                out = out[
+                    (out["killer_side"] == f.side) | (out["victim_side"] == f.side)
+                ]
+            elif "side" in out.columns:
+                out = out[out["side"] == f.side]
+        if f.results is not None and "result" in out.columns and len(out):
+            out = out[out["result"].isin(f.results)]
+        if f.dist is not None and len(out):
+            dcol = next(
+                (c for c in ("dist", "distance") if c in out.columns), None
+            )
+            if dcol is not None:
+                d = pd.to_numeric(out[dcol], errors="coerce")
+                lo, hi = f.dist
+                out = out[(d >= lo) & (d <= hi)]
+        return out.copy()
+
+    return _apply(shots), _apply(duels), _apply(hurts)
 
 
 def allowed_speed(dist, thr, safe=SAFE_DIST, strict=STRICT_DIST, vmax=FULL_SPEED):
@@ -786,10 +992,12 @@ def load_demo(path: str, progress=None) -> Demo:
 
 
 # ----------------------------------------------------------------- metrics
-def _hurts_of(demo: Demo, me: str) -> pd.DataFrame:
-    """hurts rows caused by `me`; safe when the player_hurt event is absent."""
-    if "attacker_steamid" in demo.hurts.columns and len(demo.hurts):
-        return demo.hurts[demo.hurts["attacker_steamid"] == me]
+def _hurts_of(demo: Demo, me: str, hurts: pd.DataFrame | None = None) -> pd.DataFrame:
+    """hurts rows caused by `me`; safe when the player_hurt event is absent.
+    `hurts` overrides demo.hurts (used by the global filter)."""
+    h = demo.hurts if hurts is None else hurts
+    if h is not None and "attacker_steamid" in getattr(h, "columns", []) and len(h):
+        return h[h["attacker_steamid"] == me]
     return pd.DataFrame()
 
 
@@ -912,6 +1120,7 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     out["dist"] = _nearest_enemy_dist(demo, out)
     out["hit"] = _match_hits(out, demo.hurts)
     out["side"] = [demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"])]
+    out["weapon_class"] = out["weapon"].map(weapon_class)
     return out
 
 
@@ -987,6 +1196,7 @@ def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
                     _safe_int(getattr(r, "total_rounds_played", 0)) + 1, v
                 ),
                 "weapon": norm_weapon(r.weapon),
+                "weapon_class": weapon_class(r.weapon),
                 "headshot": bool(getattr(r, "headshot", False)),
                 "distance": getattr(r, "distance", np.nan),
                 "noscope": bool(getattr(r, "noscope", False)),
@@ -1034,6 +1244,7 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
                     "result": role,
                     "opponent": df[opp],
                     "weapon": df["weapon"],
+                    "weapon_class": df["weapon_class"],
                     "my_side": df[f"{mine}_side"],
                     "opp_side": df[f"{opp}_side"],
                     "headshot": df["headshot"],
@@ -1072,11 +1283,12 @@ def player_summary(
     thr: float,
     safe: float = SAFE_DIST,
     strict: float = STRICT_DIST,
+    hurts: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     res = []
     for p in demo.players.itertuples():
         sh = shots[shots["sid"] == p.sid]
-        hi = _hurts_of(demo, p.sid)
+        hi = _hurts_of(demo, p.sid, hurts)
         dd = duels_for(duels, p.sid) if len(duels) else pd.DataFrame()
         kills = int((duels["killer"] == p.sid).sum()) if len(duels) else 0
         deaths = int((duels["victim"] == p.sid).sum()) if len(duels) else 0
@@ -1140,6 +1352,7 @@ def weapon_stats(
     thr: float,
     safe: float = SAFE_DIST,
     strict: float = STRICT_DIST,
+    hurts: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     sh = shots[shots["sid"] == me].copy()
     if len(sh):
@@ -1153,7 +1366,7 @@ def weapon_stats(
     )
     if len(sh):
         g["risky"] = sh.groupby("weapon")["_r"].mean() * 100
-    hi = _hurts_of(demo, me)
+    hi = _hurts_of(demo, me, hurts)
     h = (
         hi.groupby("weapon").agg(
             hits=("tick", "size"), hs=("hitgroup", lambda s: (s == "head").mean() * 100)
@@ -1168,8 +1381,8 @@ def weapon_stats(
     return out.sort_values("shots", ascending=False).round(1).reset_index()
 
 
-def hitgroup_counts(demo: Demo, me: str) -> pd.Series:
-    hi = _hurts_of(demo, me)
+def hitgroup_counts(demo: Demo, me: str, hurts: pd.DataFrame | None = None) -> pd.Series:
+    hi = _hurts_of(demo, me, hurts)
     if not len(hi) or "hitgroup" not in hi.columns:
         return pd.Series(dtype="int64")
     return hi["hitgroup"].value_counts()
