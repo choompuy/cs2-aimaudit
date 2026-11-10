@@ -55,6 +55,7 @@ _URL_KEYS = (
     ("preset", "flt_preset"),
     ("side", "flt_side"),
     ("res", "flt_res"),
+    ("page", "page"),
 )
 
 
@@ -175,6 +176,23 @@ def get_timeline(
     return core.timeline_data(path, me, tick, before_s=before_s, tickrate=tickrate)
 
 
+# The heavy frames behind st.cache_data, keyed on the demo file and
+# the analysis thresholds, so a rerun (or a slider tweak that misses the
+# cache only once) does not recompute every page from scratch.
+@st.cache_data(show_spinner=False)
+def get_shots(path: str, mtime: float, thr: int, safe_dist: int, strict_dist: int):
+    demo = get_demo(path, mtime)
+    return core.add_stop_quality(
+        core.add_risk(core.shots_table(demo), thr, safe_dist, strict_dist), thr
+    )
+
+
+@st.cache_data(show_spinner=False)
+def get_duels(path: str, mtime: float, window_s: float):
+    demo = get_demo(path, mtime)
+    return core.build_duels(demo, window_s)
+
+
 # ------------------------------------------------------------ file input
 state = core.load_state()
 recent = [
@@ -265,10 +283,8 @@ if not rec or rec[0] != src:
 
 # -------------------------------------------------------------- metrics
 status.update(label=t("step_metrics"))
-shots = core.add_stop_quality(
-    core.add_risk(core.shots_table(demo), thr, safe_dist, strict_dist), thr
-)
-duels_all = core.build_duels(demo, window_s)
+shots = get_shots(path, mtime, thr, safe_dist, strict_dist)
+duels_all = get_duels(path, mtime, window_s)
 
 info = []
 if demo.header.get("map_name"):
@@ -380,50 +396,117 @@ def style_figure(
 
 
 # ------------------------------------------------------ global filter bar
-# One bar under the player selector that every tab reads from: all metrics
-# below are computed on the FILTERED frames.
-with st.container(border=True):
-    st.markdown(f"**{t('flt_title')}**")
-    demo_weapons = sorted(shots["weapon"].astype(str).unique())
-    present_classes = sorted({core.weapon_class(w) for w in demo_weapons})
-    n_rounds = int(shots["round"].max()) if len(shots) else 0
-    has_sides = bool(demo.sides)
-    # drop selections that do not exist in this demo (e.g. from another file
-    # or from a shared URL of another match)
-    if "flt_weapons" in st.session_state:
-        st.session_state["flt_weapons"] = [
-            w for w in st.session_state["flt_weapons"] if w in set(demo_weapons)
-        ]
-    if "flt_classes" in st.session_state:
-        st.session_state["flt_classes"] = [
-            c for c in st.session_state["flt_classes"] if c in set(present_classes)
-        ]
-    preset_opts = ["all"] + (["pistols"] if n_rounds >= 2 else [])
-    if n_rounds >= 2 * core.ROUNDS_PER_HALF + 1:
-        preset_opts = ["all", "first", "second", "ot", "pistols"]
-    elif n_rounds >= core.ROUNDS_PER_HALF + 1:
-        preset_opts = ["all", "first", "second", "pistols"]
-    if st.session_state.get("flt_preset") not in preset_opts:
-        st.session_state["flt_preset"] = "all"
-    if st.session_state.get("flt_side") not in ("all", "T", "CT"):
-        st.session_state["flt_side"] = "all"
-    # st.slider raises StreamlitInvalidMinMaxError when min_value == max_value,
-    # which kills the whole app on a one-round demo (or any demo where every
-    # shot lands in round 1 because total_rounds_played never arrives). A
-    # single round needs no range filter, so the slider starts at 2 rounds.
-    if n_rounds >= 2:
-        # no `value=`: the clamp block above always puts the (normalized)
-        # range into session_state, and passing both a default and the
-        # session-state value makes Streamlit log a warning.
-        rv = st.session_state.get("flt_rounds") or (1, n_rounds)
-        try:
-            lo_r = max(1, min(int(rv[0]), n_rounds))
-            hi_r = max(lo_r, min(int(rv[1]), n_rounds))
-            st.session_state["flt_rounds"] = (lo_r, hi_r)
-        except (TypeError, ValueError, IndexError):
-            st.session_state["flt_rounds"] = (1, n_rounds)
+# The filters sit in one popover; active filters show as dismissible
+# chips beside it with a Reset, and every page repeats the same summary
+# as a one-line context bar. All metrics below are computed on the
+# FILTERED frames.
+demo_weapons = sorted(shots["weapon"].astype(str).unique())
+present_classes = sorted({core.weapon_class(w) for w in demo_weapons})
+n_rounds = int(shots["round"].max()) if len(shots) else 0
+has_sides = bool(demo.sides)
+# drop selections that do not exist in this demo (e.g. from another file
+# or from a shared URL of another match)
+if "flt_weapons" in st.session_state:
+    st.session_state["flt_weapons"] = [
+        w for w in st.session_state["flt_weapons"] if w in set(demo_weapons)
+    ]
+if "flt_classes" in st.session_state:
+    st.session_state["flt_classes"] = [
+        c for c in st.session_state["flt_classes"] if c in set(present_classes)
+    ]
+preset_opts = ["all"] + (["pistols"] if n_rounds >= 2 else [])
+if n_rounds >= 2 * core.ROUNDS_PER_HALF + 1:
+    preset_opts = ["all", "first", "second", "ot", "pistols"]
+elif n_rounds >= core.ROUNDS_PER_HALF + 1:
+    preset_opts = ["all", "first", "second", "pistols"]
+if st.session_state.get("flt_preset") not in preset_opts:
+    st.session_state["flt_preset"] = "all"
+if st.session_state.get("flt_side") not in ("all", "T", "CT"):
+    st.session_state["flt_side"] = "all"
+# st.slider raises StreamlitInvalidMinMaxError when min_value == max_value,
+# which kills the whole app on a one-round demo (or any demo where every
+# shot lands in round 1 because total_rounds_played never arrives). A
+# single round needs no range filter, so the slider starts at 2 rounds.
+if n_rounds >= 2:
+    # no `value=`: the clamp block above always puts the (normalized)
+    # range into session_state, and passing both a default and the
+    # session-state value makes Streamlit log a warning.
+    rv = st.session_state.get("flt_rounds") or (1, n_rounds)
+    try:
+        lo_r = max(1, min(int(rv[0]), n_rounds))
+        hi_r = max(lo_r, min(int(rv[1]), n_rounds))
+        st.session_state["flt_rounds"] = (lo_r, hi_r)
+    except (TypeError, ValueError, IndexError):
+        st.session_state["flt_rounds"] = (1, n_rounds)
 
-    fc1, fc2, fc3 = st.columns([3, 3, 2])
+
+def _apply_preset():
+    p = st.session_state.get("flt_preset", "all")
+    if p == "pistols":
+        st.session_state["flt_rounds"] = (1, max(n_rounds, 1))
+    else:
+        st.session_state["flt_rounds"] = core.round_bounds(n_rounds, p)
+
+
+def _slider_custom():
+    # manual range -> the preset label no longer applies
+    st.session_state["flt_preset"] = "all"
+
+
+def _clr(key, value):
+    """A chip click clears one filter; on_click runs before widgets."""
+
+    def _fn():
+        st.session_state[key] = value
+
+    return _fn
+
+
+def _clr_rounds():
+    st.session_state["flt_rounds"] = (1, n_rounds)
+    st.session_state["flt_preset"] = "all"
+
+
+def _reset_filters():
+    st.session_state["flt_weapons"] = []
+    st.session_state["flt_classes"] = []
+    st.session_state["flt_res"] = []
+    st.session_state["flt_side"] = "all"
+    _clr_rounds()
+
+
+# one dismissible chip per active filter: (label, clear callback)
+_chips = []
+if st.session_state.get("flt_weapons"):
+    _chips.append((", ".join(st.session_state["flt_weapons"]), _clr("flt_weapons", [])))
+if st.session_state.get("flt_classes"):
+    _chips.append(
+        (
+            ", ".join(t(f"wc_{c}") for c in st.session_state["flt_classes"]),
+            _clr("flt_classes", []),
+        )
+    )
+if has_sides and st.session_state.get("flt_side") != "all":
+    _chips.append((st.session_state["flt_side"], _clr("flt_side", "all")))
+if st.session_state.get("flt_preset", "all") != "all":
+    _chips.append((t(f"fp_{st.session_state['flt_preset']}"), _clr_rounds))
+elif n_rounds >= 2 and tuple(st.session_state.get("flt_rounds") or ()) != (
+    1,
+    n_rounds,
+):
+    _rv = tuple(st.session_state.get("flt_rounds") or ())
+    _chips.append((f"{t('flt_rounds')} {_rv[0]}–{_rv[1]}", _clr_rounds))
+if st.session_state.get("flt_res"):
+    _chips.append(
+        (
+            ", ".join(fmt_result(v) for v in st.session_state["flt_res"]),
+            _clr("flt_res", []),
+        )
+    )
+
+_fcols = st.columns([1.1] + [1.6] * len(_chips) + ([0.9] if _chips else []))
+with _fcols[0].popover(t("flt_title")):
+    fc1, fc2 = st.columns(2)
     fc1.multiselect(
         t("flt_weapons"),
         demo_weapons,
@@ -437,19 +520,6 @@ with st.container(border=True):
         key="flt_classes",
         help=t("flt_classes_help"),
     )
-    fc3.caption("")  # keeps the n-report below aligned with the widgets
-
-    def _apply_preset():
-        p = st.session_state.get("flt_preset", "all")
-        if p == "pistols":
-            st.session_state["flt_rounds"] = (1, max(n_rounds, 1))
-        else:
-            st.session_state["flt_rounds"] = core.round_bounds(n_rounds, p)
-
-    def _slider_custom():
-        # manual range -> the preset label no longer applies
-        st.session_state["flt_preset"] = "all"
-
     fr1, fr2, fr3, fr4 = st.columns([3, 2, 2, 2])
     if (
         n_rounds >= 2
@@ -484,62 +554,83 @@ with st.container(border=True):
         key="flt_res",
         help=t("flt_res_help"),
     )
-
-    preset = st.session_state.get("flt_preset", "all")
-    round_kwargs: dict = {}
-    if preset == "pistols":
-        round_kwargs["rounds_set"] = core.pistol_rounds(n_rounds)
-    elif n_rounds >= 1:
-        rv = tuple(st.session_state.get("flt_rounds") or (1, n_rounds))
-        if rv != (1, n_rounds):
-            round_kwargs["rounds"] = rv
-    filters = core.Filters(
-        weapons=set(st.session_state.get("flt_weapons") or []) or None,
-        classes=set(st.session_state.get("flt_classes") or []) or None,
-        side=(
-            st.session_state.get("flt_side")
-            if has_sides and st.session_state.get("flt_side") != "all"
-            else None
-        ),
-        **round_kwargs,
+for _i, (_label, _fn) in enumerate(_chips):
+    _fcols[_i + 1].button(
+        f"{_label} ✕",
+        on_click=_fn,
+        key=f"flt_chip_{_i}",
+        use_container_width=True,
     )
-    shots_f, duels_f, hurts_f = core.apply_filters(
-        shots, duels_all, demo.hurts, filters
-    )
-    res_sel = set(st.session_state.get("flt_res") or [])
-    fc3.caption(
-        t("flt_n", shots=len(shots_f), duels=len(duels_f))
-        + (
-            "  \n" + t("flt_n_all", shots=len(shots), duels=len(duels_all))
-            if not filters.empty()
-            else ""
-        )
+if _chips:
+    _fcols[-1].button(
+        t("flt_reset"),
+        on_click=_reset_filters,
+        key="flt_reset",
+        use_container_width=True,
     )
 
-    # keep the URL in sync so the view can be bookmarked / shared
-    url_view = {
-        "lang": st.session_state.get("lang"),
-        "me": me,
-        "weapons": st.session_state.get("flt_weapons") or [],
-        "classes": st.session_state.get("flt_classes") or [],
-        "rounds": list(st.session_state.get("flt_rounds") or ()),
-        "preset": preset,
-        "side": st.session_state.get("flt_side", "all"),
-        "res": st.session_state.get("flt_res") or [],
-    }
-    non_default = (
-        url_view["weapons"]
-        or url_view["classes"]
-        or url_view["res"]
-        or url_view["side"] != "all"
-        or url_view["preset"] != "all"
-        or (url_view["rounds"] and tuple(url_view["rounds"]) != (1, n_rounds))
-    )
-    if non_default:
-        st.query_params["f"] = _url_pack(url_view)
-        fc3.caption(t("flt_share"))
-    elif "f" in st.query_params:
-        del st.query_params["f"]
+preset = st.session_state.get("flt_preset", "all")
+round_kwargs: dict = {}
+if preset == "pistols":
+    round_kwargs["rounds_set"] = core.pistol_rounds(n_rounds)
+elif n_rounds >= 1:
+    rv = tuple(st.session_state.get("flt_rounds") or (1, n_rounds))
+    if rv != (1, n_rounds):
+        round_kwargs["rounds"] = rv
+filters = core.Filters(
+    weapons=set(st.session_state.get("flt_weapons") or []) or None,
+    classes=set(st.session_state.get("flt_classes") or []) or None,
+    side=(
+        st.session_state.get("flt_side")
+        if has_sides and st.session_state.get("flt_side") != "all"
+        else None
+    ),
+    **round_kwargs,
+)
+shots_f, duels_f, hurts_f = core.apply_filters(
+    shots, duels_all, demo.hurts, filters
+)
+res_sel = set(st.session_state.get("flt_res") or [])
+
+
+def _ctx_bar():
+    """One line of context at the top of every page - which filters
+    are active and how much data is in view."""
+    parts = [lbl for lbl, _fn in _chips]
+    line = t("flt_n", shots=len(shots_f), duels=len(duels_f))
+    if parts:
+        line = " · ".join(parts) + " — " + line
+    if not filters.empty():
+        line += " " + t("flt_n_all", shots=len(shots), duels=len(duels_all))
+    st.caption(line)
+
+
+# keep the URL in sync so the view can be bookmarked / shared
+url_view = {
+    "lang": st.session_state.get("lang"),
+    "me": me,
+    "weapons": st.session_state.get("flt_weapons") or [],
+    "classes": st.session_state.get("flt_classes") or [],
+    "rounds": list(st.session_state.get("flt_rounds") or ()),
+    "preset": preset,
+    "side": st.session_state.get("flt_side", "all"),
+    "res": st.session_state.get("flt_res") or [],
+    "page": st.session_state.get("page", "overview"),
+}
+non_default = (
+    url_view["weapons"]
+    or url_view["classes"]
+    or url_view["res"]
+    or url_view["side"] != "all"
+    or url_view["preset"] != "all"
+    or url_view["page"] != "overview"
+    or (url_view["rounds"] and tuple(url_view["rounds"]) != (1, n_rounds))
+)
+if non_default:
+    st.query_params["f"] = _url_pack(url_view)
+    st.caption(t("flt_share"))
+elif "f" in st.query_params:
+    del st.query_params["f"]
 
 summary = core.player_summary(
     demo, duels_f, shots_f, thr, safe_dist, strict_dist, hurts=hurts_f
@@ -571,14 +662,19 @@ def num(v, nd: int = 1) -> str:
     return f"{v:.{nd}f}" if pd.notna(v) else t("none_val")
 
 
-tab_ov, tab_sh, tab_du, tab_tl, tab_gd = st.tabs(
-    [
-        t("tab_overview"),
-        t("tab_shooting"),
-        t("tab_duels"),
-        t("tab_timeline"),
-        t("tab_guide"),
-    ]
+# st.tabs executes EVERY tab body on every rerun and cannot be
+# switched from code. A segmented control bound to session_state["page"]
+# renders only the active page: widget changes on one page stop
+# recomputing the others, and code can switch pages (a Duels row click
+# opens that duel in the Timeline).
+PAGES = ("overview", "shooting", "duels", "timeline", "guide")
+if st.session_state.get("page") not in PAGES:
+    st.session_state["page"] = "overview"
+page = (
+    st.segmented_control(
+        None, PAGES, format_func=lambda p: t(f"tab_{p}"), key="page"
+    )
+    or "overview"
 )
 
 # -------------------------------------------------------------- overview
@@ -586,7 +682,8 @@ tab_ov, tab_sh, tab_du, tab_tl, tab_gd = st.tabs(
 # by default, "All columns" adds the detail metrics; the selected
 # player's row is highlighted (★ + tint) and clicking any row selects
 # that player - same as the select box above.
-with tab_ov:
+if page == "overview":
+    _ctx_bar()
     st.subheader(t("ov_title"))
     st.caption(t("ov_caption"))
     _tcol, _ = st.columns([1, 2])
@@ -733,7 +830,8 @@ with tab_ov:
     )
 
 # -------------------------------------------------------------- shooting
-with tab_sh:
+elif page == "shooting":
+    _ctx_bar()
     sh_me = shots_f[shots_f["sid"] == me]
     hg_me = core.hitgroup_counts(demo, me, hurts_f)
     dd = my_duels
@@ -1085,7 +1183,8 @@ with tab_sh:
 # ~8 columns by default, "All columns" reveals the detail metrics and
 # the technical tick column; numbers carry their units; the opponent name
 # stays pinned when the full table scrolls horizontally.
-with tab_du:
+elif page == "duels":
+    _ctx_bar()
     st.subheader(t("du_title"))
     st.caption(t("du_caption"))
     if not len(my_duels):
@@ -1189,23 +1288,35 @@ with tab_du:
         ]
         _du_shown = list(du_labels) if du_full else _du_basic
         disp = pd.DataFrame({du_labels[k]: du_cells[k] for k in _du_shown})
-        du_sel = st.dataframe(
+
+        def _duel_row_click():
+            """A row click opens that duel in the Timeline right away
+            (row order == my_duels)."""
+            try:
+                sel = st.session_state["du_table"]
+            except KeyError:
+                return
+            rows = list(sel.selection.rows or [])
+            if rows and 0 <= rows[0] < len(my_duels):
+                st.session_state["tl_duel"] = int(rows[0])
+                st.session_state["page"] = "timeline"
+
+        st.dataframe(
             disp,
             column_config={du_labels[k]: du_cfg_all[k] for k in _du_shown},
             hide_index=True,
             width="stretch",
-            on_select="rerun",
+            on_select=_duel_row_click,
             selection_mode="single-row",
             key="du_table",
         )
         st.caption(t("du_click_hint"))
-        sel_rows = list(du_sel.selection.rows or [])
-        if sel_rows and 0 <= sel_rows[0] < len(my_duels):
-            # preselect this duel on the Timeline tab (row order == my_duels)
-            st.session_state["tl_duel"] = int(sel_rows[0])
 
 # ------------------------------------------------------------- timeline
-with tab_tl:
+# a fragment - picking another duel re-renders only the timeline
+@st.fragment
+def _timeline_fragment():
+    _ctx_bar()
     st.subheader(t("tl_title"))
     if not len(my_duels):
         st.info(t("du_none"))
@@ -1434,8 +1545,11 @@ with tab_tl:
             fig.update_layout(showlegend=bool(fire_pts or hit_pts))
             st.plotly_chart(fig, width="stretch")
 
+if page == "timeline":
+    _timeline_fragment()
+
 # ---------------------------------------------------------------- guide
-with tab_gd:
+if page == "guide":
     st.markdown(t("guide"))
 
 # ---------------------------------------------------------------- debug
