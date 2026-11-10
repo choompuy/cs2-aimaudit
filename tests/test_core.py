@@ -964,6 +964,191 @@ dsp, _, _ = core.apply_filters(
 )
 check("rounds_set filter frames", list(dsp["round"]) == [1, 13])
 
+# ------------------------------------------- crouch-aware err + head widths
+print("== crouch-aware angle_err / head_ang ==")
+from types import SimpleNamespace
+
+
+def row(x, y, z, pitch=0.0, yaw=0.0, duck=None, punch=None):
+    r = SimpleNamespace(X=x, Y=y, Z=z, pitch=pitch, yaw=yaw)
+    if duck is not None:
+        r.duck_amount = duck
+    if punch is not None:
+        r.punch_pitch, r.punch_yaw = punch
+    return r
+
+
+check("duck missing -> 0", core._duck_amount(row(0, 0, 0)) == 0.0)
+check("duck 0.5", core._duck_amount(row(0, 0, 0, duck=0.5)) == 0.5)
+check("duck clamped hi", core._duck_amount(row(0, 0, 0, duck=1.7)) == 1.0)
+check("duck clamped lo", core._duck_amount(row(0, 0, 0, duck=-0.2)) == 0.0)
+check("duck nan -> 0", core._duck_amount(row(0, 0, 0, duck=np.nan)) == 0.0)
+
+shooter = row(0, 0, 0)
+target_stand = row(1000, 0, 0)
+err_ss = core.angle_err(shooter, target_stand)  # head 2u below eyes
+check("stand/stand err ~ 0.11 deg", abs(err_ss - np.degrees(np.arctan(2 / 1000))) < 1e-9, err_ss)
+target_duck = row(1000, 0, 0, duck=1.0)
+err_sd = core.angle_err(shooter, target_duck)  # head 20u below eyes
+check("target crouched: err ~ 1.15 deg", abs(err_sd - np.degrees(np.arctan(20 / 1000))) < 1e-9, err_sd)
+shooter_duck = row(0, 0, 0, duck=1.0)
+err_ds = core.angle_err(shooter_duck, target_stand)  # head 16u ABOVE crouched eyes
+check("shooter crouched: err ~ 0.92 deg", abs(err_ds - np.degrees(np.arctan(16 / 1000))) < 1e-9, err_ds)
+err_dd = core.angle_err(shooter_duck, target_duck)
+check("both crouched ~ stand/stand", abs(err_dd - err_ss) < 1e-9, err_dd)
+
+ha = core.head_ang(1000.0)
+check("head_ang 1000u ~ 1.031 deg", abs(ha - 1.0313) < 1e-3, ha)
+check("head_ang 2000 ≈ half of 1000 (small-angle)", abs(core.head_ang(2000.0) - ha / 2) < 1e-3)
+check("head_ang nan", pd.isna(core.head_ang(np.nan)))
+check("head_ang 0 -> nan", pd.isna(core.head_ang(0.0)))
+ha_arr = core.head_ang(pd.Series([500.0, 1000.0, np.nan]))
+check(
+    "head_ang vector",
+    abs(ha_arr[0] - 2 * ha) < 1e-3 and abs(ha_arr[1] - ha) < 1e-9 and pd.isna(ha_arr[2]),
+    ha_arr,
+)
+# duel-level: killer_err ~5 deg (punch) at dist 800, head_ang(800)=1.289
+kerr = duels.iloc[0]["killer_err"]
+check("killer would_head False (punch pushes out)", not bool(duels.iloc[0]["killer_would_head"]))
+check("victim would_head True (aimed straight)", bool(duels.iloc[0]["victim_would_head"]))
+check(
+    "killer err_hw ~ err/1.289 (3..5)",
+    3.0 < duels.iloc[0]["killer_err_hw"] < 5.0,
+    duels.iloc[0]["killer_err_hw"],
+)
+check(
+    "victim err_hw <= 0.5",
+    duels.iloc[0]["victim_err_hw"] <= 0.5,
+    duels.iloc[0]["victim_err_hw"],
+)
+
+# duck_amount column flows through load_demo
+m_d = make_match()
+m_d["ticks"] = m_d["ticks"].assign(duck_amount=0.0)
+m_d["ticks"].loc[m_d["ticks"]["steamid"] == f64_sid(S3), "duck_amount"] = 1.0
+FakeParser.demos["duck.dem"] = m_d
+demo_d = core.load_demo("duck.dem")
+check("duck_amount parsed", "duck_amount" in demo_d.ticks.columns)
+duels_d = core.build_duels(demo_d, 3.0)
+check(
+    "crouched shooter raises victim-side err (S3 ducks, S1 stands)",
+    duels_d.iloc[0]["victim_err"] > duels.iloc[0]["victim_err"],
+    (duels_d.iloc[0]["victim_err"], duels.iloc[0]["victim_err"]),
+)
+m_d2 = make_match()
+m_d2["unsupported"] = {"duck_amount"}
+FakeParser.demos["duck2.dem"] = m_d2
+demo_d2 = core.load_demo("duck2.dem")
+check("duck unsupported: ticks parsed anyway", len(demo_d2.ticks) == 22, len(demo_d2.ticks))
+check("duck unsupported: no duck col", "duck_amount" not in demo_d2.ticks.columns)
+check("duck unsupported: punch still there", "punch_pitch" in demo_d2.ticks.columns)
+
+# -------------------------------------------------- counter-strafe quality
+print("== counter-strafe quality ==")
+# unit: add_stop_quality
+sq = pd.DataFrame(
+    {
+        "speed": [300.0, 30.0, 30.0, 0.0, np.nan, 30.0],
+        "speed_prev": [250.0, 250.0, 10.0, 250.0, 250.0, np.nan],
+    }
+)
+sq = core.add_stop_quality(sq, 40)
+check(
+    "stop classes",
+    list(sq["stop"]) == ["moving", "stopped", "standing", "stopped", "", "standing"],
+    list(sq["stop"]),
+)
+
+# integration: fake with buttons at fire ticks. S1 runs +X (yaw 0 = forward),
+# decelerates to 32 u/s at tick 121 and fires there while holding S (BACK).
+BACK_BIT = 1 << 4  # IN_BACK
+m_cs = make_match()
+m_cs["events"]["weapon_fire"] = pd.concat(
+    [
+        m_cs["events"]["weapon_fire"],
+        pd.DataFrame(
+            {
+                "tick": [121],
+                "user_steamid": pd.array([int(S1)], dtype="uint64"),
+                "user_name": ["Alpha"],
+                "weapon": ["weapon_ak47"],
+                "total_rounds_played": [0],
+                "is_warmup_period": [False],
+            }
+        ),
+    ],
+    ignore_index=True,
+)
+tk_cs = m_cs["ticks"]
+tk_cs = pd.concat(
+    [
+        tk_cs,
+        pd.DataFrame(
+            [
+                {
+                    "tick": 121,
+                    "steamid": f64_sid(S1),
+                    "name": "Alpha",
+                    "X": 4.5,  # 0.5u from t=120 -> 32 u/s at 64 tick
+                    "Y": 0.0,
+                    "Z": 0.0,
+                    "pitch": 0.0,
+                    "yaw": 0.0,
+                    "is_alive": True,
+                    "aim_punch_angle": "0 0 0",
+                }
+            ]
+        ),
+    ],
+    ignore_index=True,
+)
+m_cs["ticks"] = tk_cs
+m_cs["buttons_bit"] = {
+    (121, f64_sid(S1)): BACK_BIT,  # S held at the stop-and-shoot tick
+    (120, f64_sid(S1)): 0,
+}
+FakeParser.demos["cs.dem"] = m_cs
+demo_cs = core.load_demo("cs.dem")
+check(
+    "fire-tick buttons parsed",
+    "BACK" in demo_cs.ticks.columns,
+    sorted(c for c in demo_cs.ticks.columns if c.isupper()),
+)
+shots_cs = core.add_stop_quality(core.shots_table(demo_cs), 40)
+s1_cs = shots_cs[shots_cs["sid"] == S1].set_index("tick")
+check("moving shot at 120", s1_cs.loc[120, "stop"] == "moving", s1_cs.loc[120, "stop"])
+check(
+    "stopped shot at 121 (prev 256 -> 32)",
+    s1_cs.loc[121, "stop"] == "stopped",
+    (s1_cs.loc[121, "speed"], s1_cs.loc[121, "speed_prev"], s1_cs.loc[121, "stop"]),
+)
+check("speed_prev wired", abs(s1_cs.loc[121, "speed_prev"] - 256.0) < 1e-6)
+check("counter-strafe tap with S against +X motion", bool(s1_cs.loc[121, "counter_strafe"]))
+check("no tap when moving (no opposing key)", not bool(s1_cs.loc[120, "counter_strafe"]))
+check("standing shots have no tap", not bool(s1_cs.loc[100, "counter_strafe"]))
+
+# same geometry but holding W (FORWARD, supports the motion) -> no tap
+FWD_BIT = 1 << 3
+m_cs2 = make_match()
+m_cs2["ticks"] = tk_cs
+m_cs2["events"] = m_cs["events"]
+m_cs2["buttons_bit"] = {(121, f64_sid(S1)): FWD_BIT, (120, f64_sid(S1)): 0}
+FakeParser.demos["cs2.dem"] = m_cs2
+demo_cs2 = core.load_demo("cs2.dem")
+shots_cs2 = core.add_stop_quality(core.shots_table(demo_cs2), 40)
+s1_cs2 = shots_cs2[shots_cs2["sid"] == S1].set_index("tick")
+check(
+    "W held (supports motion) -> no tap",
+    not bool(s1_cs2.loc[121, "counter_strafe"]),
+)
+
+# demo without button data: stop classes still work, tap always False
+shots_nb = core.add_stop_quality(core.shots_table(demo), 40)
+s1_nb = shots_nb[shots_nb["sid"] == S1].set_index("tick")
+check("no buttons: stop classes ok", s1_nb.loc[120, "stop"] == "moving")
+check("no buttons: tap False", not bool(s1_nb.loc[120, "counter_strafe"]))
+
 # ------------------------------------------------------------ no_events
 print("== no player_hurt event at all ==")
 m8 = make_match()

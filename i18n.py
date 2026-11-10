@@ -85,7 +85,12 @@ STR = {
         "m_speed_help": "Your speed (units/s) at the first shot of each duel. Close to 0 = you stopped before shooting.",
         "m_risky": "Risky shots",
         "m_risky_help": "Shots where your speed exceeded the limit acceptable at that distance to the nearest living enemy: any speed point-blank, near-stationary at long range. Both distances are in Advanced settings.",
-        "ci_line": "95% confidence (Wilson): accuracy {acc} (n={n_shots}) · headshots {hs} (n={n_hits}) · shoot first {first} (n={n_duels}) — wide ranges mean small samples.",
+        "ci_line": "95% confidence (Wilson): accuracy {acc} (n={n_shots}) · headshots {hs} (n={n_hits}) · shoot first {first} (n={n_duels}) · on head at 1st shot {hw} (n={n_hw}) — wide ranges mean small samples.",
+        "m_onhead": "Crosshair on head (1st shot)",
+        "m_onhead_help": "Share of duels where your first shot's crosshair was inside the enemy head box (aim error no more than half the head's angular size at that distance). Takes crouch into account when the demo stores it.",
+        "m_cs": "Stopped with counter-strafe",
+        "m_cs_help": "Of the shots where your speed dropped under the threshold on that very tick (the stop moment), the share where you held the key pushing against your motion (W/A/S/D) — an active counter-strafe tap instead of just releasing keys. Needs button data in the demo.",
+        "col_errhw": "Aim error (head widths)",
         "small_sample": "Small sample: with fewer than {shots} shots or {duels} duels these percentages are noise, not verdicts.",
         "rank_line": "In this lobby (1 = best): {parts}.",
         "rank_part": "{name}: {pos} of {n}",
@@ -239,10 +244,11 @@ STR = {
 
 ### How to read the numbers
 - **Shots on the move** – shots fired while your speed was above the threshold. Stop first, then shoot (counter-strafe).
-- **Aim error** – angle between your crosshair (including recoil punch) and the enemy head at your first shot. Under a few degrees means the crosshair was already on the head.
+- **Aim error** – angle between your crosshair (including recoil punch) and the enemy head at your first shot. Under a few degrees means the crosshair was already on the head. The “head widths” column divides it by the angular size of the head at that distance: 0.5 or less = the crosshair was inside the head box.
 - **Shoots first** – in duels where someone fired, how often you fired first.
 - **Duel time** – from the first shot of the duel to the kill/death. Long duels with many shots point to spray/aim problems.
 - **Timeline** – speed, aim angles and held keys during the duel. Look for: moving while shooting, big last-moment aim corrections, and crouch/walk timing.
+- **Counter-strafe** – “Stopped with counter-strafe” looks at the shots where you stopped on that exact tick: did you tap the opposite key (W/A/S/D), or just release? Aim for 100%.
 
 ### The “risky shots” model
 - A shot is *risky* when your speed at that moment exceeded the limit acceptable at that distance to the nearest living enemy: any speed point-blank, near-stationary at long range, linear in between. It is a heuristic, not the real spread table; both distances are configurable in Advanced.
@@ -250,7 +256,7 @@ STR = {
 
 ### Limitations
 - Mouse movement, sensitivity, FPS and ping are not in demos. Reaction time includes network delay.
-- Aim error is approximate (fixed eye/head height, no crouch offsets; recoil punch is included when the parser provides it).
+- Aim error is approximate (eye/head height offsets, crouch-aware when the demo stores duck_amount; recoil punch is included when the parser provides it).
 - A duel is detected by time window, not by line of sight.
 - Warmup shots/kills/damage are excluded automatically.
 """,
@@ -331,7 +337,12 @@ STR = {
         "m_speed_help": "Твоя скорость (units/s) на первом выстреле каждой дуэли. Около 0 = ты остановился перед выстрелом.",
         "m_risky": "Рискованные выстрелы",
         "m_risky_help": "Выстрелы, где скорость превысила предел, допустимый на этой дистанции до ближайшего живого врага: в упор — любая, на дальней — почти стоя. Обе дистанции настраиваются в «Дополнительно».",
-        "ci_line": "95% доверие (Вилсон): точность {acc} (n={n_shots}) · в голову {hs} (n={n_hits}) · первым стреляешь {first} (n={n_duels}) — широкий разброс значит маленькую выборку.",
+        "ci_line": "95% доверие (Вилсон): точность {acc} (n={n_shots}) · в голову {hs} (n={n_hits}) · первым стреляешь {first} (n={n_duels}) · прицел на голове на 1-м выстреле {hw} (n={n_hw}) — широкий разброс значит маленькую выборку.",
+        "m_onhead": "Прицел на голове (1-й выстрел)",
+        "m_onhead_help": "Доля дуэлей, где прицел на первом выстреле был внутри хитбокса головы (ошибка не больше половины углового размера головы на этой дистанции). Учитывает присед, если демка его хранит.",
+        "m_cs": "Остановился контр-стрейфом",
+        "m_cs_help": "Среди выстрелов, где скорость упала ниже порога прямо в этот тик (момент остановки), — доля тех, где была зажата клавиша, толкающая против движения (W/A/S/D): активный контр-стрейф, а не просто отпускание клавиш. Нужны данные клавиш в демке.",
+        "col_errhw": "Ошибка прицела (ширины головы)",
         "small_sample": "Маленькая выборка: меньше {shots} выстрелов или {duels} дуэлей — эти проценты шум, а не приговор.",
         "rank_line": "В этом лобби (1 = лучший): {parts}.",
         "rank_part": "{name}: {pos} из {n}",
@@ -480,10 +491,11 @@ STR = {
 
 ### Как читать цифры
 - **Выстрелы на ходу** – выстрелы при скорости выше порога. Сначала остановись, потом стреляй (контрстрейф).
-- **Ошибка прицела** – угол между прицелом (с учётом отдачи) и головой врага на первом выстреле. Несколько градусов и меньше: прицел уже был на голове.
+- **Ошибка прицела** – угол между прицелом (с учётом отдачи) и головой врага на первом выстреле. Несколько градусов и меньше: прицел уже был на голове. Колонка «ширины головы» делит его на угловой размер головы на этой дистанции: 0,5 и меньше = прицел был внутри хитбокса головы.
 - **Стреляет первым** – в дуэлях, где кто-то стрелял, как часто первым стреляешь ты.
 - **Время дуэли** – от первого выстрела дуэли до килла/смерти. Долгие дуэли с множеством выстрелов говорят о проблемах со спреем или аимом.
 - **Таймлайн** – скорость, углы прицела и клавиши во время дуэли. Ищи: стрельбу на ходу, большие доводки в последний момент, тайминг приседа и шифта.
+- **Контр-стрейф** – «Остановился контр-стрейфом» смотрит на выстрелы, где ты остановился ровно в этот тик: тапнул ли ты противоположную клавишу (W/A/S/D) или просто отпустил? Цель — 100%.
 
 ### Модель «рискованных выстрелов»
 - Выстрел *рискованный*, если скорость в его момент превысила предел, допустимый на дистанции до ближайшего живого врага: в упор — любая скорость, на дальней — только почти стоя, между ними — линейно. Это эвристика, а не настоящая таблица разброса; обе дистанции настраиваются в «Дополнительно».
@@ -491,7 +503,7 @@ STR = {
 
 ### Ограничения
 - Движения мыши, сенса, FPS и пинг в демках не хранятся. Время реакции включает сетевую задержку.
-- Ошибка прицела приблизительная (фиксированная высота глаз/головы, без приседа; отдача учитывается, если парсер её отдаёт).
+- Ошибка прицела приблизительная (высоты глаз/головы — приблизительные, присед учитывается, если демка хранит duck_amount; отдача учитывается, если парсер её отдаёт).
 - Дуэль определяется по окну времени, а не по линии видимости.
 - Выстрелы/килы/урон из вармапа исключаются автоматически.
 """,

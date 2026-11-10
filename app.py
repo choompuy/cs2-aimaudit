@@ -35,9 +35,13 @@ _URL_KEYS = (
 
 
 def _url_pack(d: dict) -> str:
-    return base64.urlsafe_b64encode(
-        json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode()
-    ).decode().rstrip("=")
+    return (
+        base64.urlsafe_b64encode(
+            json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
 
 
 def _url_unpack(s: str) -> dict | None:
@@ -140,9 +144,7 @@ def get_timeline(
 # ------------------------------------------------------------ file input
 state = core.load_state()
 recent = [
-    p
-    for p in state.get("recent_demos", [])
-    if isinstance(p, str) and os.path.exists(p)
+    p for p in state.get("recent_demos", []) if isinstance(p, str) and os.path.exists(p)
 ]
 
 up = st.file_uploader(
@@ -224,7 +226,9 @@ if not rec or rec[0] != src:
 
 # -------------------------------------------------------------- metrics
 status.update(label=t("step_metrics"))
-shots = core.add_risk(core.shots_table(demo), thr, safe_dist, strict_dist)
+shots = core.add_stop_quality(
+    core.add_risk(core.shots_table(demo), thr, safe_dist, strict_dist), thr
+)
 duels_all = core.build_duels(demo, window_s)
 
 info = []
@@ -390,11 +394,17 @@ with st.container(border=True):
         ),
         **round_kwargs,
     )
-    shots_f, duels_f, hurts_f = core.apply_filters(shots, duels_all, demo.hurts, filters)
+    shots_f, duels_f, hurts_f = core.apply_filters(
+        shots, duels_all, demo.hurts, filters
+    )
     res_sel = set(st.session_state.get("flt_res") or [])
     fc3.caption(
         t("flt_n", shots=len(shots_f), duels=len(duels_f))
-        + ("  \n" + t("flt_n_all", shots=len(shots), duels=len(duels_all)) if not filters.empty() else "")
+        + (
+            "  \n" + t("flt_n_all", shots=len(shots), duels=len(duels_all))
+            if not filters.empty()
+            else ""
+        )
     )
 
     # keep the URL in sync so the view can be bookmarked / shared
@@ -515,6 +525,10 @@ with tab_sh:
     dur = dd["duration_s"].median() if len(dd) else np.nan
     err = dd["my_err"].median() if len(dd) else np.nan
     spd = dd["my_speed"].median() if len(dd) else np.nan
+    dd_err = dd[dd["my_err"].notna()] if len(dd) else dd
+    onhead_pct = dd_err["my_would_head"].mean() * 100 if len(dd_err) else np.nan
+    stops = sh_me[sh_me["stop"] == "stopped"] if len(sh_me) else sh_me
+    cs_pct = stops["counter_strafe"].mean() * 100 if len(stops) else np.nan
 
     c = st.columns(5)
     c[0].metric(t("m_shots"), len(sh_me), help=t("m_shots_help"))
@@ -528,6 +542,9 @@ with tab_sh:
     c[2].metric(t("m_err"), num(err, 1), help=t("m_err_help"))
     c[3].metric(t("m_speed"), num(spd, 0), help=t("m_speed_help"))
     c[4].metric(t("m_first"), pct(first_pct), help=t("m_first_help"))
+    c = st.columns(5)
+    c[0].metric(t("m_onhead"), pct(onhead_pct), help=t("m_onhead_help"))
+    c[1].metric(t("m_cs"), pct(cs_pct), help=t("m_cs_help"), delta=None)
 
     # honesty block: n, Wilson 95% CIs and lobby ranks for the rates above
     def _ci(k, n):
@@ -543,6 +560,12 @@ with tab_sh:
             n_hits=hits_n,
             first=_ci(int((fs["first"] == "me").sum()), len(fs)) if len(fs) else "—",
             n_duels=len(fs),
+            hw=(
+                _ci(int(dd_err["my_would_head"].sum()), len(dd_err))
+                if len(dd_err)
+                else "—"
+            ),
+            n_hw=len(dd_err),
         )
     )
     if len(sh_me) < core.MIN_N_SHOTS or len(dd) < core.MIN_N_DUELS:
@@ -717,6 +740,7 @@ with tab_du:
                 t("col_duration"): ddf["duration_s"].to_numpy(),
                 t("col_speed"): ddf["my_speed"].round(0).to_numpy(),
                 t("col_err"): ddf["my_err"].round(1).to_numpy(),
+                t("col_errhw"): ddf["my_err_hw"].round(2).to_numpy(),
                 t("col_flags"): flags,
             }
         )

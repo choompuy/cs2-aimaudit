@@ -69,9 +69,7 @@ WEAPON_CLASSES: dict[str, set[str]] = {
     "shotgun": {"nova", "xm1014", "mag7", "sawedoff"},
     "lmg": {"m249", "negev"},
 }
-WEAPON_TO_CLASS: dict[str, str] = {
-    w: c for c, ws in WEAPON_CLASSES.items() for w in ws
-}
+WEAPON_TO_CLASS: dict[str, str] = {w: c for c, ws in WEAPON_CLASSES.items() for w in ws}
 # ------------------------------------------------------------- buttons
 # Named button props actually supported by demoparser2 (README props table).
 # LEFT/RIGHT are strafe A/D (IN_MOVELEFT/IN_MOVERIGHT), TURNLEFT/RIGHT are not
@@ -102,6 +100,9 @@ BUTTONS = [
     "FIRE",
     "RELOAD",
 ]
+# Movement keys with the direction they push (deg relative to yaw).
+# Counter-strafing = tapping the key that pushes AGAINST your motion.
+STRAFE_DIRS = {"FORWARD": 0.0, "LEFT": 90.0, "BACK": 180.0, "RIGHT": -90.0}
 # NOTE: velocity_X/velocity_Y are deliberately NOT requested. demoparser2
 # computes them as (prev sampled pos - prev-prev sampled pos) * 64 over the
 # REQUESTED tick rows (see its collect_data.rs::velocity_from_history), so with
@@ -115,6 +116,8 @@ ALIVE_PROPS = ["is_alive"]
 # Recoil punch angle (CCSPlayerPawn.m_aimPunchAngle): requested in addition to
 # POS; if the parser does not know the prop we fall back to a plain POS parse.
 PUNCH_PROPS = ["aim_punch_angle"]
+# Crouch amount (m_flDuckAmount, 0..1): shifts eye/head height down ~18u.
+DUCK_PROPS = ["duck_amount"]
 TEAMS = {2: "T", 3: "CT"}
 SIDE_PROPS = ["team_num"]  # m_iTeamNum per tick: the real per-round side
 
@@ -137,6 +140,13 @@ MAX_SPEED = 600.0
 # (absorbs off-by-one/two without flagging earlier shots of the same burst).
 HIT_WINDOW = 3
 MAX_DUEL_DIST = 10000.0
+# Eye / head heights (units, above the pawn origin). Crouching lowers both
+# by ~18 units; we scale linearly with duck_amount (0..1).
+EYE_STAND, HEAD_STAND, DUCK_DROP = 64.0, 62.0, 18.0
+# Approximate horizontal size of the head hitbox (units). Used to express
+# the aim error in "head widths": 5° at 200 units is a miss, 5° at 2000
+# units can still be a headshot.
+HEAD_WIDTH = 18.0
 # Below these counts a rate is noise: the UI shows a small-sample hint
 # instead of pretending the number means something.
 MIN_N_SHOTS = 10
@@ -174,7 +184,11 @@ def rank_in_lobby(
     None when the player or the column is not there or nothing to compare.
     """
 
-    if summary is None or col not in getattr(summary, "columns", []) or not len(summary):
+    if (
+        summary is None
+        or col not in getattr(summary, "columns", [])
+        or not len(summary)
+    ):
         return None
     vals = summary[["sid", col]].dropna()
     if sid not in set(vals["sid"]) or len(vals) < 2:
@@ -242,7 +256,9 @@ def round_bounds(n_rounds: int, preset: str) -> tuple[int, int]:
 
 def pistol_rounds(n_rounds: int) -> set[int]:
     """First round of each half incl. overtime halves (MR12: 1, 13, 25, ...)."""
-    return {r for r in range(1, max(int(n_rounds), 1) + 1) if (r - 1) % ROUNDS_PER_HALF == 0}
+    return {
+        r for r in range(1, max(int(n_rounds), 1) + 1) if (r - 1) % ROUNDS_PER_HALF == 0
+    }
 
 
 def apply_filters(
@@ -309,9 +325,7 @@ def apply_filters(
         if f.results is not None and "result" in out.columns and len(out):
             out = out[out["result"].isin(f.results)]
         if f.dist is not None and len(out):
-            dcol = next(
-                (c for c in ("dist", "distance") if c in out.columns), None
-            )
+            dcol = next((c for c in ("dist", "distance") if c in out.columns), None)
             if dcol is not None:
                 d = pd.to_numeric(out[dcol], errors="coerce")
                 lo, hi = f.dist
@@ -536,7 +550,11 @@ def _norm_alive(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _speed_from_positions(
-    d: pd.DataFrame, dt: pd.Series, dx: pd.Series, dy: pd.Series, tickrate: int = TICKRATE
+    d: pd.DataFrame,
+    dt: pd.Series,
+    dx: pd.Series,
+    dy: pd.Series,
+    tickrate: int = TICKRATE,
 ) -> pd.Series:
     """Horizontal speed (u/s) = |dpos| / dt_ticks * tickrate, NaN on garbage."""
     v = np.hypot(dx, dy) / dt * tickrate
@@ -594,19 +612,71 @@ def _timeline_speed(df: pd.DataFrame, tickrate: int = TICKRATE) -> pd.DataFrame:
     return d
 
 
+def _counter_strafe_tap(rt, rp) -> bool:
+    """
+    True when every held movement key (W/A/S/D) at the shot tick - or at
+    the tick before - pushed AGAINST the player's movement over that tick:
+    an active counter-strafe tap, not just releasing keys. False when
+    button data is missing, the player barely moved (no direction to
+    oppose) or the held keys are mixed (still steering).
+    """
+
+    if rt is None or rp is None:
+        return False
+    try:
+        dx, dy = float(rt.X) - float(rp.X), float(rt.Y) - float(rp.Y)
+        yaw = float(rt.yaw)
+    except (TypeError, ValueError):
+        return False
+    if not np.isfinite(yaw):
+        return False
+    hyp = float(np.hypot(dx, dy))
+    if hyp < 0.5:  # barely moving: no direction to oppose
+        return False
+
+    def _keys_oppose(row) -> bool:
+        if row is None:
+            return False
+        held = [k for k in STRAFE_DIRS if bool(getattr(row, k, False))]
+        if not held:
+            return False
+        for k in held:
+            a = np.radians(yaw + STRAFE_DIRS[k])
+            if (np.cos(a) * dx + np.sin(a) * dy) / hyp >= -0.5:
+                return False  # this key does not oppose the motion
+        return True
+
+    return _keys_oppose(rt) or _keys_oppose(rp)
+
+
+def _duck_amount(r) -> float:
+    """Clamped 0..1 duck_amount of a ticks-table row (0 when unknown)."""
+    v = getattr(r, "duck_amount", np.nan)
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    if pd.isna(v):
+        return 0.0
+    return min(max(v, 0.0), 1.0)
+
+
 def angle_err(a, t) -> float:
     """
     Angle (deg) between player a's view direction and player t's head.
 
-    Approximate: eyes = Z+64, head = Z+62; crouching offsets are ignored.
-    If recoil punch angles are known for `a` they are ADDED to the view
-    (bullet direction ~= eye angles + aim punch), so `err` reflects where the
-    bullet could actually go, not just the pre-recoil crosshair.
+    Approximate heights: eyes = Z+64, head = Z+62; both drop by ~18u with
+    duck_amount when the parser provides it (crouch-aware). If recoil punch
+    angles are known for `a` they are ADDED to the view (bullet direction
+    ~= eye angles + aim punch), so `err` reflects where the bullet could
+    actually go, not just the pre-recoil crosshair.
     """
 
     if a is None or t is None:
         return float("nan")
-    d = np.array([t.X - a.X, t.Y - a.Y, (t.Z + 62.0) - (a.Z + 64.0)])
+    eye = a.Z + EYE_STAND - DUCK_DROP * _duck_amount(a)
+    head = t.Z + HEAD_STAND - DUCK_DROP * _duck_amount(t)
+    d = np.array([t.X - a.X, t.Y - a.Y, head - eye])
     n = np.linalg.norm(d)
     if n == 0:
         return float("nan")
@@ -617,6 +687,21 @@ def angle_err(a, t) -> float:
     p, y = np.radians(a.pitch + pp), np.radians(a.yaw + py)
     v = np.array([np.cos(p) * np.cos(y), np.cos(p) * np.sin(y), -np.sin(p)])
     return float(np.degrees(np.arccos(np.clip(v @ d / n, -1, 1))))
+
+
+def head_ang(dist) -> float | np.ndarray:
+    """
+    Angular size (deg) of the head (HEAD_WIDTH wide) at `dist` units.
+    Scalar in, scalar out; Series/array in, array out; NaN for dist <= 0.
+    """
+
+    d = np.asarray(dist, dtype=float)
+    scalar = d.ndim == 0
+    d = np.atleast_1d(d).copy()
+    out = np.full_like(d, np.nan)
+    ok = np.isfinite(d) & (d > 0)
+    out[ok] = np.degrees(2.0 * np.arctan((HEAD_WIDTH / 2.0) / d[ok]))
+    return float(out[0]) if scalar else out
 
 
 def _speed(r) -> float:
@@ -669,7 +754,8 @@ def decompressed_demo(path: str) -> str:
         raise ValueError(f"Cannot read demo file: {p}") from e
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in stem)[:80]
     target = os.path.join(
-        tempfile.gettempdir(), f"cs2_aimaudit_{safe}_{st.st_size}_{int(st.st_mtime)}.dem"
+        tempfile.gettempdir(),
+        f"cs2_aimaudit_{safe}_{st.st_size}_{int(st.st_mtime)}.dem",
     )
     if os.path.exists(target) and os.path.getsize(target) > 0:
         return target  # cached from an earlier run
@@ -689,7 +775,9 @@ def decompressed_demo(path: str) -> str:
         with zipfile.ZipFile(p) as z:
             members = sorted(n for n in z.namelist() if n.lower().endswith(".dem"))
             if not members:
-                raise ValueError(f"No .dem file inside the archive: {os.path.basename(p)}")
+                raise ValueError(
+                    f"No .dem file inside the archive: {os.path.basename(p)}"
+                )
             with z.open(members[0]) as src, open(tmp, "wb") as dst:
                 shutil.copyfileobj(src, dst)
     if not os.path.exists(tmp) or os.path.getsize(tmp) == 0:
@@ -967,7 +1055,13 @@ def load_demo(path: str, progress=None) -> Demo:
     say("ticks", n=len(fires))
     td = None
     last_err: Exception | None = None
-    for props in (POS + PUNCH_PROPS + ALIVE_PROPS, POS + ALIVE_PROPS, POS):
+    for props in (
+        POS + BTN_NAMED + ["buttons"] + PUNCH_PROPS + DUCK_PROPS + ALIVE_PROPS,
+        POS + PUNCH_PROPS + DUCK_PROPS + ALIVE_PROPS,
+        POS + PUNCH_PROPS + ALIVE_PROPS,
+        POS + ALIVE_PROPS,
+        POS,
+    ):
         try:
             td = p.parse_ticks(props, ticks=ticks_list)
             break
@@ -982,6 +1076,7 @@ def load_demo(path: str, progress=None) -> Demo:
         name_to_sid,
     )
     td = td.drop_duplicates(["tick", "steamid"]).reset_index(drop=True)
+    td = _decode_buttons(td)
     td = _norm_alive(td)
     td = _extract_punch(td)
     tickrate = tickrate_from_header(header)
@@ -1117,10 +1212,53 @@ def shots_table(demo: Demo) -> pd.DataFrame:
         columns={"steamid": "sid"}
     )
     out = s.merge(t, on=["tick", "sid"], how="left").reset_index(drop=True)
+    # speed on the tick BEFORE the shot (stop detection: 'stopped' = crossed
+    # under the threshold exactly on the shot tick)
+    prev = demo.ticks[["tick", "steamid", "speed"]].copy()
+    prev["tick"] = prev["tick"] + 1
+    out = out.merge(
+        prev.rename(columns={"steamid": "sid", "speed": "speed_prev"}),
+        on=["tick", "sid"],
+        how="left",
+    )
+    rows = demo.rows
+    out["counter_strafe"] = [
+        _counter_strafe_tap(rows.get((int(t), s)), rows.get((int(t) - 1, s)))
+        for t, s in zip(out["tick"], out["sid"])
+    ]
     out["dist"] = _nearest_enemy_dist(demo, out)
     out["hit"] = _match_hits(out, demo.hurts)
-    out["side"] = [demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"])]
+    out["side"] = [
+        demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"])
+    ]
     out["weapon_class"] = out["weapon"].map(weapon_class)
+    return out
+
+
+def add_stop_quality(shots: pd.DataFrame, thr: float) -> pd.DataFrame:
+    """
+    Adds `stop`: what the player's movement did at the shot tick.
+
+    'stopped'  - speed crossed under `thr` exactly on this tick (the
+                 counter-strafe moment: prev tick above, this tick below),
+    'standing' - already slow at this tick (and the previous one),
+    'moving'   - still fast at the shot,
+    ''         - speed unknown.
+    """
+
+    out = shots.copy()
+    sp = out["speed"] if "speed" in out.columns else pd.Series(np.nan, index=out.index)
+    spp = (
+        out["speed_prev"]
+        if "speed_prev" in out.columns
+        else pd.Series(np.nan, index=out.index)
+    )
+    stop = pd.Series("", index=out.index, dtype=object)
+    stop[sp.notna() & (sp > thr)] = "moving"
+    slow_now = sp.notna() & (sp <= thr)
+    stop[slow_now & (spp > thr)] = "stopped"
+    stop[slow_now & ~(spp > thr)] = "standing"  # incl. unknown prev: slow now
+    out["stop"] = stop
     return out
 
 
@@ -1170,6 +1308,31 @@ def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
         kw, vw = in_win(k), in_win(v)
         kf = int(kw.min()) if len(kw) else None
         vf = int(vw.min()) if len(vw) else None
+
+        def _duel_dist(r, fa, fb, f_tick) -> float:
+            """Distance for head-size maths: the game value, else positions."""
+            d = getattr(r, "distance", np.nan)
+            if pd.notna(d) and d > 0:
+                return float(d)
+            a, b = rows.get((f_tick, fa)), rows.get((f_tick, fb))
+            if a is not None and b is not None:
+                return float(
+                    np.sqrt((a.X - b.X) ** 2 + (a.Y - b.Y) ** 2 + (a.Z - b.Z) ** 2)
+                )
+            return float("nan")
+
+        k_err = (
+            angle_err(rows.get((kf, k)), rows.get((kf, v)))
+            if kf is not None
+            else np.nan
+        )
+        v_err = (
+            angle_err(rows.get((vf, v)), rows.get((vf, k)))
+            if vf is not None
+            else np.nan
+        )
+        k_ang = head_ang(_duel_dist(r, k, v, kf))
+        v_ang = head_ang(_duel_dist(r, v, k, vf))
         if kf is None and vf is None:
             first = "none"
         elif vf is None or (kf is not None and kf < vf):
@@ -1211,15 +1374,25 @@ def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
                 "duration_s": round((t - start) / demo.tickrate, 2),
                 "killer_speed": _speed(rows.get((kf, k))) if kf is not None else np.nan,
                 "victim_speed": _speed(rows.get((vf, v))) if vf is not None else np.nan,
-                "killer_err": (
-                    angle_err(rows.get((kf, k)), rows.get((kf, v)))
-                    if kf is not None
+                "killer_err": k_err,
+                "victim_err": v_err,
+                "killer_err_hw": (
+                    float(k_err / k_ang)
+                    if np.isfinite(k_err) and np.isfinite(k_ang) and k_ang > 0
                     else np.nan
                 ),
-                "victim_err": (
-                    angle_err(rows.get((vf, v)), rows.get((vf, k)))
-                    if vf is not None
+                "victim_err_hw": (
+                    float(v_err / v_ang)
+                    if np.isfinite(v_err) and np.isfinite(v_ang) and v_ang > 0
                     else np.nan
+                ),
+                # crosshair inside the head box (within half a head width of
+                # its center) at the moment of the first shot
+                "killer_would_head": bool(
+                    np.isfinite(k_err) and np.isfinite(k_ang) and k_err <= k_ang / 2
+                ),
+                "victim_would_head": bool(
+                    np.isfinite(v_err) and np.isfinite(v_ang) and v_err <= v_ang / 2
                 ),
             }
         )
@@ -1263,6 +1436,10 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
                     "my_err": df[f"{mine}_err"],
                     "opp_speed": df[f"{opp}_speed"],
                     "opp_err": df[f"{opp}_err"],
+                    "my_err_hw": df[f"{mine}_err_hw"],
+                    "opp_err_hw": df[f"{opp}_err_hw"],
+                    "my_would_head": df[f"{mine}_would_head"],
+                    "opp_would_head": df[f"{opp}_would_head"],
                     "my_first_tick": df[f"{mine}_first_tick"],
                     "noscope": df["noscope"],
                     "thrusmoke": df["thrusmoke"],
@@ -1381,7 +1558,9 @@ def weapon_stats(
     return out.sort_values("shots", ascending=False).round(1).reset_index()
 
 
-def hitgroup_counts(demo: Demo, me: str, hurts: pd.DataFrame | None = None) -> pd.Series:
+def hitgroup_counts(
+    demo: Demo, me: str, hurts: pd.DataFrame | None = None
+) -> pd.Series:
     hi = _hurts_of(demo, me, hurts)
     if not len(hi) or "hitgroup" not in hi.columns:
         return pd.Series(dtype="int64")
