@@ -169,8 +169,10 @@ with st.expander(t("path_expander")):
         t("path_label"), placeholder=t("path_ph"), key="demo_path", help=t("path_help")
     )
 
-# Explorer's "Copy as path" wraps the path in quotes; also accept ~ and %VARS%
-path_in = str(st.session_state.get("demo_path", "")).strip().strip("\"'").strip()
+# Windows "Copy as path" adds quotes, terminals leave ~ / %VAR% / single
+# quotes behind - core.normalize_input_path cleans all that up before the
+# os.path.isfile check, otherwise the app says "File not found".
+path_in = core.normalize_input_path(st.session_state.get("demo_path", ""))
 if path_in:
     path_in = os.path.expandvars(os.path.expanduser(path_in))
 if path_in:

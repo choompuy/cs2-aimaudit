@@ -10,6 +10,7 @@ import bz2
 import gzip
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -731,26 +732,44 @@ def _zstandard_module():
 
 def _unpack(ext: str, p: str, tmp: str) -> None:
     """Stream-decompress archive `p` into file `tmp` (may raise on corrupt input)."""
-    if ext == ".bz2":
-        with bz2.open(p, "rb") as src, open(tmp, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-    elif ext == ".gz":
-        with gzip.open(p, "rb") as src, open(tmp, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-    elif ext == ".zst":
-        zstd = _zstandard_module()
-        with open(p, "rb") as src, open(tmp, "wb") as dst:
-            with zstd.ZstdDecompressor().stream_reader(src) as rdr:
-                shutil.copyfileobj(rdr, dst)
-    else:  # .zip
-        with zipfile.ZipFile(p) as z:
-            members = sorted(n for n in z.namelist() if n.lower().endswith(".dem"))
-            if not members:
-                raise ValueError(
-                    f"No .dem file inside the archive: {os.path.basename(p)}"
-                )
-            with z.open(members[0]) as src, open(tmp, "wb") as dst:
+    try:
+        if ext == ".bz2":
+            with bz2.open(p, "rb") as src, open(tmp, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+        elif ext == ".gz":
+            with gzip.open(p, "rb") as src, open(tmp, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        elif ext == ".zst":
+            zstd = _zstandard_module()
+            with open(p, "rb") as src, open(tmp, "wb") as dst:
+                with zstd.ZstdDecompressor().stream_reader(src) as rdr:
+                    shutil.copyfileobj(rdr, dst)
+        else:  # .zip
+            with zipfile.ZipFile(p) as z:
+                members = sorted(
+                    n for n in z.namelist() if n.lower().endswith(".dem")
+                )
+                if not members:
+                    raise ValueError(
+                        f"No .dem file inside the archive: {os.path.basename(p)}"
+                    )
+                with z.open(members[0]) as src, open(tmp, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    except ValueError:
+        # one of our own clear messages - just drop the partial .part
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    except Exception as e:  # noqa: BLE001 - broken archive, any library error
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise ValueError(
+            f"Cannot decompress {os.path.basename(p)}: {type(e).__name__}: {e}"
+        ) from e
 
 
 def decompressed_demo(path: str) -> str:
@@ -764,6 +783,12 @@ def decompressed_demo(path: str) -> str:
     the system temp dir under a name derived from source path + size +
     mtime, so re-opening the same archive does not decompress again.
     Anything else is returned unchanged.
+
+    A truncated or corrupt archive raises ValueError (whatever the
+    decompressor throws - EOFError, BadZipFile, ZstdError, OSError...):
+    the UI only catches ValueError, and a raw traceback is not a friendly
+    message. A half-written .part is never left behind either - it can be
+    as large as the unpacked demo and nothing prunes the temp dir.
     """
 
     p = os.path.realpath(path)
@@ -809,6 +834,34 @@ def decompressed_demo(path: str) -> str:
         raise ValueError(f"Decompressed demo is empty: {os.path.basename(p)}")
     os.replace(tmp, target)  # atomic: no half-written cache on crash
     return target
+
+
+def normalize_input_path(raw) -> str:
+    """
+    Clean up a path typed or pasted into the demo path box.
+
+    Windows Explorer's 'Copy as path' wraps the path in double quotes, a
+    shell drag-and-drop leaves single quotes, and ~ / %USERPROFILE% show
+    up when a path is copied out of a terminal. os.path.isfile() on a
+    quoted path is False (the UI then says 'File not found'), so quote
+    characters and spaces are stripped first; after that ~ and $VAR /
+    %VAR% are expanded.
+    """
+    if raw is None:
+        return ""
+    s = str(raw).strip()
+    s = s.strip("\"'").strip()
+    if not s:
+        return s
+    if s.startswith("~"):
+        s = os.path.expanduser(s)
+    if "%" in s:
+        # os.path.expandvars ignores %VAR% on non-Windows - do it by hand
+        def _env(m):
+            return os.environ.get(m.group(1), m.group(0))
+
+        s = re.sub(r"%([A-Za-z_][A-Za-z0-9_]*)%", _env, s)
+    return os.path.expandvars(s)
 
 
 # ------------------------------------------------------------ app state

@@ -648,6 +648,109 @@ try:
 except ImportError:
     print("  skip zst (zstandard not installed)")
 
+# broken archives: a truncated or corrupt file can make the decompressor
+# throw anything (EOFError, BadZipFile, ZstdError, OSError). The UI only
+# catches ValueError, so everything must be converted - and the half-
+# written .part must be deleted, not left to eat disk space in temp.
+print("== decompressed_demo: broken archives ==")
+
+
+def _parts_in_tmp():
+    d = tempfile.gettempdir()
+    return sorted(
+        f for f in os.listdir(d)
+        if f.startswith("cs2_aimaudit_") and f.endswith(".part")
+    )
+
+
+def _expect_value_error(p):
+    nm = os.path.basename(p)
+    before = _parts_in_tmp()
+    try:
+        core.decompressed_demo(p)
+        check(f"{nm} -> ValueError", False, "no exception at all")
+    except ValueError:
+        check(f"{nm} -> ValueError", True)
+    except Exception as e:  # noqa: BLE001
+        check(f"{nm} -> ValueError", False, f"escaped as {type(e).__name__}: {e}")
+    check(f"{nm} -> no .part left", _parts_in_tmp() == before, _parts_in_tmp())
+
+
+bz_trunc = os.path.join(tdir, "truncated.dem.bz2")
+_blob = bz2.compress(payload)
+with open(bz_trunc, "wb") as f:
+    f.write(_blob[: len(_blob) // 2])
+gz_trunc = os.path.join(tdir, "truncated.dem.gz")
+_blob = gzip.compress(payload)
+with open(gz_trunc, "wb") as f:
+    f.write(_blob[: len(_blob) // 2])
+zip_fake = os.path.join(tdir, "fake.zip")
+with open(zip_fake, "wb") as f:
+    f.write(b"this is not a zip file at all, just garbage bytes")
+for p in (bz_trunc, gz_trunc, zip_fake):
+    _expect_value_error(p)
+
+try:
+    import zstandard
+
+    zs_garbage = os.path.join(tdir, "garbage.dem.zst")
+    with open(zs_garbage, "wb") as f:
+        f.write(b"\x28\xb5\x2f\xfd not really a zstd frame")
+    zs_trunc = os.path.join(tdir, "truncated.dem.zst")
+    _blob = zstandard.compress(payload)
+    with open(zs_trunc, "wb") as f:
+        f.write(_blob[: len(_blob) // 2])
+    for p in (zs_garbage, zs_trunc):
+        _expect_value_error(p)
+except ImportError:
+    print("  skip broken zst (zstandard not installed)")
+
+# ------------------------------------------------- input path normalization
+print("== normalize_input_path ==")
+check("plain path unchanged", core.normalize_input_path("/a/b/match.dem") == "/a/b/match.dem")
+check("None -> empty", core.normalize_input_path(None) == "")
+check("empty -> empty", core.normalize_input_path("") == "")
+check("whitespace stripped", core.normalize_input_path("  /a/b.dem \n") == "/a/b.dem")
+check(
+    "double quotes stripped (Explorer 'Copy as path')",
+    core.normalize_input_path('"/a/b/match.dem"') == "/a/b/match.dem",
+)
+check(
+    "single quotes stripped (shell drop)",
+    core.normalize_input_path("'/a/b/match.dem'") == "/a/b/match.dem",
+)
+check(
+    "nested quotes stripped",
+    core.normalize_input_path("\"'/a/b.dem'\"") == "/a/b.dem",
+)
+check(
+    "only leading quote stripped",
+    core.normalize_input_path('"/a/b.dem') == "/a/b.dem",
+)
+check(
+    "~ expands",
+    core.normalize_input_path("~/x/match.dem")
+    == os.path.join(os.path.expanduser("~"), "x", "match.dem"),
+)
+os.environ["CS2AA_TEST_DIR"] = "/env/demo/dir"
+check(
+    "%VAR% expands (Windows style, on any OS)",
+    core.normalize_input_path("%CS2AA_TEST_DIR%/x.dem") == "/env/demo/dir/x.dem",
+)
+check(
+    "unknown %VAR% kept as is",
+    core.normalize_input_path("%CS2AA_NOPE%/x.dem") == "%CS2AA_NOPE%/x.dem",
+)
+with tempfile.TemporaryDirectory(prefix="cs2aa_path_") as td:
+    fp = os.path.join(td, "match.dem")
+    with open(fp, "wb") as f:
+        f.write(b"x")
+    check(
+        "quoted real file passes isfile()",
+        os.path.isfile(core.normalize_input_path(f'"{fp}"')),
+    )
+del os.environ["CS2AA_TEST_DIR"]
+
 # ------------------------------------------------------------- app state
 print("== app state (recent demos) ==")
 with tempfile.TemporaryDirectory(prefix="cs2aa_state_") as td:
