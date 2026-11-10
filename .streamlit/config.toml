@@ -5,6 +5,12 @@ backgroundColor = "#0e1117"
 secondaryBackgroundColor = "#171c26"
 textColor = "#e8eaed"
 
+[browser]
+# The README promises "no telemetry": Streamlit sends anonymous usage
+# statistics by default, so turn it off explicitly (this also suppresses
+# the first-run "welcome / email" prompt in the terminal).
+gatherUsageStats = false
+
 [server]
 # CS2 match demos can be large; the default upload limit is 1024 MB
 maxUploadSize = 1024

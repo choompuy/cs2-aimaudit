@@ -105,6 +105,7 @@ for lang in ("en", "ru"):
     t("tl_no_buttons", keys="k")
     t("tl_buttons", keys="k")
     t("tl_first", speed="1", err="1")
+    t("err_path_missing", path="x")
 bad("t() smoke formatting", True)
 
 # ---- 6. columns produced by core vs consumed by app
@@ -166,6 +167,20 @@ for fn, cols in {
     # crude: every column name must appear somewhere in core.py source
     missing = [c for c in cols if c not in src]
     bad(f"{fn} columns present in core source", not missing, missing)
+
+# ---- 7. privacy: Streamlit usage statistics must stay disabled
+# The README promises "no telemetry"; without this setting Streamlit phones
+# home with anonymous usage stats.
+import configparser  # noqa: E402
+
+cfg = configparser.ConfigParser()
+cfg.read(ROOT / ".streamlit" / "config.toml")
+bad(
+    "[browser] gatherUsageStats = false",
+    cfg.has_option("browser", "gatherUsageStats")
+    and cfg.getboolean("browser", "gatherUsageStats") is False,
+    "Streamlit telemetry is NOT disabled in .streamlit/config.toml",
+)
 
 print(f"\n{'FAILURES: ' + str(FAIL) if FAIL else 'ALL OK'}")
 sys.exit(1 if FAIL else 0)

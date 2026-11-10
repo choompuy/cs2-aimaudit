@@ -6,9 +6,14 @@ All column names / values here are language-neutral; the UI translates them.
 from __future__ import annotations
 
 import bisect
+import bz2
+import gzip
 import json
 import os
+import shutil
 import sys
+import tempfile
+import zipfile
 from dataclasses import dataclass, field
 from functools import cached_property
 
@@ -419,6 +424,115 @@ def _speed(r) -> float:
 
 
 # -------------------------------------------------------------------- load
+COMPRESSED_EXTS = {".bz2", ".gz", ".zst", ".zip"}
+
+
+def _zstandard_module():
+    try:
+        import zstandard  # optional dependency, only needed for .zst
+    except ImportError as e:
+        raise ValueError(
+            "The .zst demo needs the 'zstandard' package: pip install zstandard"
+        ) from e
+    return zstandard
+
+
+def decompressed_demo(path: str) -> str:
+    """
+    Path to a plain .dem for `path`, decompressing transparently.
+
+    Demos are often delivered compressed: Valve serves .dem.bz2, FACEIT
+    .dem.gz, tournaments .zip. Supported: .bz2 / .gz / .zip (stdlib) and
+    .zst (needs the `zstandard` package). Inside a .zip the first *.dem
+    member (alphabetically) is used. The decompressed copy is cached in
+    the system temp dir under a name derived from source path + size +
+    mtime, so re-opening the same archive does not decompress again.
+    Anything else is returned unchanged.
+    """
+
+    p = os.path.realpath(path)
+    ext = os.path.splitext(p)[1].lower()
+    if ext not in COMPRESSED_EXTS:
+        return p
+    stem = os.path.basename(p)
+    stem = stem[: -len(ext)] if stem.lower().endswith(ext) else stem
+    try:
+        st = os.stat(p)
+    except OSError as e:
+        raise ValueError(f"Cannot read demo file: {p}") from e
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in stem)[:80]
+    target = os.path.join(
+        tempfile.gettempdir(), f"cs2_aimaudit_{safe}_{st.st_size}_{int(st.st_mtime)}.dem"
+    )
+    if os.path.exists(target) and os.path.getsize(target) > 0:
+        return target  # cached from an earlier run
+    tmp = target + ".part"
+    if ext == ".bz2":
+        with bz2.open(p, "rb") as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    elif ext == ".gz":
+        with gzip.open(p, "rb") as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    elif ext == ".zst":
+        zstd = _zstandard_module()
+        with open(p, "rb") as src, open(tmp, "wb") as dst:
+            with zstd.ZstdDecompressor().stream_reader(src) as rdr:
+                shutil.copyfileobj(rdr, dst)
+    else:  # .zip
+        with zipfile.ZipFile(p) as z:
+            members = sorted(n for n in z.namelist() if n.lower().endswith(".dem"))
+            if not members:
+                raise ValueError(f"No .dem file inside the archive: {os.path.basename(p)}")
+            with z.open(members[0]) as src, open(tmp, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+    if not os.path.exists(tmp) or os.path.getsize(tmp) == 0:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise ValueError(f"Decompressed demo is empty: {os.path.basename(p)}")
+    os.replace(tmp, target)  # atomic: no half-written cache on crash
+    return target
+
+
+# ------------------------------------------------------------ app state
+# Small local state next to nothing else: recent demo paths and the last
+# selected player. Everything stays on this machine; if the file is not
+# writable the app simply does not remember anything.
+STATE_PATH = os.path.join(os.path.expanduser("~"), ".cs2-aimaudit", "state.json")
+RECENT_MAX = 10
+
+
+def load_state() -> dict:
+    """Load the local state file; {} when missing or unreadable."""
+    try:
+        with open(STATE_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(d: dict) -> None:
+    """Atomically save the state file; silent when the home dir is read-only."""
+    try:
+        os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+        tmp = STATE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, STATE_PATH)
+    except OSError:
+        pass
+
+
+def remember_demo(path: str, state: dict) -> dict:
+    """Move `path` to the front of state['recent_demos'] (capped at RECENT_MAX)."""
+    rec = [p for p in state.get("recent_demos", []) if isinstance(p, str) and p != path]
+    rec.insert(0, path)
+    state["recent_demos"] = rec[:RECENT_MAX]
+    return state
+
+
 @dataclass
 class Demo:
     path: str

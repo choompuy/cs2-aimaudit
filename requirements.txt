@@ -4,3 +4,5 @@ demoparser2>=0.42.1
 pandas>=2.0
 numpy>=1.26
 plotly>=5.24
+# transparently unpacks .dem.zst demos (.bz2/.gz/.zip are stdlib)
+zstandard>=0.22

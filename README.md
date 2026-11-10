@@ -38,13 +38,13 @@ Requires Python 3.10+ (tested on 3.12) and a CS2 match demo (`.dem`).
 ### Where to get a demo
 
 - **Premier / Competitive:** CS2 → Play → _Your Matches_ → download the demo. Demos are kept only for a limited time, so grab them soon after the match.
-- **FACEIT / ESEA:** the demo link on the match page (unzip first if it is compressed).
+- **FACEIT / ESEA:** the demo link on the match page. Compressed files (`.dem.bz2`, `.dem.gz`, `.zip`, `.dem.zst`) are unpacked by the app automatically.
 
 Then pick the file in the app.
 
 ## Privacy
 
-All parsing and analysis happen inside the app on your machine. CS2-AimAudit makes no network requests, collects no telemetry and does not upload your demos anywhere.
+All parsing and analysis happen inside the app on your machine. CS2-AimAudit makes no network requests, collects no telemetry and does not upload your demos anywhere. The bundled `.streamlit/config.toml` also disables Streamlit's own anonymous usage statistics (`gatherUsageStats = false`) — if you copy or replace that file, keep the setting.
 
 ## Reading the numbers
 

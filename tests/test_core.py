@@ -6,8 +6,13 @@ a lonely shot) and verifies every core metric without a real .dem file.
 Run from the repo root: python tests/test_core.py
 """
 
+import bz2
+import gzip
 import json
+import os
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -509,7 +514,89 @@ check(
 )
 check("named in missing list", set(core.BTN_NAMED).issubset(set(missing3)))
 
-# ------------------------------------------------------------- no_events
+# ------------------------------------------------- compressed demo unpacking
+print("== decompressed_demo ==")
+payload = b"FAKEDEMO-PAYLOAD-" * 256
+tdir = tempfile.mkdtemp(prefix="cs2aa_test_")
+
+
+def _read(p):
+    with open(p, "rb") as f:
+        return f.read()
+
+
+plain = os.path.join(tdir, "match.dem")
+with open(plain, "wb") as f:
+    f.write(payload)
+check("plain .dem returned as is", core.decompressed_demo(plain) == plain)
+
+bz = os.path.join(tdir, "valve_match.dem.bz2")
+with bz2.open(bz, "wb") as f:
+    f.write(payload)
+out = core.decompressed_demo(bz)
+check("bz2 unpacked", _read(out) == payload and out != bz)
+check("bz2 cache hit (same path, no re-unpack)", core.decompressed_demo(bz) == out)
+
+gz = os.path.join(tdir, "faceit_match.dem.gz")
+with gzip.open(gz, "wb") as f:
+    f.write(payload)
+check("gz unpacked", _read(core.decompressed_demo(gz)) == payload)
+
+zp = os.path.join(tdir, "match.zip")
+with zipfile.ZipFile(zp, "w") as z:
+    z.writestr("readme.txt", "ignore me")
+    z.writestr("map-de_dust2.dem", payload)
+check("zip unpacked (first .dem member)", _read(core.decompressed_demo(zp)) == payload)
+
+zp_bad = os.path.join(tdir, "no_dem.zip")
+with zipfile.ZipFile(zp_bad, "w") as z:
+    z.writestr("readme.txt", "no demo here")
+try:
+    core.decompressed_demo(zp_bad)
+    check("zip without .dem raises", False)
+except ValueError as e:
+    check("zip without .dem raises", "No .dem" in str(e))
+
+try:
+    import zstandard  # noqa: F401
+
+    zs = os.path.join(tdir, "match.dem.zst")
+    with open(zs, "wb") as f:
+        f.write(zstandard.compress(payload))
+    check("zst unpacked", _read(core.decompressed_demo(zs)) == payload)
+except ImportError:
+    print("  skip zst (zstandard not installed)")
+
+# ------------------------------------------------------------- app state
+print("== app state (recent demos) ==")
+with tempfile.TemporaryDirectory(prefix="cs2aa_state_") as td:
+    core.STATE_PATH = os.path.join(td, "state.json")
+    check("missing state file -> {}", core.load_state() == {})
+    st_ = core.remember_demo("/a/b.dem", {})
+    st_ = core.remember_demo("/c/d.dem", st_)
+    st_ = core.remember_demo("/a/b.dem", st_)  # dedupe + move to front
+    check("recent order + dedupe", st_["recent_demos"] == ["/a/b.dem", "/c/d.dem"], st_)
+    core.save_state(st_)
+    check("state round-trip", core.load_state() == st_)
+    st2 = {}
+    for i in range(15):
+        st2 = core.remember_demo(f"/x/{i}.dem", st2)
+    check(
+        "recent capped",
+        len(st2["recent_demos"]) == core.RECENT_MAX
+        and st2["recent_demos"][0] == "/x/14.dem",
+        st2["recent_demos"],
+    )
+    with open(core.STATE_PATH, "w", encoding="utf-8") as f:
+        f.write("{ not json")
+    check("corrupt state -> {}", core.load_state() == {})
+    core.STATE_PATH = os.path.join(td, "ro", "sub", "state.json")
+    os.chmod(td, 0o500)  # read-only parent: save must stay silent
+    core.save_state({"x": 1})
+    check("read-only home -> silent", True)
+    os.chmod(td, 0o700)
+
+# ------------------------------------------------------------ no_events
 print("== no player_hurt event at all ==")
 m8 = make_match()
 m8["events"]["player_hurt"] = pd.DataFrame()

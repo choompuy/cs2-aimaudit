@@ -14,8 +14,15 @@ STR = {
         "thr_help": "A shot counts as fired “on the move” if your speed was above this value. Rifles are most accurate when you are almost standing still. This is a tunable rule of thumb, not an official number.",
         "win_label": "Duel window before a kill (s)",
         "win_help": "Shots fired by either player within this many seconds before a kill are treated as part of that duel.",
-        "upload_label": "Demo file (.dem)",
-        "no_file": "Upload a demo to start. Not sure where to get one? Open the Guide tab after loading, or see the README.",
+        "upload_label": "Demo file (.dem, also .bz2 / .gz / .zip / .zst — unpacked automatically)",
+        "no_file": "Upload a demo to start — or open one by local path below. Not sure where to get one? Open the Guide tab after loading, or see the README.",
+        "path_expander": "Open by local path (faster for big demos)",
+        "recent_label": "Recent demos",
+        "recent_pick_hint": "choose…",
+        "path_label": "Path to the demo file",
+        "path_ph": "C:\\Users\\you\\matches\\match.dem.bz2",
+        "path_help": "Reads the file straight from disk — no browser upload copy of a 300 MB+ demo. Compressed archives (.bz2 / .gz / .zip / .zst) are unpacked automatically. The path takes priority over the uploaded file.",
+        "err_path_missing": "File not found: {path}",
         "loading": "Analyzing demo…",
         "loaded": "Demo loaded",
         "load_failed": "Could not parse this demo",
@@ -189,7 +196,7 @@ STR = {
         "guide": """
 ### How to get a demo
 - **Premier / Competitive:** CS2 → Play → *Your Matches* → download the demo. Demos are kept only for a limited time, so grab them soon after the match.
-- **FACEIT / ESEA:** use the demo link on the match page (unzip it first if it is compressed).
+- **FACEIT / ESEA:** use the demo link on the match page. Compressed files (`.dem.bz2`, `.dem.gz`, `.zip`, `.dem.zst`) are unpacked by the app automatically — no need to unzip first.
 - Pick the file in the box at the top of the page.
 
 ### How to read the numbers
@@ -218,8 +225,15 @@ STR = {
         "thr_help": "Выстрел считается «на ходу», если скорость была выше этого значения. Из винтовок точнее всего стрелять почти стоя. Это подбираемое правило, а не официальное число.",
         "win_label": "Окно дуэли до килла (с)",
         "win_help": "Выстрелы любого из двух игроков за столько секунд до килла считаются частью этой дуэли.",
-        "upload_label": "Файл демки (.dem)",
-        "no_file": "Загрузи демку, чтобы начать. Не знаешь, где её взять? Смотри вкладку «Гайд» после загрузки или README.",
+        "upload_label": "Файл демки (.dem, также .bz2 / .gz / .zip / .zst — распакуется автоматически)",
+        "no_file": "Загрузи демку, чтобы начать — или открой её по локальному пути ниже. Не знаешь, где её взять? Смотри вкладку «Гайд» после загрузки или README.",
+        "path_expander": "Открыть по локальному пути (быстрее для больших демок)",
+        "recent_label": "Недавние демки",
+        "recent_pick_hint": "выбрать…",
+        "path_label": "Путь к файлу демки",
+        "path_ph": "C:\\Users\\вы\\матчи\\match.dem.bz2",
+        "path_help": "Файл читается прямо с диска — без копирования демки на 300+ МБ через загрузку. Сжатые архивы (.bz2 / .gz / .zip / .zst) распаковываются автоматически. Путь имеет приоритет над загруженным файлом.",
+        "err_path_missing": "Файл не найден: {path}",
         "loading": "Анализируем демку…",
         "loaded": "Демка загружена",
         "load_failed": "Не удалось разобрать демку",
@@ -385,7 +399,7 @@ STR = {
         "guide": """
 ### Где взять демку
 - **Premier / Соревновательный:** CS2 → Играть → *Ваши матчи* → скачать демку. Демки хранятся ограниченное время, так что скачивай вскоре после матча.
-- **FACEIT / ESEA:** ссылка на демку на странице матча (при необходимости сначала распакуй архив).
+- **FACEIT / ESEA:** ссылка на демку на странице матча. Сжатые файлы (`.dem.bz2`, `.dem.gz`, `.zip`, `.dem.zst`) приложение распакует само — распаковывать заранее не нужно.
 - Выбери файл в поле вверху страницы.
 
 ### Как читать цифры

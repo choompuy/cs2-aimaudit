@@ -97,14 +97,55 @@ def get_timeline(path: str, mtime: float, me: str, tick: int, before_s: float):
 
 
 # ------------------------------------------------------------ file input
-up = st.file_uploader(t("upload_label"), type=["dem"], key="demo_file")
-if not up:
+state = core.load_state()
+recent = [
+    p
+    for p in state.get("recent_demos", [])
+    if isinstance(p, str) and os.path.exists(p)
+]
+
+up = st.file_uploader(
+    t("upload_label"), type=["dem", "bz2", "gz", "zst", "zip"], key="demo_file"
+)
+with st.expander(t("path_expander")):
+    if recent:
+
+        def _pick_recent():
+            v = st.session_state.get("recent_pick")
+            if v:
+                st.session_state["demo_path"] = v
+
+        st.selectbox(
+            t("recent_label"),
+            [""] + recent,
+            format_func=lambda v: t("recent_pick_hint") if not v else v,
+            key="recent_pick",
+            on_change=_pick_recent,
+        )
+    st.text_input(
+        t("path_label"), placeholder=t("path_ph"), key="demo_path", help=t("path_help")
+    )
+
+path_in = str(st.session_state.get("demo_path", "")).strip()
+if path_in:
+    if not os.path.isfile(path_in):
+        st.error(t("err_path_missing", path=path_in))
+        st.stop()
+    src = path_in  # read straight from disk, no upload copy
+elif up:
+    src = os.path.join(tempfile.gettempdir(), up.name)
+    if not os.path.exists(src) or os.path.getsize(src) != up.size:
+        with open(src, "wb") as f:
+            f.write(up.getbuffer())
+else:
     st.info(t("no_file"))
     st.stop()
-path = os.path.join(tempfile.gettempdir(), up.name)
-if not os.path.exists(path) or os.path.getsize(path) != up.size:
-    with open(path, "wb") as f:
-        f.write(up.getbuffer())
+try:
+    path = core.decompressed_demo(src)
+except ValueError as e:
+    st.error(t("load_failed"))
+    st.caption(str(e))
+    st.stop()
 mtime = os.path.getmtime(path)
 
 # ----------------------------------------------------------------- load
@@ -134,6 +175,12 @@ if demo.players.empty:
     st.error(t("err_no_events"))
     st.stop()
 
+# remember what opened fine (recent list stays local, see core.load_state)
+rec = state.get("recent_demos") or []
+if not rec or rec[0] != src:
+    core.remember_demo(src, state)
+    core.save_state(state)
+
 # -------------------------------------------------------------- metrics
 status.update(label=t("step_metrics"))
 shots = core.add_risk(core.shots_table(demo), thr, safe_dist, strict_dist)
@@ -157,12 +204,20 @@ team_of = dict(zip(demo.players["sid"], demo.players["team"]))
 plist = demo.players.assign(
     _n=demo.players["name"].astype(str).str.lower()
 ).sort_values(["team", "_n"])
+me_opts = plist["sid"].tolist()
+# preselect the remembered player (and drop a stale pick from another demo)
+if st.session_state.get("me") not in me_opts:
+    last = state.get("last_player")
+    st.session_state["me"] = last if last in me_opts else me_opts[0]
 me = st.selectbox(
     t("player"),
-    plist["sid"].tolist(),
+    me_opts,
     format_func=lambda s: f"{name_of.get(s, s)} ({team_of.get(s, '?')})",
     key="me",
 )
+if state.get("last_player") != me:
+    state["last_player"] = me
+    core.save_state(state)
 
 my_duels = core.duels_for(duels_all, me) if len(duels_all) else pd.DataFrame()
 status.update(label=t("loaded"), state="complete")
