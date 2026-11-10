@@ -34,5 +34,10 @@ if [ ! -f "$HOME/.streamlit/credentials.toml" ]; then
   printf '[general]\nemail = ""\n' > "$HOME/.streamlit/credentials.toml"
 fi
 
+# First Streamlit launch asks for an email and waits for Enter - the
+# terminal then looks frozen. An empty credentials.toml skips the prompt.
+mkdir -p "$HOME/.streamlit" 2>/dev/null
+[ -f "$HOME/.streamlit/credentials.toml" ] || : > "$HOME/.streamlit/credentials.toml" 2>/dev/null
+
 echo "[3/3] Starting CS2-AimAudit, a browser tab will open ..."
 python -m streamlit run app.py

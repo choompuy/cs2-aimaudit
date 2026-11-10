@@ -217,5 +217,29 @@ bad(
     "Streamlit telemetry is NOT disabled in .streamlit/config.toml",
 )
 
+# ---- 8. launchers: no first-run "Email:" prompt
+# Even with gatherUsageStats=false, Streamlit asks for an email on the very
+# first launch and waits for Enter - the launcher window then looks frozen.
+# An empty ~/.streamlit/credentials.toml skips the prompt, so both launchers
+# must create it before starting the app (and start.bat must stay CRLF,
+# see .gitattributes).
+bat = (ROOT / "start.bat").read_bytes()
+bad(
+    "start.bat creates credentials.toml",
+    b"credentials.toml" in bat and b"type nul" in bat,
+    "start.bat does not pre-create ~/.streamlit/credentials.toml",
+)
+bad(
+    "start.bat keeps CRLF line endings",
+    b"\r\n" in bat and bat.replace(b"\r\n", b"").find(b"\n") == -1,
+    "cmd.exe may mis-parse a .bat with mixed/LF endings",
+)
+sh = (ROOT / "start.sh").read_text(encoding="utf-8")
+bad(
+    "start.sh creates credentials.toml",
+    "credentials.toml" in sh and "$HOME/.streamlit" in sh,
+    "start.sh does not pre-create ~/.streamlit/credentials.toml",
+)
+
 print(f"\n{'FAILURES: ' + str(FAIL) if FAIL else 'ALL OK'}")
 sys.exit(1 if FAIL else 0)

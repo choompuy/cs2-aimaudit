@@ -49,6 +49,13 @@ if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
     >> "%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
 )
 
+rem First Streamlit launch asks for an email and waits for Enter -
+rem the window then looks frozen. An empty credentials.toml skips it.
+if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
+    if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit"
+    type nul > "%USERPROFILE%\.streamlit\credentials.toml" 2>nul
+)
+
 echo [3/3] Starting CS2-AimAudit, a browser tab will open ...
 python -m streamlit run app.py
 

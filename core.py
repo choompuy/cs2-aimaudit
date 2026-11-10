@@ -854,7 +854,9 @@ def normalize_input_path(raw) -> str:
     if not s:
         return s
     if s.startswith("~"):
-        s = os.path.expanduser(s)
+        # normpath: expanduser keeps '/' after the home dir on Windows,
+        # producing mixed separators (C:\Users\x/y.dem)
+        s = os.path.normpath(os.path.expanduser(s))
     if "%" in s:
         # os.path.expandvars ignores %VAR% on non-Windows - do it by hand
         def _env(m):
