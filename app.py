@@ -303,6 +303,48 @@ def _pct_col(label):
     )
 
 
+# One semantic palette everywhere, colour-blind-safe (Okabe–Ito based),
+# tuned for the dark theme. Roles, not decoration: accent = you (your
+# lines and bars), grey = context (misses, baselines, thresholds),
+# vermillion = bad/risky, blue = good. Meaning never rides on colour
+# alone: series keep their label, marker shape or dash too.
+PAL = {
+    "you": "#F5A623",
+    "ctx": "#8899AA",
+    "bad": "#D55E00",
+    "good": "#56B4E9",
+}
+# Order for traces without a semantic role (the timeline keys row); the
+# same list lives in .streamlit/config.toml (theme.chartCategoricalColors,
+# Streamlit >=1.46 and the repo floor is 1.49) so theme and code agree.
+CHART_COLORS = ["#F5A623", "#56B4E9", "#D55E00", "#8899AA", "#009E73", "#CC79A7"]
+
+
+def style_figure(
+    fig, height=380, margin=None, x_title=None, y_title=None, hover=None, legend_y=1.12
+):
+    """The one place every chart gets its look: height, margins,
+    font size, the categorical palette, a horizontal legend above the plot,
+    axis titles, and — where the caller passes one — a shared hovertemplate
+    so hover always shows units. Semantic per-trace colours come from PAL
+    at trace setup.
+    """
+    fig.update_layout(
+        height=height,
+        margin=margin or dict(t=10, r=10),
+        font=dict(size=13),
+        colorway=CHART_COLORS,
+        legend=dict(orientation="h", y=legend_y),
+    )
+    if x_title is not None:
+        fig.update_xaxes(title_text=x_title)
+    if y_title is not None:
+        fig.update_yaxes(title_text=y_title)
+    if hover is not None:
+        fig.update_traces(hovertemplate=hover)
+    return fig
+
+
 # ------------------------------------------------------ global filter bar
 # One bar under the player selector that every tab reads from: all metrics
 # below are computed on the FILTERED frames.
@@ -506,10 +548,10 @@ tab_ov, tab_sh, tab_du, tab_tl, tab_gd = st.tabs(
 )
 
 # -------------------------------------------------------------- overview
-# D4: one table for both teams (Team column + subtle team tint) instead of
-# two near-identical ones; ~8 columns by default, "All columns" adds the
-# detail metrics; the selected player's row is highlighted (★ + tint) and
-# clicking any row selects that player - same as the select box above.
+# One table for both teams (Team column + subtle team tint); ~8 columns
+# by default, "All columns" adds the detail metrics; the selected
+# player's row is highlighted (★ + tint) and clicking any row selects
+# that player - same as the select box above.
 with tab_ov:
     st.subheader(t("ov_title"))
     st.caption(t("ov_caption"))
@@ -684,21 +726,153 @@ with tab_sh:
     stops = sh_me[sh_me["stop"] == "stopped"] if len(sh_me) else sh_me
     cs_pct = stops["counter_strafe"].mean() * 100 if len(stops) else np.nan
 
-    c = st.columns(5)
-    c[0].metric(t("m_shots"), len(sh_me), help=t("m_shots_help"))
-    c[1].metric(t("m_hits"), hits_n, help=t("m_hits_help"))
-    c[2].metric(t("m_kd"), f"{kills} / {dths}", help=t("m_kd_help"))
-    c[3].metric(t("m_moving"), pct(moving_pct), help=t("m_moving_help"))
-    c[4].metric(t("m_risky"), pct(risky_pct), help=t("m_risky_help"))
-    c = st.columns(5)
-    c[0].metric(t("m_hs"), pct(hs_hits), help=t("m_hs_help"))
-    c[1].metric(t("m_dur"), num(dur, 2), help=t("m_dur_help"))
+    # "Top 3 things to work on" opens the tab: a severity chip
+    # (HIGH / MED / INFO), the sentence with its number, and the evidence
+    # behind a "show me" popover (the duels behind the number) or a
+    # pointer to the chart below. The engine emits at most three items:
+    # one movement verdict, the aim-error one, the first-shot one.
+    tips = []
+    if len(sh_me) >= 10:
+        if pd.notna(risky_pct) and risky_pct > 35:
+            tips.append((2, t("tip_risky", pct=risky_pct), "risk"))
+        elif pd.notna(moving_pct) and moving_pct > 35:
+            tips.append((1, t("tip_moving", pct=moving_pct), "speed"))
+        else:
+            tips.append(
+                (
+                    0,
+                    t("tip_moving_ok", pct=moving_pct if pd.notna(moving_pct) else 0),
+                    None,
+                )
+            )
+    if len(dd) >= 5 and pd.notna(err) and err > 5:
+        tips.append((1, t("tip_err", err=err), "err"))
+    dth_df = dd[dd["result"] == "death"] if len(dd) else dd
+    if len(dth_df) >= 3:
+        n_lost = int((dth_df["first"] == "opponent").sum())
+        if n_lost and n_lost / len(dth_df) >= 0.5:
+            tips.append((1, t("tip_lost_first", n=n_lost, m=len(dth_df)), "lost"))
+    if not tips:
+        tips.append((0, t("tip_few"), None))
+    tips.sort(key=lambda item: -item[0])
+
+    # severity chips: colour from the semantic palette + a text
+    # label, so meaning never rides on colour alone
+    sev_style = {
+        2: ("sev_high", PAL["bad"]),  # vermillion — bad / risky
+        1: ("sev_med", PAL["you"]),  # accent      — warning
+        0: ("sev_info", PAL["good"]),  # blue       — info / good
+    }
+    with st.container(border=True):
+        st.markdown(f"**{t('top3_title')}**")
+        st.caption(t("tips_caption"))
+        for sev, tip_text, ev in tips[:3]:
+            sev_key, sev_color = sev_style[sev]
+            chip, text_col, ev_col = st.columns([1, 6, 2])
+            chip.markdown(
+                f"<span style='color:{sev_color}; font-weight:600'>"
+                f"● {t(sev_key)}</span>",
+                unsafe_allow_html=True,
+            )
+            text_col.markdown(tip_text)
+            with ev_col:
+                if ev == "err":
+                    with st.popover(t("top3_show")):
+                        st.caption(t("top3_ev_err"))
+                        ev_df = dd[dd["my_err"].notna()].nlargest(5, "my_err")
+                        if len(ev_df):
+                            st.dataframe(
+                                pd.DataFrame(
+                                    {
+                                        t("col_round"): ev_df["round"].to_numpy(),
+                                        t("col_opponent"): [
+                                            name_of.get(s, s) for s in ev_df["opponent"]
+                                        ],
+                                        t("col_weapon"): ev_df["weapon"].to_numpy(),
+                                        t("col_err"): ev_df["my_err"].to_numpy(),
+                                        t("col_result"): [
+                                            fmt_result(v) for v in ev_df["result"]
+                                        ],
+                                    }
+                                ),
+                                column_config={
+                                    t("col_round"): st.column_config.NumberColumn(
+                                        t("col_round"), format="%d"
+                                    ),
+                                    t("col_err"): st.column_config.NumberColumn(
+                                        t("col_err"), format="%.1f°"
+                                    ),
+                                },
+                                hide_index=True,
+                                width="stretch",
+                            )
+                elif ev == "lost":
+                    with st.popover(t("top3_show")):
+                        st.caption(t("top3_ev_lost"))
+                        ev_df = dth_df[dth_df["first"] == "opponent"]
+                        if len(ev_df):
+                            st.dataframe(
+                                pd.DataFrame(
+                                    {
+                                        t("col_round"): ev_df["round"].to_numpy(),
+                                        t("col_opponent"): [
+                                            name_of.get(s, s) for s in ev_df["opponent"]
+                                        ],
+                                        t("col_weapon"): ev_df["weapon"].to_numpy(),
+                                        t("col_err"): ev_df["my_err"].to_numpy(),
+                                        t("col_duration"): ev_df["duration_s"].to_numpy(),
+                                    }
+                                ),
+                                column_config={
+                                    t("col_round"): st.column_config.NumberColumn(
+                                        t("col_round"), format="%d"
+                                    ),
+                                    t("col_err"): st.column_config.NumberColumn(
+                                        t("col_err"), format="%.1f°"
+                                    ),
+                                    t("col_duration"): st.column_config.NumberColumn(
+                                        t("col_duration"), format="%.2f s"
+                                    ),
+                                },
+                                hide_index=True,
+                                width="stretch",
+                            )
+                elif ev is not None:  # "risk" / "speed": chart is below
+                    st.caption(
+                        t(
+                            "top3_see_chart",
+                            chart=(t("risk_title") if ev == "risk" else t("speed_hist")),
+                        )
+                    )
+
+    # one headline tile per theme — Accuracy, Movement (risky, the
+    # distance-aware one), Crosshair, Duels — instead of anonymous rows;
+    # the rest are grouped under section headers behind "All metrics"
+    # (mirrors the tables' Basic/Full switch).
+    acc_pct = hits_n / len(sh_me) * 100 if len(sh_me) else np.nan
+    c = st.columns(4)
+    c[0].metric(t("m_acc"), pct(acc_pct), help=t("m_acc_help"))
+    c[1].metric(t("m_risky"), pct(risky_pct), help=t("m_risky_help"))
     c[2].metric(t("m_err"), num(err, 1), help=t("m_err_help"))
-    c[3].metric(t("m_speed"), num(spd, 0), help=t("m_speed_help"))
-    c[4].metric(t("m_first"), pct(first_pct), help=t("m_first_help"))
-    c = st.columns(5)
-    c[0].metric(t("m_onhead"), pct(onhead_pct), help=t("m_onhead_help"))
-    c[1].metric(t("m_cs"), pct(cs_pct), help=t("m_cs_help"), delta=None)
+    c[3].metric(t("m_first"), pct(first_pct), help=t("m_first_help"))
+    if st.toggle(t("all_metrics"), key="sh_all"):
+        st.markdown(f"**{t('sec_accuracy')}**")
+        c = st.columns(4)
+        c[0].metric(t("m_shots"), len(sh_me), help=t("m_shots_help"))
+        c[1].metric(t("m_hits"), hits_n, help=t("m_hits_help"))
+        c[2].metric(t("m_hs"), pct(hs_hits), help=t("m_hs_help"))
+        st.markdown(f"**{t('sec_movement')}**")
+        c = st.columns(4)
+        c[0].metric(t("m_moving"), pct(moving_pct), help=t("m_moving_help"))
+        c[1].metric(t("m_speed"), num(spd, 0), help=t("m_speed_help"))
+        c[2].metric(t("m_cs"), pct(cs_pct), help=t("m_cs_help"), delta=None)
+        st.markdown(f"**{t('sec_crosshair')}**")
+        c = st.columns(4)
+        c[0].metric(t("m_onhead"), pct(onhead_pct), help=t("m_onhead_help"))
+        st.markdown(f"**{t('sec_duels')}**")
+        c = st.columns(4)
+        c[0].metric(t("m_kd"), f"{kills} / {dths}", help=t("m_kd_help"))
+        c[1].metric(t("m_dur"), num(dur, 2), help=t("m_dur_help"))
 
     # honesty block: n, Wilson 95% CIs and lobby ranks for the rates above
     def _ci(k, n):
@@ -741,30 +915,6 @@ with tab_sh:
         if pd.notna(k_err) and k_err > 25:
             st.warning(t("warn_angles"))
 
-    st.subheader(t("tips"))
-    st.caption(t("tips_caption"))
-    tips = []
-    if len(sh_me) >= 10:
-        if pd.notna(risky_pct) and risky_pct > 35:
-            tips.append(t("tip_risky", pct=risky_pct))
-        elif pd.notna(moving_pct) and moving_pct > 35:
-            tips.append(t("tip_moving", pct=moving_pct))
-        else:
-            tips.append(
-                t("tip_moving_ok", pct=moving_pct if pd.notna(moving_pct) else 0)
-            )
-    if len(dd) >= 5 and pd.notna(err) and err > 5:
-        tips.append(t("tip_err", err=err))
-    dth_df = dd[dd["result"] == "death"] if len(dd) else dd
-    if len(dth_df) >= 3:
-        n_lost = int((dth_df["first"] == "opponent").sum())
-        if n_lost and n_lost / len(dth_df) >= 0.5:
-            tips.append(t("tip_lost_first", n=n_lost, m=len(dth_df)))
-    if not tips:
-        tips.append(t("tip_few"))
-    for tip in tips:
-        st.markdown(f"- {tip}")
-
     left, right = st.columns(2)
     with left:
         st.markdown(f"**{t('hit_where')}**")
@@ -773,23 +923,34 @@ with tab_sh:
         else:
             idx = [k for k in HG_ORDER if k in hg_me.index]
             idx += [k for k in hg_me.index if k not in HG_ORDER]
+            # your hits in the accent colour; style_figure keeps both
+            # small charts at the same height, axis style and hover format
             fig = go.Figure(
-                go.Bar(x=[t(f"hg_{k}") for k in idx], y=hg_me.reindex(idx).values)
+                go.Bar(
+                    x=[t(f"hg_{k}") for k in idx],
+                    y=hg_me.reindex(idx).values,
+                    marker_color=PAL["you"],
+                )
             )
-            fig.update_layout(height=280, margin=dict(t=10))
+            style_figure(
+                fig,
+                height=260,
+                y_title=t("col_hits"),
+                hover="%{x}: %{y}<extra></extra>",
+            )
             st.plotly_chart(fig, width="stretch")
     with right:
         st.markdown(f"**{t('speed_hist')}**")
         sv = sh_me["speed"].dropna() if len(sh_me) else pd.Series(dtype=float)
         if len(sv):
-            fig = go.Figure(go.Histogram(x=sv, nbinsx=40))
-            fig.add_vline(x=thr, line_dash="dot")
-            fig.update_layout(
-                height=280,
-                margin=dict(t=10),
-                xaxis_title=t("speed_x"),
-                yaxis_title=t("speed_y"),
+            # your speeds in the accent colour; the moving threshold
+            # is a grey context line — the danger boundary is the
+            # vermillion curve on the risk chart below, not this line
+            fig = go.Figure(
+                go.Histogram(x=sv, nbinsx=40, marker_color=PAL["you"])
             )
+            fig.add_vline(x=thr, line_dash="dot", line_color=PAL["ctx"])
+            style_figure(fig, height=260, x_title=t("speed_x"), y_title=t("speed_y"))
             st.plotly_chart(fig, width="stretch")
 
     st.markdown(f"**{t('risk_title')}**")
@@ -797,6 +958,10 @@ with tab_sh:
     if not len(known_r):
         st.info(t("risk_none"))
     else:
+        # grey = misses (context), blue = hits (good), vermillion = the
+        # "too fast for this distance" boundary; a plain red/green pair
+        # would be the classic colour-blind trap, and every series keeps
+        # its own label
         fig = go.Figure()
         miss = known_r[~known_r["hit"].astype(bool)]
         hit = known_r[known_r["hit"].astype(bool)]
@@ -807,7 +972,7 @@ with tab_sh:
                 mode="markers",
                 name=t("lbl_miss"),
                 opacity=0.45,
-                marker=dict(size=5, color="#8899aa"),
+                marker=dict(size=5, color=PAL["ctx"]),
             )
         )
         fig.add_trace(
@@ -817,7 +982,7 @@ with tab_sh:
                 mode="markers",
                 name=t("lbl_hit"),
                 opacity=0.8,
-                marker=dict(size=5, color="#e15759"),
+                marker=dict(size=5, color=PAL["good"]),
             )
         )
         dmax = float(known_r["dist"].max())
@@ -828,22 +993,22 @@ with tab_sh:
                 y=core.allowed_speed(xs, thr, safe_dist, strict_dist),
                 mode="lines",
                 name=t("risk_curve"),
-                line=dict(color="#4daf4a", dash="dash"),
+                line=dict(color=PAL["bad"], dash="dash"),
             )
         )
-        fig.update_layout(
+        style_figure(
+            fig,
             height=380,
-            margin=dict(t=10),
-            xaxis_title=t("risk_x"),
-            yaxis_title=t("risk_y"),
-            legend=dict(orientation="h", y=1.12),
+            x_title=t("risk_x"),
+            y_title=t("risk_y"),
+            hover="%{x:.0f} u<br>%{y:.0f} u/s<extra>%{fullData.name}</extra>",
         )
         st.plotly_chart(fig, width="stretch")
 
     st.markdown(f"**{t('weapons')}**")
     w = core.weapon_stats(demo, shots_f, me, thr, safe_dist, strict_dist, hurts=hurts_f)
     if len(w):
-        # D4: same table conventions as the other tables - units in the
+        # same table conventions as the other tables - units in the
         # numbers, progress bars for percentages, weapon name pinned.
         w_labels = {
             "weapon": t("col_weapon"),
@@ -881,7 +1046,7 @@ with tab_sh:
         st.dataframe(w, column_config=w_cfg, hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------- duels
-# D4: ~8 columns by default, "All columns" reveals the detail metrics and
+# ~8 columns by default, "All columns" reveals the detail metrics and
 # the technical tick column; numbers carry their units; the opponent name
 # stays pinned when the full table scrolls horizontally.
 with tab_du:
@@ -1120,9 +1285,28 @@ with tab_tl:
                 ),
                 subplot_titles=titles,
             )
-            fig.add_trace(go.Scatter(x=x, y=speed, mode="lines"), row=1, col=1)
-            fig.add_trace(go.Scatter(x=x, y=yaw, mode="lines"), row=2, col=1)
-            fig.add_trace(go.Scatter(x=x, y=pitch, mode="lines"), row=3, col=1)
+            # your signals in the accent colour ("you"), one per row
+            fig.add_trace(
+                go.Scatter(
+                    x=x, y=speed, mode="lines", line=dict(color=PAL["you"], width=2)
+                ),
+                row=1,
+                col=1,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=x, y=yaw, mode="lines", line=dict(color=PAL["you"], width=2)
+                ),
+                row=2,
+                col=1,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=x, y=pitch, mode="lines", line=dict(color=PAL["you"], width=2)
+                ),
+                row=3,
+                col=1,
+            )
             # shot / hit markers on the speed chart (within the shown window)
             w_lo, w_hi = int(tdf["tick"].min()), int(tdf["tick"].max())
             sp_by_tick = dict(zip(tdf["tick"].astype(int), tdf["speed"]))
@@ -1154,7 +1338,7 @@ with tab_tl:
                         y=[p[1] for p in hit_pts],
                         mode="markers",
                         name=t("tl_mark_hits"),
-                        marker=dict(symbol="star", size=11, color="#e15759"),
+                        marker=dict(symbol="star", size=11, color=PAL["good"]),
                     ),
                     row=1,
                     col=1,
@@ -1166,7 +1350,9 @@ with tab_tl:
                         y=[p[1] for p in fire_pts],
                         mode="markers",
                         name=t("tl_mark_shots"),
-                        marker=dict(symbol="triangle-up", size=9, color="#4daf4a"),
+                        marker=dict(
+                            symbol="triangle-up", size=9, color=PAL["ctx"]
+                        ),
                     ),
                     row=1,
                     col=1,
@@ -1196,19 +1382,24 @@ with tab_tl:
                     fig.add_vline(
                         x=0,
                         line_dash="dash",
+                        line_color=PAL["ctx"],
                         annotation_text=t("ch_event"),
                         row=1,
                         col=1,
                     )
                 else:
-                    fig.add_vline(x=0, line_dash="dash", row=row_i, col=1)
+                    fig.add_vline(
+                        x=0,
+                        line_dash="dash",
+                        line_color=PAL["ctx"],
+                        row=row_i,
+                        col=1,
+                    )
             fig.update_xaxes(title_text=t("ch_x"), row=rows_n, col=1)
-            fig.update_layout(
-                height=760,
-                showlegend=bool(fire_pts or hit_pts),
-                legend=dict(orientation="h", y=1.06),
-                margin=dict(t=60),
-            )
+            # shared look (palette, font, legend, margins); the height
+            # stays 760 — four stacked rows need it
+            style_figure(fig, height=760, margin=dict(t=60, r=10), legend_y=1.06)
+            fig.update_layout(showlegend=bool(fire_pts or hit_pts))
             st.plotly_chart(fig, width="stretch")
 
 # ---------------------------------------------------------------- guide

@@ -1781,7 +1781,7 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
         {"id": "missing_pos", "level": lvl(f, 0.001, 0.10), "n": n, "pct": f * 100}
     )
 
-    # 3b. shots with unknown speed (no t-1 tick / death / teleport right
+    # 4. shots with unknown speed (no t-1 tick / death / teleport right
     # before the shot). Better an honest NaN than a garbage number.
     n = int(shots["speed"].isna().sum()) if len(shots) else 0
     f = n / max(len(shots), 1)
@@ -1789,14 +1789,14 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
         {"id": "no_speed", "level": lvl(f, 0.05, 0.20), "n": n, "pct": f * 100}
     )
 
-    # 4. shots without a living enemy nearby (dist unknown)
+    # 5. shots without a living enemy nearby (dist unknown)
     n = int(shots["dist"].isna().sum()) if len(shots) else 0
     f = n / max(len(shots), 1)
     checks.append(
         {"id": "no_dist", "level": lvl(f, 0.05, 0.25), "n": n, "pct": f * 100}
     )
 
-    # 5. physically impossible speeds
+    # 6. physically impossible speeds
     n = (
         int((shots["speed"] > IMPOSSIBLE_SPEED).sum())
         if len(shots) and shots["speed"].notna().any()
@@ -1807,12 +1807,12 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
         {"id": "fast_speeds", "level": lvl(f, 0.0001, 0.02), "n": n, "pct": f * 100}
     )
 
-    # 6. shots without a round number -> alive-filter unreliable for them
+    # 7. shots without a round number -> alive-filter unreliable for them
     n = int((shots["round"] <= 0).sum()) if len(shots) else 0
     f = n / max(len(shots), 1)
     checks.append({"id": "round0", "level": lvl(f, 0.02, 0.20), "n": n, "pct": f * 100})
 
-    # 7. implausible duel distances
+    # 8. implausible duel distances
     if len(duels) and duels["distance"].notna().any():
         dist = pd.to_numeric(duels["distance"], errors="coerce")
         n = int((dist.isna() | (dist <= 0) | (dist > MAX_DUEL_DIST)).sum())
@@ -1823,7 +1823,7 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
     else:
         checks.append({"id": "duel_dist", "level": "ok", "n": 0, "pct": 0.0})
 
-    # 8. aim-error sanity (angle convention / offsets)
+    # 9. aim-error sanity (angle convention / offsets)
     if len(duels) and duels["killer_err"].notna().any():
         med = float(duels["killer_err"].median())
         n = int((duels["killer_err"] > 45).sum())
@@ -1851,7 +1851,7 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
             }
         )
 
-    # 9. unexpected hitgroup values
+    # 11. unexpected hitgroup values
     ok_vals = set(HITGROUPS.values()) | {"other"}
     bad = (
         set(demo.hurts["hitgroup"].dropna().unique()) - ok_vals

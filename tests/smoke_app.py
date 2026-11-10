@@ -495,7 +495,7 @@ def scenario_matrix():
 
 def scenario_tables():
     """
-    D4 (UX redesign): Basic/Full table switches, and the overview table
+    Basic/Full table switches, and the overview table
     must survive a row-selection state (the browser sends it on click;
     AppTest cannot fire on_select callbacks, but the state must not crash
     the app either).
