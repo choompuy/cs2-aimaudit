@@ -4,8 +4,10 @@ Analysis logic lives in core.py, translations in i18n.py. Only UI here.
 """
 
 import base64
+import functools
 import json
 import os
+import subprocess
 import tempfile
 
 import numpy as np
@@ -17,7 +19,29 @@ from plotly.subplots import make_subplots
 import core
 import i18n
 
-st.set_page_config(page_title="CS2-AimAudit", layout="wide")
+st.set_page_config(
+    page_title="CS2-AimAudit",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _app_version() -> str:
+    """Short commit of the running checkout for the footer ('dev' outside a repo)."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        return out.stdout.strip() or "dev"
+    except Exception:  # noqa: BLE001 - no git / no repo: footer still renders
+        return "dev"
+
 
 # ------------------------------------------------- shareable view in the URL
 # The whole view (language, player, filters) is packed into ?f=<b64 json>
@@ -83,12 +107,14 @@ with st.sidebar:
         format_func=lambda k: i18n.LANGS[k],
         key="lang",
     )
-    st.header(t("settings"))
-    thr = st.slider(t("thr_label"), 0, 250, 40, help=t("thr_help"), key="thr")
-    window_s = st.slider(
-        t("win_label"), 1.0, 6.0, 3.0, 0.5, help=t("win_help"), key="window_s"
-    )
-    with st.expander(t("adv")):
+    # thresholds are advanced tuning - one closed "Analysis settings"
+    # expander with a reset, instead of jargon sliders above the content;
+    # each slider's effect is one tooltip line (help=)
+    with st.expander(t("settings_box")):
+        thr = st.slider(t("thr_label"), 0, 250, 40, help=t("thr_help"), key="thr")
+        window_s = st.slider(
+            t("win_label"), 1.0, 6.0, 3.0, 0.5, help=t("win_help"), key="window_s"
+        )
         safe_dist = st.slider(
             t("safe_dist_label"),
             100,
@@ -107,6 +133,14 @@ with st.sidebar:
             help=t("strict_dist_help"),
             key="strict_dist",
         )
+
+        def _reset_settings():
+            st.session_state["thr"] = 40
+            st.session_state["window_s"] = 3.0
+            st.session_state["safe_dist"] = 500
+            st.session_state["strict_dist"] = 1500
+
+        st.button(t("reset_defaults"), on_click=_reset_settings, key="btn_reset_set")
     strict_dist = max(strict_dist, safe_dist + 100)
 
 st.title("🎯 CS2-AimAudit")
@@ -629,9 +663,7 @@ with tab_ov:
         "risky": _pct_col(ov_labels["risky"]),
         "first_shot": _pct_col(ov_labels["first_shot"]),
         "sides": st.column_config.TextColumn(ov_labels["sides"]),
-        "aim_err": st.column_config.NumberColumn(
-            ov_labels["aim_err"], format="%.1f°"
-        ),
+        "aim_err": st.column_config.NumberColumn(ov_labels["aim_err"], format="%.1f°"),
         "duration": st.column_config.NumberColumn(
             ov_labels["duration"], format="%.2f s"
         ),
@@ -820,7 +852,9 @@ with tab_sh:
                                         ],
                                         t("col_weapon"): ev_df["weapon"].to_numpy(),
                                         t("col_err"): ev_df["my_err"].to_numpy(),
-                                        t("col_duration"): ev_df["duration_s"].to_numpy(),
+                                        t("col_duration"): ev_df[
+                                            "duration_s"
+                                        ].to_numpy(),
                                     }
                                 ),
                                 column_config={
@@ -841,7 +875,9 @@ with tab_sh:
                     st.caption(
                         t(
                             "top3_see_chart",
-                            chart=(t("risk_title") if ev == "risk" else t("speed_hist")),
+                            chart=(
+                                t("risk_title") if ev == "risk" else t("speed_hist")
+                            ),
                         )
                     )
 
@@ -915,6 +951,7 @@ with tab_sh:
         if pd.notna(k_err) and k_err > 25:
             st.warning(t("warn_angles"))
 
+    st.divider()
     left, right = st.columns(2)
     with left:
         st.markdown(f"**{t('hit_where')}**")
@@ -946,9 +983,7 @@ with tab_sh:
             # your speeds in the accent colour; the moving threshold
             # is a grey context line — the danger boundary is the
             # vermillion curve on the risk chart below, not this line
-            fig = go.Figure(
-                go.Histogram(x=sv, nbinsx=40, marker_color=PAL["you"])
-            )
+            fig = go.Figure(go.Histogram(x=sv, nbinsx=40, marker_color=PAL["you"]))
             fig.add_vline(x=thr, line_dash="dot", line_color=PAL["ctx"])
             style_figure(fig, height=260, x_title=t("speed_x"), y_title=t("speed_y"))
             st.plotly_chart(fig, width="stretch")
@@ -1005,6 +1040,7 @@ with tab_sh:
         )
         st.plotly_chart(fig, width="stretch")
 
+    st.divider()
     st.markdown(f"**{t('weapons')}**")
     w = core.weapon_stats(demo, shots_f, me, thr, safe_dist, strict_dist, hurts=hurts_f)
     if len(w):
@@ -1133,9 +1169,7 @@ with tab_du:
             "duration": st.column_config.NumberColumn(
                 du_labels["duration"], format="%.2f s"
             ),
-            "speed": st.column_config.NumberColumn(
-                du_labels["speed"], format="%d u/s"
-            ),
+            "speed": st.column_config.NumberColumn(du_labels["speed"], format="%d u/s"),
             "errhw": st.column_config.NumberColumn(du_labels["errhw"], format="%.2f"),
             "side": st.column_config.TextColumn(du_labels["side"], width="small"),
             "flags": st.column_config.TextColumn(du_labels["flags"], width="medium"),
@@ -1350,9 +1384,7 @@ with tab_tl:
                         y=[p[1] for p in fire_pts],
                         mode="markers",
                         name=t("tl_mark_shots"),
-                        marker=dict(
-                            symbol="triangle-up", size=9, color=PAL["ctx"]
-                        ),
+                        marker=dict(symbol="triangle-up", size=9, color=PAL["ctx"]),
                     ),
                     row=1,
                     col=1,
@@ -1441,3 +1473,9 @@ with st.expander(f"🐞 {t('debug')}"):
         mime="application/json",
         key="dbg_dl",
     )
+
+st.divider()
+st.caption(
+    f"CS2-AimAudit · {_app_version()} · {t('footer_privacy')} · "
+    f"[{t('footer_issues')}](https://github.com/choompuy/cs2-aimaudit/issues)"
+)

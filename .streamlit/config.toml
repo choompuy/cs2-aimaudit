@@ -5,6 +5,8 @@ backgroundColor = "#0e1117"
 secondaryBackgroundColor = "#171c26"
 textColor = "#e8eaed"
 chartCategoricalColors = ["#F5A623", "#56B4E9", "#D55E00", "#8899AA", "#009E73", "#CC79A7"]
+baseRadius = "0.25rem"
+borderColor = "#262D3B"
 
 [browser]
 # The README promises "no telemetry": Streamlit sends anonymous usage

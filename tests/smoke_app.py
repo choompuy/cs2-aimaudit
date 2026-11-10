@@ -248,6 +248,17 @@ def widget(at, kind, key):
         return None
 
 
+def goto(at, page):
+    """
+    Only the active page renders, so switch the page before
+    interacting with widgets that live on it.
+    """
+
+    at.session_state["page"] = page
+    at.run()
+    check(f"page {page} renders", not at.exception, err_of(at))
+
+
 def act(at, name, fn):
     """Apply one UI interaction, re-run, and demand a clean run."""
     try:
@@ -300,6 +311,7 @@ def scenario_one_round():
     )
     act(at, "language ru", lambda: at.selectbox(key="lang").select("ru").run())
     act(at, "thr slider 200", lambda: at.slider(key="thr").set_value(200).run())
+    goto(at, "timeline")
     act(
         at, "timeline duel renders", lambda: at.selectbox(key="tl_duel").select(0).run()
     )
@@ -364,6 +376,7 @@ def scenario_long25():
         "side filter CT (round 13 only)",
         lambda: at.selectbox(key="flt_side").select("CT").run(),
     )
+    goto(at, "timeline")
     act(at, "timeline duel 1 of 3", lambda: at.selectbox(key="tl_duel").select(1).run())
 
 
@@ -473,6 +486,7 @@ def scenario_matrix():
                     lambda s=sid: at.selectbox(key="me").select(s).run(),
                 )
             for tk in ("ov_full", "du_full"):
+                goto(at, {"ov_full": "overview", "du_full": "duels"}[tk])
                 if widget(at, "toggle", tk) is not None:
                     act(
                         at,
@@ -484,6 +498,7 @@ def scenario_matrix():
                         f"{tk} off",
                         lambda tk=tk: at.toggle(key=tk).set_value(False).run(),
                     )
+            goto(at, "timeline")
             for i in range(3):
                 if widget(at, "selectbox", "tl_duel") is not None:
                     act(
@@ -504,27 +519,53 @@ def scenario_tables():
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "tables.dem")
     check("runs without exception", not at.exception, err_of(at))
     check("overview toggle exists", widget(at, "toggle", "ov_full") is not None)
+    act(
+        at,
+        "overview: all columns",
+        lambda: at.toggle(key="ov_full").set_value(True).run(),
+    )
+    goto(at, "duels")
     check("duels toggle exists", widget(at, "toggle", "du_full") is not None)
-    act(at, "overview: all columns", lambda: at.toggle(key="ov_full").set_value(True).run())
-    act(at, "duels: all columns", lambda: at.toggle(key="du_full").set_value(True).run())
-    act(at, "both back to basic", lambda: (
-        at.toggle(key="ov_full").set_value(False),
-        at.toggle(key="du_full").set_value(False),
-        at.run(),
-    ))
+    act(
+        at, "duels: all columns", lambda: at.toggle(key="du_full").set_value(True).run()
+    )
+    act(
+        at,
+        "duels back to basic",
+        lambda: at.toggle(key="du_full").set_value(False).run(),
+    )
+    goto(at, "overview")
+    act(
+        at,
+        "overview back to basic",
+        lambda: at.toggle(key="ov_full").set_value(False).run(),
+    )
     # the same widget state the browser sends after a row click on the
     # overview table: the app must render (the on_select callback itself
     # only runs in a real browser session)
     at.session_state["ov_table"] = {"selection": {"rows": [2], "columns": []}}
     at.run()
     check("row-selection state does not crash", not at.exception, err_of(at))
+    # A duels row click jumps to the Timeline; AppTest cannot fire
+    # on_select, but the widget state alone must not crash the app
+    goto(at, "duels")
+    at.session_state["du_table"] = {"selection": {"rows": [0], "columns": []}}
+    at.run()
+    check("duels row-click state does not crash", not at.exception, err_of(at))
     # russian labels are ~20-30% longer - the tables must hold
     act(at, "tables in russian", lambda: at.selectbox(key="lang").select("ru").run())
-    act(at, "russian + all columns", lambda: (
-        at.toggle(key="ov_full").set_value(True),
-        at.toggle(key="du_full").set_value(True),
-        at.run(),
-    ))
+    goto(at, "overview")
+    act(
+        at,
+        "russian overview: all columns",
+        lambda: at.toggle(key="ov_full").set_value(True).run(),
+    )
+    goto(at, "duels")
+    act(
+        at,
+        "russian duels: all columns",
+        lambda: at.toggle(key="du_full").set_value(True).run(),
+    )
 
 
 def run_real(path):
