@@ -746,9 +746,7 @@ def _unpack(ext: str, p: str, tmp: str) -> None:
                     shutil.copyfileobj(rdr, dst)
         else:  # .zip
             with zipfile.ZipFile(p) as z:
-                members = sorted(
-                    n for n in z.namelist() if n.lower().endswith(".dem")
-                )
+                members = sorted(n for n in z.namelist() if n.lower().endswith(".dem"))
                 if not members:
                     raise ValueError(
                         f"No .dem file inside the archive: {os.path.basename(p)}"
@@ -821,7 +819,9 @@ def decompressed_demo(path: str) -> str:
     except ValueError:
         _drop_part()
         raise
-    except Exception as e:  # noqa: BLE001 - truncated/corrupt archive, bad zip, zstd error...
+    except (
+        Exception
+    ) as e:  # noqa: BLE001 - truncated/corrupt archive, bad zip, zstd error...
         _drop_part()
         raise ValueError(
             f"Cannot unpack {os.path.basename(p)}: {type(e).__name__}: {e}"
@@ -1377,7 +1377,9 @@ def build_duels(
         sid: [
             o
             for o in names
-            if o != sid and teams.get(o) not in (None, "?") and teams.get(o) != teams.get(sid)
+            if o != sid
+            and teams.get(o) not in (None, "?")
+            and teams.get(o) != teams.get(sid)
         ]
         for sid in names
     }

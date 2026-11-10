@@ -238,7 +238,21 @@ elif up:
         with open(src, "wb") as f:
             f.write(up.getbuffer())
 else:
+    # the empty state is a 3-step card with the demo instructions
+    # inline (the same text the Guide shows), so a first-time player
+    # knows what they will get before any file is loaded
     st.info(t("no_file"))
+    with st.container(border=True):
+        st.subheader(t("start_title"))
+        s1, s2, s3 = st.columns(3)
+        s1.markdown(f"**1 · {t('start_1')}**")
+        s1.caption(t("start_1_t"))
+        s2.markdown(f"**2 · {t('start_2')}**")
+        s2.caption(t("start_2_t"))
+        s3.markdown(f"**3 · {t('start_3')}**")
+        s3.caption(t("start_3_t"))
+        with st.expander(t("demo_how_title")):
+            st.markdown(t("demo_how"))
     st.stop()
 try:
     path = core.decompressed_demo(src)
@@ -587,9 +601,7 @@ filters = core.Filters(
     ),
     **round_kwargs,
 )
-shots_f, duels_f, hurts_f = core.apply_filters(
-    shots, duels_all, demo.hurts, filters
-)
+shots_f, duels_f, hurts_f = core.apply_filters(shots, duels_all, demo.hurts, filters)
 res_sel = set(st.session_state.get("flt_res") or [])
 
 
@@ -671,9 +683,7 @@ PAGES = ("overview", "shooting", "duels", "timeline", "guide")
 if st.session_state.get("page") not in PAGES:
     st.session_state["page"] = "overview"
 page = (
-    st.segmented_control(
-        None, PAGES, format_func=lambda p: t(f"tab_{p}"), key="page"
-    )
+    st.segmented_control(None, PAGES, format_func=lambda p: t(f"tab_{p}"), key="page")
     or "overview"
 )
 
@@ -1008,42 +1018,6 @@ elif page == "shooting":
         c[0].metric(t("m_kd"), f"{kills} / {dths}", help=t("m_kd_help"))
         c[1].metric(t("m_dur"), num(dur, 2), help=t("m_dur_help"))
 
-    # honesty block: n, Wilson 95% CIs and lobby ranks for the rates above
-    def _ci(k, n):
-        lo, hi = core.wilson_ci(k, n)
-        return "—" if pd.isna(lo) else f"{lo:.0f}–{hi:.0f}%"
-
-    st.caption(
-        t(
-            "ci_line",
-            acc=_ci(hits_n, len(sh_me)),
-            n_shots=len(sh_me),
-            hs=_ci(hg_me.get("head", 0), hits_n),
-            n_hits=hits_n,
-            first=_ci(int((fs["first"] == "me").sum()), len(fs)) if len(fs) else "—",
-            n_duels=len(fs),
-            hw=(
-                _ci(int(dd_err["my_would_head"].sum()), len(dd_err))
-                if len(dd_err)
-                else "—"
-            ),
-            n_hw=len(dd_err),
-        )
-    )
-    if len(sh_me) < core.MIN_N_SHOTS or len(dd) < core.MIN_N_DUELS:
-        st.caption(t("small_sample", shots=core.MIN_N_SHOTS, duels=core.MIN_N_DUELS))
-    parts = []
-    for col, key, best in (
-        ("accuracy", "rk_acc", "high"),
-        ("first_shot", "rk_first", "high"),
-        ("risky", "rk_risky", "low"),
-    ):
-        rk = core.rank_in_lobby(summary, me, col, best)
-        if rk:
-            parts.append(t("rank_part", name=t(key), pos=rk[0], n=rk[1]))
-    if parts:
-        st.caption(t("rank_line", parts=" · ".join(parts)))
-
     if len(dd):
         k_err = dd.loc[dd["result"] == "kill", "my_err"].median()
         if pd.notna(k_err) and k_err > 25:
@@ -1312,6 +1286,7 @@ elif page == "duels":
         )
         st.caption(t("du_click_hint"))
 
+
 # ------------------------------------------------------------- timeline
 # a fragment - picking another duel re-renders only the timeline
 @st.fragment
@@ -1325,7 +1300,47 @@ def _timeline_fragment():
             0 <= st.session_state["tl_duel"] < len(my_duels)
         ):
             st.session_state["tl_duel"] = 0
+
+        # prev/next buttons and a round selector instead of one long
+        # select box; the exact duel picker stays below for precision
+        def _tl_shift(d):
+            j = st.session_state.get("tl_duel", 0) + d
+            st.session_state["tl_duel"] = max(0, min(len(my_duels) - 1, j))
+
+        def _tl_round_pick():
+            rv = st.session_state.get("tl_round")
+            hits = np.nonzero(my_duels["round"].to_numpy() == rv)[0]
+            if len(hits):
+                st.session_state["tl_duel"] = int(hits[0])
+
         labels = [duel_label(my_duels.iloc[i]) for i in range(len(my_duels))]
+        rounds_avail = sorted(int(x) for x in pd.unique(my_duels["round"].dropna()))
+        _cur_round = my_duels.iloc[st.session_state["tl_duel"]]["round"]
+        if pd.notna(_cur_round) and int(_cur_round) in rounds_avail:
+            st.session_state["tl_round"] = int(_cur_round)
+        nav1, nav2, nav3 = st.columns([1, 2, 1], vertical_alignment="bottom")
+        nav1.button(
+            t("tl_prev"),
+            key="tl_prev",
+            on_click=_tl_shift,
+            args=(-1,),
+            disabled=(st.session_state["tl_duel"] == 0),
+            use_container_width=True,
+        )
+        if rounds_avail:
+            nav2.selectbox(
+                t("col_round"), rounds_avail, key="tl_round", on_change=_tl_round_pick
+            )
+        else:
+            nav2.caption(duel_label(my_duels.iloc[st.session_state["tl_duel"]]))
+        nav3.button(
+            t("tl_next"),
+            key="tl_next",
+            on_click=_tl_shift,
+            args=(1,),
+            disabled=(st.session_state["tl_duel"] == len(my_duels) - 1),
+            use_container_width=True,
+        )
         i = st.selectbox(
             t("tl_pick"),
             range(len(my_duels)),
@@ -1338,17 +1353,6 @@ def _timeline_fragment():
             tdf, missing = get_timeline(path, mtime, me, tick, window_s, demo.tickrate)
         if missing:
             st.warning(t("tl_no_buttons", keys=", ".join(t(f"k_{b}") for b in missing)))
-        st.markdown(
-            t(
-                "tl_summary",
-                res=fmt_result(r["result"]),
-                opp=name_of.get(r["opponent"], r["opponent"]),
-                weapon=str(r["weapon"]),
-                first=fmt_first(r["first"]),
-                shots=int(r["my_shots"]),
-                dur=r["duration_s"],
-            )
-        )
 
         # auto verdict in plain words
         verdict = []
@@ -1375,8 +1379,28 @@ def _timeline_fragment():
             verdict.append(t("tl_v_first_me"))
         elif r["first"] == "opponent":
             verdict.append(t("tl_v_first_opp"))
-        if verdict:
-            st.caption(" · ".join(verdict))
+
+        # the verdict card leads - one sentence, the three numbers
+        # that explain it (icons + values + units, never icons alone)
+        # and the plain-words verdict line
+        with st.container(border=True):
+            st.markdown(
+                t(
+                    "tl_summary",
+                    res=fmt_result(r["result"]),
+                    opp=name_of.get(r["opponent"], r["opponent"]),
+                    weapon=str(r["weapon"]),
+                    first=fmt_first(r["first"]),
+                    shots=int(r["my_shots"]),
+                    dur=r["duration_s"],
+                )
+            )
+            st.markdown(
+                f"🕐 {num(r['duration_s'], 1)} s · ⚡ {num(r['my_speed'], 0)} u/s"
+                f" · 🎯 {num(r['my_err'], 1)}°"
+            )
+            if verdict:
+                st.caption(" · ".join(verdict))
         if tdf is None or tdf.empty:
             st.info(t("tl_empty"))
         else:
@@ -1402,6 +1426,7 @@ def _timeline_fragment():
 
             # Cut the window at the player's death: buttons/"speed" of a
             # dead pawn are parser artifacts, not real input.
+            death_x = None
             if "is_alive" in tdf.columns and len(tdf):
                 dead_ix = tdf.index[~tdf["is_alive"].astype(bool)]
                 if len(dead_ix):
@@ -1409,6 +1434,7 @@ def _timeline_fragment():
                     if d_tick <= int(tdf["tick"].max()):
                         tdf = tdf[tdf["tick"] <= d_tick]
                         st.caption(t("tl_dead_cut"))
+                        death_x = (d_tick - tick) / demo.tickrate
             x = (tdf["tick"] - tick) / demo.tickrate
             speed = (
                 tdf["speed"]
@@ -1538,12 +1564,24 @@ def _timeline_fragment():
                         row=row_i,
                         col=1,
                     )
+            # the death moment named on the chart (vermillion = bad)
+            if death_x is not None:
+                fig.add_vline(
+                    x=death_x,
+                    line_color=PAL["bad"],
+                    annotation_text=t("tl_death"),
+                    row=1,
+                    col=1,
+                )
             fig.update_xaxes(title_text=t("ch_x"), row=rows_n, col=1)
             # shared look (palette, font, legend, margins); the height
             # stays 760 — four stacked rows need it
             style_figure(fig, height=760, margin=dict(t=60, r=10), legend_y=1.06)
+            # one shared vertical cursor per row
+            fig.update_layout(hovermode="x unified")
             fig.update_layout(showlegend=bool(fire_pts or hit_pts))
             st.plotly_chart(fig, width="stretch")
+
 
 if page == "timeline":
     _timeline_fragment()
@@ -1551,6 +1589,25 @@ if page == "timeline":
 # ---------------------------------------------------------------- guide
 if page == "guide":
     st.markdown(t("guide"))
+    # every metric tooltip also reachable without hover (touch
+    # devices have none) - one list, reused from the i18n help texts
+    with st.expander(t("glossary_title")):
+        for _mk, _hk in (
+            ("m_acc", "m_acc_help"),
+            ("m_shots", "m_shots_help"),
+            ("m_hits", "m_hits_help"),
+            ("m_hs", "m_hs_help"),
+            ("m_risky", "m_risky_help"),
+            ("m_moving", "m_moving_help"),
+            ("m_speed", "m_speed_help"),
+            ("m_cs", "m_cs_help"),
+            ("m_err", "m_err_help"),
+            ("m_onhead", "m_onhead_help"),
+            ("m_first", "m_first_help"),
+            ("m_kd", "m_kd_help"),
+            ("m_dur", "m_dur_help"),
+        ):
+            st.markdown(f"**{t(_mk)}** — {t(_hk)}")
 
 # ---------------------------------------------------------------- debug
 with st.expander(f"🐞 {t('debug')}"):
