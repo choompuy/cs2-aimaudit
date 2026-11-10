@@ -158,6 +158,85 @@ def make_match():
     }
 
 
+def make_match_sides():
+    """4 players, 2 rounds with a halftime swap.
+
+    Round 1: S1,S2 = T (team_num 2); S3,S4 = CT (3). Round 2: swapped.
+    Static player_info keeps the END-of-match teams (S1,S2 = CT), which is
+    exactly the trap the per-round side logic must fix.
+    """
+    player_info = pd.DataFrame(
+        {
+            "steamid": [int(s) for s in IDS],
+            "name": ["Alpha", "Bravo", "Charlie", "Delta"],
+            "team_number": [3, 3, 2, 2],  # end of match: swapped
+        }
+    )
+    events = {
+        "weapon_fire": pd.DataFrame(
+            {
+                "tick": [100, 110, 300],
+                "user_steamid": pd.array(
+                    [int(S1), int(S3), int(S3)], dtype="uint64"
+                ),
+                "user_name": ["Alpha", "Charlie", "Charlie"],
+                "weapon": ["weapon_ak47"] * 3,
+                "total_rounds_played": [0, 0, 1],
+                "is_warmup_period": [False, False, False],
+            }
+        ),
+        "player_hurt": pd.DataFrame(),
+        "player_death": pd.DataFrame(
+            {
+                "tick": [120, 310],
+                "attacker_steamid": pd.array([int(S1), int(S3)], dtype="float64"),
+                "attacker_name": ["Alpha", "Charlie"],
+                "user_steamid": pd.array([int(S3), int(S1)], dtype="float64"),
+                "user_name": ["Charlie", "Alpha"],
+                "weapon": ["weapon_ak47", "weapon_ak47"],
+                "headshot": [False, True],
+                "distance": [500, 500],
+                "total_rounds_played": [0, 1],
+                "is_warmup_period": [False, False],
+            }
+        ),
+    }
+    # team_num per (tick, sid): round 1 (ticks ~100) and round 2 (ticks ~300)
+    tn = {}
+    rows = []
+    req = sorted({99, 100, 109, 110, 119, 120, 299, 300, 309, 310})
+    pos = {S1: (0.0, 0.0), S2: (10.0, 10.0), S3: (500.0, 0.0), S4: (510.0, 10.0)}
+    yaw = {S1: 0.0, S2: 0.0, S3: 180.0, S4: 180.0}
+    for tick in req:
+        for sid in IDS:
+            first_half = tick < 200
+            tn[(tick, sid)] = (
+                (2 if sid in (S1, S2) else 3) if first_half else (3 if sid in (S1, S2) else 2)
+            )
+            rows.append(
+                {
+                    "tick": tick,
+                    "steamid": f64_sid(sid),
+                    "name": {S1: "Alpha", S2: "Bravo", S3: "Charlie", S4: "Delta"}[sid],
+                    "X": pos[sid][0],
+                    "Y": pos[sid][1],
+                    "Z": 0.0,
+                    "pitch": 0.0,
+                    "yaw": yaw[sid],
+                    "is_alive": True,
+                    "aim_punch_angle": "0 0 0",
+                    "team_num": tn[(tick, sid)],
+                }
+            )
+    return {
+        "player_info": player_info,
+        "header": {"map_name": "de_mirage"},
+        "events": events,
+        "ticks": pd.DataFrame(rows),
+        "unsupported": set(),
+    }
+
+
 class FakeParser:
     demos: dict = {}
     # Source IN_* bits for the named button props (mirrors real parser)
@@ -595,6 +674,118 @@ with tempfile.TemporaryDirectory(prefix="cs2aa_state_") as td:
     core.save_state({"x": 1})
     check("read-only home -> silent", True)
     os.chmod(td, 0o700)
+
+# -------------------------------------------------- tickrate from header
+print("== tickrate from header ==")
+check(
+    "128 from playback fields",
+    core.tickrate_from_header({"playback_ticks": 6400, "playback_time": 50.0}) == 128,
+)
+check(
+    "64 from playback fields",
+    core.tickrate_from_header({"playback_ticks": 64000, "playback_time": 1000.0}) == 64,
+)
+check("missing header -> 64", core.tickrate_from_header({}) == 64)
+check(
+    "zero playback_time -> 64",
+    core.tickrate_from_header({"playback_ticks": 6400, "playback_time": 0}) == 64,
+)
+check(
+    "insane ratio -> 64",
+    core.tickrate_from_header({"playback_ticks": 5, "playback_time": 1000.0}) == 64,
+)
+
+m_tr = make_match()
+m_tr["header"] = {"map_name": "de_mirage", "playback_ticks": 6400, "playback_time": 50.0}
+FakeParser.demos["match128.dem"] = m_tr
+demo128 = core.load_demo("match128.dem")
+check("demo.tickrate == 128", demo128.tickrate == 128)
+sp128 = float(
+    demo128.ticks[(demo128.ticks["steamid"] == S1) & (demo128.ticks["tick"] == 120)][
+        "speed"
+    ].iloc[0]
+)
+check("speed scales with tickrate (4u/tick -> 512 u/s)", abs(sp128 - 512.0) < 1e-6, sp128)
+d128 = core.build_duels(demo128, 3.0)
+check("duel found at 128 tick", len(d128) == 1)
+check(
+    "duration in seconds scales (21 ticks / 128)",
+    abs(d128.iloc[0]["duration_s"] - round(21 / 128, 2)) < 1e-9,
+    d128.iloc[0]["duration_s"],
+)
+check("default fake demo stays 64", demo.tickrate == 64)
+
+dftl, _ = core.timeline_data(
+    "tl.dem", S1, 512, before_s=3.0, after_s=0.25, tickrate=128
+)
+check(
+    "timeline window in ticks scales (first row 490)",
+    len(dftl) and int(dftl.iloc[0]["tick"]) == 490,
+    dftl["tick"].tolist()[:3],
+)
+sp_tl = dftl[(dftl["tick"] > 490) & (dftl["tick"] < 512)]["speed"].dropna()
+check("timeline speed at 128 tick = 512", abs(sp_tl.max() - 512.0) < 1e-6, sp_tl.max())
+
+# --------------------------------------------------- halftime side swap
+print("== per-round sides (halftime swap) ==")
+FakeParser.demos["sides.dem"] = make_match_sides()
+demo_s = core.load_demo("sides.dem")
+check(
+    "sides round 1",
+    demo_s.sides.get(1) == {S1: "T", S2: "T", S3: "CT", S4: "CT"},
+    demo_s.sides,
+)
+check(
+    "sides round 2 (swapped)",
+    demo_s.sides.get(2) == {S1: "CT", S2: "CT", S3: "T", S4: "T"},
+    demo_s.sides,
+)
+shots_s = core.shots_table(demo_s)
+s1s = shots_s[shots_s["sid"] == S1].iloc[0]
+s3s = shots_s[shots_s["sid"] == S3].sort_values("tick").iloc[-1]
+check("S1 round-1 shot side = T (not the static CT)", s1s["side"] == "T", s1s["side"])
+check("S3 round-2 shot side = T (swapped)", s3s["side"] == "T", s3s["side"])
+duels_s = core.build_duels(demo_s, 3.0)
+check("two duels", len(duels_s) == 2, len(duels_s))
+d1 = duels_s[duels_s["round"] == 1].iloc[0]
+d2 = duels_s[duels_s["round"] == 2].iloc[0]
+check(
+    "duel 1 sides: T killed CT",
+    d1["killer_side"] == "T" and d1["victim_side"] == "CT",
+    (d1["killer_side"], d1["victim_side"]),
+)
+check(
+    "duel 2 sides: T killed CT after swap",
+    d2["killer_side"] == "T" and d2["victim_side"] == "CT",
+    (d2["killer_side"], d2["victim_side"]),
+)
+mine_s = core.duels_for(duels_s, S1)
+check(
+    "duels_for my_side follows rounds",
+    list(mine_s["my_side"]) == ["T", "CT"],
+    list(mine_s["my_side"]),
+)
+summ_s = core.player_summary(demo_s, duels_s, shots_s, 40)
+a_row = summ_s[summ_s["sid"] == S1].iloc[0]
+check("summary sides T→CT", a_row["sides"] == "T→CT", a_row["sides"])
+chk_s = {c["id"]: c for c in core.data_checks(demo_s, shots_s, duels_s)}
+check("sides check ok when data present", chk_s["sides"]["level"] == "ok", chk_s["sides"])
+
+# team_num unavailable -> static fallback + warn check
+m_s2 = make_match_sides()
+m_s2["unsupported"] = {"team_num"}
+FakeParser.demos["sides2.dem"] = m_s2
+demo_s2 = core.load_demo("sides2.dem")
+check("no team_num -> sides empty", demo_s2.sides == {})
+shots_s2 = core.shots_table(demo_s2)
+s1s2 = shots_s2[shots_s2["sid"] == S1].sort_values("tick").iloc[0]
+check(
+    "fallback to static team (S1 end-of-match CT, per-round would be T)",
+    s1s2["side"] == "CT",
+    s1s2["side"],
+)
+chk_s2 = {c["id"]: c for c in core.data_checks(demo_s2, shots_s2, core.build_duels(demo_s2, 3.0))}
+check("sides check warns when missing", chk_s2["sides"]["level"] == "warn", chk_s2["sides"])
 
 # ------------------------------------------------------------ no_events
 print("== no player_hurt event at all ==")

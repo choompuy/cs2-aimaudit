@@ -1,9 +1,3 @@
-* text=auto
-*.py text
-*.md text
-*.toml text
-*.yml text
-*.txt text
-*.dem binary
-*.png binary
-*.jpg binary
+# Windows batch files must keep CRLF in the repo blob, or cmd.exe
+# may mis-parse them after a fresh checkout / git apply.
+*.bat -text

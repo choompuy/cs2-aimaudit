@@ -24,6 +24,13 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 
 ## Quick start
 
+Easiest:
+
+- **Windows:** double-click `start.bat` — it prints what it is doing (`[1/3] creating venv…`, `[2/3] installing packages, first run takes 1–3 min…`, `[3/3] starting`) and pauses on any error.
+- **macOS / Linux:** `./start.sh` in a terminal.
+
+Or manually:
+
 ```bash
 git clone https://github.com/choompuy/cs2-aimaudit.git
 cd cs2-aimaudit

@@ -92,8 +92,10 @@ def get_demo(path: str, mtime: float) -> core.Demo:
 
 
 @st.cache_data(show_spinner=False)
-def get_timeline(path: str, mtime: float, me: str, tick: int, before_s: float):
-    return core.timeline_data(path, me, tick, before_s=before_s)
+def get_timeline(
+    path: str, mtime: float, me: str, tick: int, before_s: float, tickrate: int
+):
+    return core.timeline_data(path, me, tick, before_s=before_s, tickrate=tickrate)
 
 
 # ------------------------------------------------------------ file input
@@ -191,6 +193,7 @@ info = []
 if demo.header.get("map_name"):
     info.append(f"**{t('map')}:** {demo.header['map_name']}")
 info.append(f"**{t('players_n')}:** {len(demo.players)}")
+info.append(f"**{t('tickrate')}:** {demo.tickrate}")
 trp = demo.deaths.get("total_rounds_played") if len(demo.deaths) else None
 if trp is not None:
     r_max = pd.to_numeric(trp, errors="coerce").max()
@@ -271,6 +274,7 @@ with tab_ov:
     st.caption(t("ov_caption"))
     cols = {
         "player": t("col_player"),
+        "sides": t("col_sides"),
         "kills": t("col_kills"),
         "deaths": t("col_deaths"),
         "shots": t("col_shots"),
@@ -500,6 +504,7 @@ with tab_du:
                     "tick": ddf["tick"].to_numpy(),
                     t("col_result"): [fmt_result(v) for v in ddf["result"]],
                     t("col_opponent"): [name_of.get(s, s) for s in ddf["opponent"]],
+                    t("col_side"): ddf["my_side"].to_numpy(),
                     t("col_weapon"): ddf["weapon"].to_numpy(),
                     t("col_hs"): ["✓" if v else "" for v in ddf["headshot"]],
                     t("col_distance"): ddf["distance"].round(0).to_numpy(),
@@ -530,7 +535,7 @@ with tab_tl:
         r = my_duels.iloc[i]
         tick = int(r["tick"])
         with st.spinner(t("tl_loading")):
-            tdf, missing = get_timeline(path, mtime, me, tick, window_s)
+            tdf, missing = get_timeline(path, mtime, me, tick, window_s, demo.tickrate)
         if missing:
             st.warning(t("tl_no_buttons", keys=", ".join(t(f"k_{b}") for b in missing)))
         st.markdown(
@@ -576,7 +581,7 @@ with tab_tl:
                     if d_tick <= int(tdf["tick"].max()):
                         tdf = tdf[tdf["tick"] <= d_tick]
                         st.caption(t("tl_dead_cut"))
-            x = (tdf["tick"] - tick) / core.TICKRATE
+            x = (tdf["tick"] - tick) / demo.tickrate
             speed = (
                 tdf["speed"]
                 if "speed" in tdf.columns

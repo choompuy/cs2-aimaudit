@@ -92,6 +92,7 @@ ALIVE_PROPS = ["is_alive"]
 # POS; if the parser does not know the prop we fall back to a plain POS parse.
 PUNCH_PROPS = ["aim_punch_angle"]
 TEAMS = {2: "T", 3: "CT"}
+SIDE_PROPS = ["team_num"]  # m_iTeamNum per tick: the real per-round side
 
 # ------------------------------------------------- distance-aware risk model
 # Heuristic, NOT the real in-game spread table. Weapon inaccuracy grows with
@@ -329,20 +330,20 @@ def _norm_alive(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _speed_from_positions(
-    d: pd.DataFrame, dt: pd.Series, dx: pd.Series, dy: pd.Series
+    d: pd.DataFrame, dt: pd.Series, dx: pd.Series, dy: pd.Series, tickrate: int = TICKRATE
 ) -> pd.Series:
-    """Horizontal speed (u/s) = |dpos| / dt_ticks * TICKRATE, NaN on garbage."""
-    v = np.hypot(dx, dy) / dt * TICKRATE
+    """Horizontal speed (u/s) = |dpos| / dt_ticks * tickrate, NaN on garbage."""
+    v = np.hypot(dx, dy) / dt * tickrate
     return v.where((dt >= 1) & (v <= MAX_SPEED))
 
 
-def _add_speed(df: pd.DataFrame) -> pd.DataFrame:
+def _add_speed(df: pd.DataFrame, tickrate: int = TICKRATE) -> pd.DataFrame:
     """
     Own `speed` column for the fire-tick table (see the POS note above).
 
     Fire ticks are parsed together with tick-1, so speed is the exact one-tick
-    delta |pos(t) - pos(t-1)| * 64. NaN when: no t-1 row, the player was dead
-    at either tick, or the delta looks like a teleport (respawn/dormancy).
+    delta |pos(t) - pos(t-1)| * tickrate. NaN when: no t-1 row, the player was
+    dead at either tick, or the delta looks like a teleport (respawn/dormancy).
     """
 
     df = df.copy()
@@ -360,11 +361,11 @@ def _add_speed(df: pd.DataFrame) -> pd.DataFrame:
         al = d["is_alive"].astype(float)
         gal = al.groupby(d["steamid"], sort=False)
         ok &= gal.shift(1).fillna(1.0).astype(bool) & al.astype(bool)
-    d["speed"] = _speed_from_positions(d, dt, dx, dy).where(ok)
+    d["speed"] = _speed_from_positions(d, dt, dx, dy, tickrate).where(ok)
     return d
 
 
-def _timeline_speed(df: pd.DataFrame) -> pd.DataFrame:
+def _timeline_speed(df: pd.DataFrame, tickrate: int = TICKRATE) -> pd.DataFrame:
     """
     Own `speed` column for a contiguous tick window (timeline chart).
 
@@ -380,7 +381,7 @@ def _timeline_speed(df: pd.DataFrame) -> pd.DataFrame:
         return df
     d = df.sort_values("tick", kind="stable")
     dt = d["tick"].astype(float).diff()
-    v = _speed_from_positions(d, dt, d["X"].diff(), d["Y"].diff())
+    v = _speed_from_positions(d, dt, d["X"].diff(), d["Y"].diff(), tickrate)
     if "is_alive" in d.columns:
         v = v.where(d["is_alive"].astype(bool))
     d["speed"] = v
@@ -533,6 +534,85 @@ def remember_demo(path: str, state: dict) -> dict:
     return state
 
 
+def tickrate_from_header(header: dict) -> int:
+    """
+    Tick rate from the demo header: playback_ticks / playback_time.
+
+    The previously hard-coded 64 is wrong for 128-tick demos (FACEIT and
+    community servers): every speed and every seconds<->ticks conversion
+    would be off by 2x. Falls back to 64 when the header is missing or
+    implausible (corrupt header, partial demo).
+    """
+
+    try:
+        ticks = float(header.get("playback_ticks"))
+        secs = float(header.get("playback_time"))
+        if ticks > 0 and secs > 0:
+            tr = ticks / secs
+            if 16.0 <= tr <= 512.0:  # sane window: 32 / 64 / 128 tick all fit
+                return int(round(tr))
+    except (TypeError, ValueError):
+        pass
+    return TICKRATE
+
+
+def _parse_round_sides(
+    parser, frames: list[pd.DataFrame], flookup: dict, name_to_sid: dict
+) -> dict[int, dict[str, str]]:
+    """
+    Per-round player sides: team_num read at one tick per round.
+
+    parse_player_info().team_number is a single static value (the team at
+    the END of the match), so after the halftime swap - and again in every
+    overtime half - the T/CT labels are wrong for half of the rounds. The
+    enemy/teammate logic is unaffected (teammates share the static label),
+    but anything shown per side needs the per-round value. Returns {} when
+    the prop is unavailable (old demos / old parser).
+    """
+
+    per_round: dict[int, int] = {}  # round(1-based) -> representative tick
+    for df in frames:
+        if (
+            not len(df)
+            or "total_rounds_played" not in df.columns
+            or "tick" not in df.columns
+        ):
+            continue
+        r = _round_col(df)
+        tk = pd.to_numeric(df["tick"], errors="coerce")
+        ok = (r >= 0) & tk.notna()
+        for ri, tick in zip(r[ok], tk[ok]):
+            ri = int(ri) + 1
+            t = int(tick)
+            if ri not in per_round or t < per_round[ri]:
+                per_round[ri] = t
+    if not per_round:
+        return {}
+    try:
+        sd = parser.parse_ticks(SIDE_PROPS, ticks=sorted(per_round.values()))
+    except Exception:  # noqa: BLE001 - unknown prop on old parser versions
+        return {}
+    if sd is None or "team_num" not in getattr(sd, "columns", []) or not len(sd):
+        return {}
+    sd = sd.copy()
+    sd["steamid"] = fix_ids(
+        sd["steamid"],
+        flookup,
+        sd["name"] if "name" in sd.columns else None,
+        name_to_sid,
+    )
+    tick_to_round = {t: r for r, t in per_round.items()}
+    out: dict[int, dict[str, str]] = {}
+    for row in sd.itertuples(index=False):
+        ri = tick_to_round.get(int(row.tick))
+        sid = getattr(row, "steamid", NA)
+        if ri is None or sid in (NA, None):
+            continue
+        side = TEAMS.get(_safe_int(row.team_num), "?")
+        out.setdefault(ri, {})[sid] = side
+    return out
+
+
 @dataclass
 class Demo:
     path: str
@@ -544,6 +624,24 @@ class Demo:
     ticks: pd.DataFrame  # POS (+punch/alive) of all players at every gun-fire
     #                      tick AND tick-1; `speed` is our own position delta
     warmup_dropped: dict = field(default_factory=dict)
+    tickrate: int = TICKRATE  # from the demo header (fallback: 64)
+    sides: dict = field(default_factory=dict)  # round(1-based) -> sid -> T/CT
+
+    def side_at(self, round_no: int, sid: str) -> str:
+        """Player's side in a given round (falls back to the static team)."""
+        s = self.sides.get(int(round_no), {}).get(sid)
+        if s and s != "?":
+            return s
+        return self.teams.get(sid, "?")
+
+    def side_history(self, sid: str) -> list[str]:
+        """Sides played, in round order, collapsed to changes (['T', 'CT'])."""
+        out: list[str] = []
+        for r in sorted(self.sides):
+            s = self.sides[r].get(sid)
+            if s and s != "?" and (not out or out[-1] != s):
+                out.append(s)
+        return out or [self.teams.get(sid, "?")]
 
     @cached_property
     def rows(self) -> dict:
@@ -653,6 +751,9 @@ def load_demo(path: str, progress=None) -> Demo:
         hurts["weapon"] = hurts["weapon"].map(norm_weapon)
         hurts["hitgroup"] = hurts["hitgroup"].map(hg_key)
 
+    # per-round sides (halftime swap), see _parse_round_sides
+    sides = _parse_round_sides(p, [deaths, fires, hurts], flookup, name_to_sid)
+
     # Fire ticks AND tick-1: the exact one-tick position delta gives the real
     # speed at the moment of each shot without the parser's velocity props.
     fticks = {int(t) for t in fires["tick"]}
@@ -677,8 +778,11 @@ def load_demo(path: str, progress=None) -> Demo:
     td = td.drop_duplicates(["tick", "steamid"]).reset_index(drop=True)
     td = _norm_alive(td)
     td = _extract_punch(td)
-    td = _add_speed(td)
-    return Demo(path, header, players, deaths, fires, hurts, td, warmup_dropped)
+    tickrate = tickrate_from_header(header)
+    td = _add_speed(td, tickrate)
+    return Demo(
+        path, header, players, deaths, fires, hurts, td, warmup_dropped, tickrate, sides
+    )
 
 
 # ----------------------------------------------------------------- metrics
@@ -807,6 +911,7 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     out = s.merge(t, on=["tick", "sid"], how="left").reset_index(drop=True)
     out["dist"] = _nearest_enemy_dist(demo, out)
     out["hit"] = _match_hits(out, demo.hurts)
+    out["side"] = [demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"])]
     return out
 
 
@@ -829,7 +934,7 @@ def add_risk(
 
 def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
     """One row per enemy kill. 'Duel' = shots of both players in the window before the kill."""
-    win = int(window_s * TICKRATE)
+    win = int(window_s * demo.tickrate)
     rows, names, teams = demo.rows, demo.names, demo.teams
     fires_by = {
         k: g["tick"].astype(int).to_numpy()
@@ -875,6 +980,12 @@ def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
                 "tick": t,
                 "killer": k,
                 "victim": v,
+                "killer_side": demo.side_at(
+                    _safe_int(getattr(r, "total_rounds_played", 0)) + 1, k
+                ),
+                "victim_side": demo.side_at(
+                    _safe_int(getattr(r, "total_rounds_played", 0)) + 1, v
+                ),
                 "weapon": norm_weapon(r.weapon),
                 "headshot": bool(getattr(r, "headshot", False)),
                 "distance": getattr(r, "distance", np.nan),
@@ -887,7 +998,7 @@ def build_duels(demo: Demo, window_s: float = 3.0) -> pd.DataFrame:
                 "victim_shots": len(vw),
                 "killer_first_tick": kf,
                 "victim_first_tick": vf,
-                "duration_s": round((t - start) / TICKRATE, 2),
+                "duration_s": round((t - start) / demo.tickrate, 2),
                 "killer_speed": _speed(rows.get((kf, k))) if kf is not None else np.nan,
                 "victim_speed": _speed(rows.get((vf, v))) if vf is not None else np.nan,
                 "killer_err": (
@@ -923,6 +1034,8 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
                     "result": role,
                     "opponent": df[opp],
                     "weapon": df["weapon"],
+                    "my_side": df[f"{mine}_side"],
+                    "opp_side": df[f"{opp}_side"],
                     "headshot": df["headshot"],
                     "distance": df["distance"],
                     "first": df["first"].map(
@@ -984,6 +1097,7 @@ def player_summary(
                 "player": p.name,
                 "sid": p.sid,
                 "team": p.team,
+                "sides": "→".join(demo.side_history(p.sid)),
                 "kills": kills,
                 "deaths": deaths,
                 "shots": len(sh),
@@ -1062,13 +1176,23 @@ def hitgroup_counts(demo: Demo, me: str) -> pd.Series:
 
 
 def timeline_data(
-    path: str, me: str, tick: int, before_s: float = 3.0, after_s: float = 0.25
+    path: str,
+    me: str,
+    tick: int,
+    before_s: float = 3.0,
+    after_s: float = 0.25,
+    tickrate: int | None = None,
 ):
     """Tick-level data of one player around an event. Returns (df, missing_buttons)."""
-    ticks = list(
-        range(tick - int(before_s * TICKRATE), tick + int(after_s * TICKRATE) + 1)
-    )
     parser = DemoParser(path)
+    if tickrate is None:
+        try:
+            tickrate = tickrate_from_header(parser.parse_header())
+        except Exception:  # noqa: BLE001 - header is optional here
+            tickrate = TICKRATE
+    ticks = list(
+        range(tick - int(before_s * tickrate), tick + int(after_s * tickrate) + 1)
+    )
     df = None
     last_err: Exception | None = None
     for props in (
@@ -1086,7 +1210,7 @@ def timeline_data(
         raise last_err  # type: ignore[misc]
     df = _decode_buttons(df)
     df = _norm_alive(df)
-    df = _timeline_speed(df)
+    df = _timeline_speed(df, tickrate)
     missing = [x for x in BUTTONS if x not in df.columns]
     return df.sort_values("tick").reset_index(drop=True), missing
 
@@ -1188,6 +1312,25 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
     else:
         checks.append({"id": "angles", "level": "ok", "n": 0, "med": float("nan")})
 
+    # 10. per-round side data (halftime swap): without it the shown side
+    # silently falls back to the end-of-match team for those rounds
+    if len(shots) and demo.sides:
+        n = int((~shots["round"].isin(set(demo.sides))).sum())
+        f = n / len(shots)
+        checks.append(
+            {"id": "sides", "level": lvl(f, 0.05, 0.40), "n": n, "pct": f * 100}
+        )
+    else:
+        n = len(shots)
+        checks.append(
+            {
+                "id": "sides",
+                "level": "warn" if n else "ok",
+                "n": n,
+                "pct": (100.0 if n else 0.0),
+            }
+        )
+
     # 9. unexpected hitgroup values
     ok_vals = set(HITGROUPS.values()) | {"other"}
     bad = (
@@ -1252,8 +1395,8 @@ def debug_report(
             "numpy": np.__version__,
             "pandas": pd.__version__,
             "demoparser2": dp_ver,
-            "tickrate": TICKRATE,
-            "speed_model": "own pos delta (t-1 -> t) * 64; parser velocity unused",
+            "tickrate": demo.tickrate,
+            "speed_model": f"own pos delta (t-1 -> t) * {demo.tickrate}; parser velocity unused",
             "risk_model": {
                 "safe_dist": params.get("safe_dist", SAFE_DIST),
                 "strict_dist": params.get("strict_dist", STRICT_DIST),

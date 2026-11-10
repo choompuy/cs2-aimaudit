@@ -33,6 +33,7 @@ STR = {
         "err_no_events": "No weapon-fire events found. Is this a full CS2 match demo (.dem)?",
         "map": "Map",
         "players_n": "Players",
+        "tickrate": "Tickrate",
         "rounds_n": "Rounds (approx.)",
         "player": "Player",
         "tab_overview": "Overview",
@@ -44,6 +45,7 @@ STR = {
         "ov_title": "All players",
         "ov_caption": "Kills/deaths count duels against enemies only (no bomb, fall, team kills, warmup). Pick a player above for the detailed tabs.",
         "col_player": "Player",
+        "col_sides": "Sides",
         "col_kills": "Kills",
         "col_deaths": "Deaths",
         "col_shots": "Shots",
@@ -118,6 +120,7 @@ STR = {
         "col_round": "Round",
         "col_result": "Result",
         "col_opponent": "Opponent",
+        "col_side": "My side",
         "col_hs": "HS",
         "col_distance": "Distance",
         "col_first": "Shot first",
@@ -192,6 +195,7 @@ STR = {
         "chk_duel_dist": "{n} duels have an implausible distance (≤0 or >10000 units).",
         "chk_angles": "Median aim error across duels: {med:.1f}°, {n} duels above 45°. If this looks implausible, send the report.",
         "chk_hitgroups": "Unexpected hit-zone values in the data: {vals}.",
+        "chk_sides": "Per-round side data is missing for {n} shots ({pct:.1f}%); the end-of-match side is shown for them instead (halftime swaps are not reflected).",
         # guide
         "guide": """
 ### How to get a demo
@@ -244,6 +248,7 @@ STR = {
         "err_no_events": "Не найдено ни одного выстрела. Это точно демка полного матча CS2 (.dem)?",
         "map": "Карта",
         "players_n": "Игроков",
+        "tickrate": "Тикрейт",
         "rounds_n": "Раундов (прибл.)",
         "player": "Игрок",
         "tab_overview": "Обзор",
@@ -254,6 +259,7 @@ STR = {
         "ov_title": "Все игроки",
         "ov_caption": "Килы/смерти считаются только в дуэлях с врагами (без бомбы, падений, тимкиллов и вармапа). Выбери игрока сверху для подробных вкладок.",
         "col_player": "Игрок",
+        "col_sides": "Стороны",
         "col_kills": "Килы",
         "col_deaths": "Смерти",
         "col_shots": "Выстрелы",
@@ -325,6 +331,7 @@ STR = {
         "col_round": "Раунд",
         "col_result": "Результат",
         "col_opponent": "Противник",
+        "col_side": "Моя сторона",
         "col_hs": "HS",
         "col_distance": "Дистанция",
         "col_first": "Первым выстрелил",
@@ -396,6 +403,7 @@ STR = {
         "chk_duel_dist": "{n} дуэлей с неправдоподобной дистанцией (≤0 или >10000 units).",
         "chk_angles": "Медиана ошибки прицела по дуэлям: {med:.1f}°, {n} дуэлей выше 45°. Если выглядит неправдоподобно — пришли отчёт.",
         "chk_hitgroups": "Неожидаемые значения зон попадания: {vals}.",
+        "chk_sides": "Для {n} выстрелов ({pct:.1f}%) нет данных о стороне в раунде; для них показана сторона на конец матча (смена на халфтайме не учтена).",
         "guide": """
 ### Где взять демку
 - **Premier / Соревновательный:** CS2 → Играть → *Ваши матчи* → скачать демку. Демки хранятся ограниченное время, так что скачивай вскоре после матча.

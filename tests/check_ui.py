@@ -58,6 +58,7 @@ used |= {
         "duel_dist",
         "angles",
         "hitgroups",
+        "sides",
     ]
 }
 for lang in ("en", "ru"):
@@ -106,6 +107,7 @@ for lang in ("en", "ru"):
     t("tl_buttons", keys="k")
     t("tl_first", speed="1", err="1")
     t("err_path_missing", path="x")
+    t("chk_sides", n=1, pct=1.0)
 bad("t() smoke formatting", True)
 
 # ---- 6. columns produced by core vs consumed by app
@@ -113,11 +115,12 @@ import pandas as pd  # noqa: E402
 
 demo = core.load_demo  # symbol check only
 for fn, cols in {
-    "shots_table": ["tick", "sid", "weapon", "round", "speed", "dist", "hit"],
+    "shots_table": ["tick", "sid", "weapon", "round", "speed", "dist", "hit", "side"],
     "player_summary": [
         "player",
         "sid",
         "team",
+        "sides",
         "kills",
         "deaths",
         "shots",
@@ -137,6 +140,8 @@ for fn, cols in {
         "result",
         "opponent",
         "weapon",
+        "my_side",
+        "opp_side",
         "headshot",
         "distance",
         "first",
