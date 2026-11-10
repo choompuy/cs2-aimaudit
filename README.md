@@ -13,7 +13,7 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 
 ## Features
 
-- **Overview** — every player in one table: K/D, accuracy, HS%, shots on the move, "risky shots", shoots-first rate, aim error, duel duration.
+- **Overview** — every player in one table: K/D, accuracy, HS%, shots on the move, "risky shots", shoots-first rate, aim error, duel duration. Tick a row's checkbox to analyze that player; the **All columns** toggle adds the detail metrics.
 - **Shooting** — hit zones, speed at each shot, a speed-vs-distance scatter with the acceptable-speed curve, per-weapon stats.
 - **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded.
 - **Timeline** — speed / yaw / pitch / held keys around any duel, cut at the moment of death (input recorded after death is a demo-parser artifact, not real play).

@@ -284,6 +284,25 @@ def fmt_first(v: str) -> str:
     }.get(v, str(v))
 
 
+def _cell_style(styler, css_fn, subset):
+    """Apply a per-cell CSS function to a Styler subset.
+
+    Styler.map exists from pandas 2.1; pandas 2.0 (our floor) spells it
+    applymap, which is deprecated (and removed in pandas 3) later on.
+    """
+    method = getattr(styler, "map", None)
+    if method:
+        return method(css_fn, subset=subset)
+    return styler.applymap(css_fn, subset=subset)
+
+
+def _pct_col(label):
+    """A 0-100 percentage column with a progress bar (units live in the cell)."""
+    return st.column_config.ProgressColumn(
+        label, min_value=0, max_value=100, format="%.1f%%"
+    )
+
+
 # ------------------------------------------------------ global filter bar
 # One bar under the player selector that every tab reads from: all metrics
 # below are computed on the FILTERED frames.
@@ -487,12 +506,36 @@ tab_ov, tab_sh, tab_du, tab_tl, tab_gd = st.tabs(
 )
 
 # -------------------------------------------------------------- overview
+# D4: one table for both teams (Team column + subtle team tint) instead of
+# two near-identical ones; ~8 columns by default, "All columns" adds the
+# detail metrics; the selected player's row is highlighted (★ + tint) and
+# clicking any row selects that player - same as the select box above.
 with tab_ov:
     st.subheader(t("ov_title"))
     st.caption(t("ov_caption"))
-    cols = {
+    _tcol, _ = st.columns([1, 2])
+    with _tcol:
+        ov_full = st.toggle(t("all_columns"), key="ov_full")
+    st.caption(t("ov_click_hint"))
+
+    team_order = ["T", "CT"] + sorted(set(summary["team"]) - {"T", "CT"})
+    ov = (
+        summary.assign(
+            _n=summary["player"].astype(str).str.lower(),
+            _t=summary["team"].map(
+                lambda x: team_order.index(x) if x in team_order else len(team_order)
+            ),
+        )
+        .sort_values(["_t", "_n"])
+        .reset_index(drop=True)
+    )
+    ov_sids = ov["sid"].tolist()
+    sel_row = ov_sids.index(me) if me in ov_sids else None
+
+    ov_labels = {
         "player": t("col_player"),
-        "sides": t("col_sides"),
+        "team": t("col_team"),
+        "kd": t("col_kd"),
         "kills": t("col_kills"),
         "deaths": t("col_deaths"),
         "shots": t("col_shots"),
@@ -503,20 +546,117 @@ with tab_ov:
         "moving": t("col_moving"),
         "risky": t("col_risky"),
         "first_shot": t("col_first_shot"),
+        "sides": t("col_sides"),
         "aim_err": t("col_aim_err"),
         "duration": t("col_duration"),
     }
-    team_order = ["T", "CT"] + sorted(set(summary["team"]) - {"T", "CT"})
-    for team in team_order:
-        g = summary[summary["team"] == team]
-        if not len(g):
-            continue
-        st.markdown(f"**{team}**")
-        st.dataframe(
-            g.drop(columns=["sid", "team"]).rename(columns=cols),
-            hide_index=True,
-            width="stretch",
+    ov_cells = {
+        "player": [
+            ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"])
+        ],
+        "team": ov["team"].to_numpy(),
+        "kd": [f"{k} / {d}" for k, d in zip(ov["kills"], ov["deaths"])],
+        "kills": ov["kills"].to_numpy(),
+        "deaths": ov["deaths"].to_numpy(),
+        "shots": ov["shots"].to_numpy(),
+        "hits": ov["hits"].to_numpy(),
+        "accuracy": ov["accuracy"].to_numpy(),
+        "hs_hits": ov["hs_hits"].to_numpy(),
+        "hs_kills": ov["hs_kills"].to_numpy(),
+        "moving": ov["moving"].to_numpy(),
+        "risky": ov["risky"].to_numpy(),
+        "first_shot": ov["first_shot"].to_numpy(),
+        "sides": ov["sides"].to_numpy(),
+        "aim_err": ov["aim_err"].to_numpy(),
+        "duration": ov["duration"].to_numpy(),
+    }
+    ov_cfg_all = {
+        "player": st.column_config.TextColumn(
+            ov_labels["player"], pinned=True, width="medium"
+        ),
+        "team": st.column_config.TextColumn(ov_labels["team"], width="small"),
+        "kd": st.column_config.TextColumn(ov_labels["kd"], width="small"),
+        "kills": st.column_config.NumberColumn(ov_labels["kills"], format="%d"),
+        "deaths": st.column_config.NumberColumn(ov_labels["deaths"], format="%d"),
+        "shots": st.column_config.NumberColumn(ov_labels["shots"], format="%d"),
+        "hits": st.column_config.NumberColumn(ov_labels["hits"], format="%d"),
+        "accuracy": _pct_col(ov_labels["accuracy"]),
+        "hs_hits": _pct_col(ov_labels["hs_hits"]),
+        "hs_kills": _pct_col(ov_labels["hs_kills"]),
+        "moving": _pct_col(ov_labels["moving"]),
+        "risky": _pct_col(ov_labels["risky"]),
+        "first_shot": _pct_col(ov_labels["first_shot"]),
+        "sides": st.column_config.TextColumn(ov_labels["sides"]),
+        "aim_err": st.column_config.NumberColumn(
+            ov_labels["aim_err"], format="%.1f°"
+        ),
+        "duration": st.column_config.NumberColumn(
+            ov_labels["duration"], format="%.2f s"
+        ),
+    }
+    _ov_basic = [
+        "player",
+        "team",
+        "kd",
+        "shots",
+        "accuracy",
+        "hs_hits",
+        "risky",
+        "first_shot",
+    ]
+    _ov_all = [
+        "player",
+        "team",
+        "kd",
+        "kills",
+        "deaths",
+        "shots",
+        "hits",
+        "accuracy",
+        "hs_hits",
+        "hs_kills",
+        "moving",
+        "risky",
+        "first_shot",
+        "sides",
+        "aim_err",
+        "duration",
+    ]
+    _ov_shown = _ov_all if ov_full else _ov_basic
+    ov_disp = pd.DataFrame({ov_labels[k]: ov_cells[k] for k in _ov_shown})
+
+    def _pick_player():
+        """Row click -> select that player (runs before widgets, so setting
+        session_state['me'] here is allowed; doing it in the tab body would
+        raise StreamlitWidgetAlreadyInstantiatedError)."""
+        try:
+            sel = st.session_state["ov_table"]
+        except KeyError:
+            return
+        rows = list(sel.selection.rows or [])
+        if rows and 0 <= rows[0] < len(ov_sids):
+            st.session_state["me"] = ov_sids[rows[0]]
+
+    _ov_styler = ov_disp.style
+    _team_css = {"T": "background-color: #2A2118", "CT": "background-color: #182432"}
+    _ov_styler = _cell_style(
+        _ov_styler, lambda v: _team_css.get(v, ""), subset=[ov_labels["team"]]
+    )
+    if sel_row is not None:
+        _ov_styler = _cell_style(
+            _ov_styler,
+            lambda v: "background-color: #3B3218",
+            subset=([sel_row], ov_disp.columns.tolist()),
         )
+    st.dataframe(
+        _ov_styler,
+        column_config={ov_labels[k]: ov_cfg_all[k] for k in _ov_shown},
+        hide_index=True,
+        width="stretch",
+        on_select=_pick_player,
+        selection_mode="single-row",
+        key="ov_table",
+    )
 
 # -------------------------------------------------------------- shooting
 with tab_sh:
@@ -703,22 +843,47 @@ with tab_sh:
     st.markdown(f"**{t('weapons')}**")
     w = core.weapon_stats(demo, shots_f, me, thr, safe_dist, strict_dist, hurts=hurts_f)
     if len(w):
-        w = w.rename(
-            columns={
-                "weapon": t("col_weapon"),
-                "shots": t("col_shots"),
-                "median_speed": t("col_median_speed"),
-                "median_dist": t("col_median_dist"),
-                "moving": t("col_moving_w"),
-                "risky": t("col_risky_w"),
-                "hits": t("col_hits"),
-                "hs": t("col_hs_hits"),
-                "accuracy": t("col_accuracy"),
-            }
-        )
-        st.dataframe(w, hide_index=True, width="stretch")
+        # D4: same table conventions as the other tables - units in the
+        # numbers, progress bars for percentages, weapon name pinned.
+        w_labels = {
+            "weapon": t("col_weapon"),
+            "shots": t("col_shots"),
+            "median_speed": t("col_median_speed"),
+            "median_dist": t("col_median_dist"),
+            "moving": t("col_moving_w"),
+            "risky": t("col_risky_w"),
+            "hits": t("col_hits"),
+            "hs": t("col_hs_hits"),
+            "accuracy": t("col_accuracy"),
+        }
+        w = w.rename(columns=w_labels)
+        w_cfg = {
+            w_labels["weapon"]: st.column_config.TextColumn(
+                w_labels["weapon"], pinned=True, width="medium"
+            ),
+            w_labels["shots"]: st.column_config.NumberColumn(
+                w_labels["shots"], format="%d"
+            ),
+            w_labels["median_speed"]: st.column_config.NumberColumn(
+                w_labels["median_speed"], format="%d u/s"
+            ),
+            w_labels["median_dist"]: st.column_config.NumberColumn(
+                w_labels["median_dist"], format="%d u"
+            ),
+            w_labels["moving"]: _pct_col(w_labels["moving"]),
+            w_labels["risky"]: _pct_col(w_labels["risky"]),
+            w_labels["hits"]: st.column_config.NumberColumn(
+                w_labels["hits"], format="%d"
+            ),
+            w_labels["hs"]: _pct_col(w_labels["hs"]),
+            w_labels["accuracy"]: _pct_col(w_labels["accuracy"]),
+        }
+        st.dataframe(w, column_config=w_cfg, hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------- duels
+# D4: ~8 columns by default, "All columns" reveals the detail metrics and
+# the technical tick column; numbers carry their units; the opponent name
+# stays pinned when the full table scrolls horizontally.
 with tab_du:
     st.subheader(t("du_title"))
     st.caption(t("du_caption"))
@@ -740,28 +905,94 @@ with tab_du:
             if r.penetrated:
                 fl.append(t("flag_penetrated"))
             flags.append(", ".join(fl))
-        disp = pd.DataFrame(
-            {
-                t("col_round"): ddf["round"].to_numpy(),
-                "tick": ddf["tick"].to_numpy(),
-                t("col_result"): [fmt_result(v) for v in ddf["result"]],
-                t("col_opponent"): [name_of.get(s, s) for s in ddf["opponent"]],
-                t("col_side"): ddf["my_side"].to_numpy(),
-                t("col_weapon"): ddf["weapon"].to_numpy(),
-                t("col_hs"): ["✓" if v else "" for v in ddf["headshot"]],
-                t("col_distance"): ddf["distance"].round(0).to_numpy(),
-                t("col_first"): [fmt_first(v) for v in ddf["first"]],
-                t("col_my_shots"): ddf["my_shots"].to_numpy(),
-                t("col_opp_shots"): ddf["opp_shots"].to_numpy(),
-                t("col_duration"): ddf["duration_s"].to_numpy(),
-                t("col_speed"): ddf["my_speed"].round(0).to_numpy(),
-                t("col_err"): ddf["my_err"].round(1).to_numpy(),
-                t("col_errhw"): ddf["my_err_hw"].round(2).to_numpy(),
-                t("col_flags"): flags,
-            }
-        )
+        _tcol, _ = st.columns([1, 2])
+        with _tcol:
+            du_full = st.toggle(t("all_columns"), key="du_full")
+        du_labels = {
+            "round": t("col_round"),
+            "result": t("col_result"),
+            "opponent": t("col_opponent"),
+            "weapon": t("col_weapon"),
+            "hs": t("col_hs"),
+            "distance": t("col_distance"),
+            "first": t("col_first"),
+            "aim_err": t("col_err"),
+            "my_shots": t("col_my_shots"),
+            "opp_shots": t("col_opp_shots"),
+            "duration": t("col_duration"),
+            "speed": t("col_speed"),
+            "errhw": t("col_errhw"),
+            "side": t("col_side"),
+            "flags": t("col_flags"),
+            "tick": t("col_tick"),
+        }
+        du_cells = {
+            "round": ddf["round"].to_numpy(),
+            "result": [fmt_result(v) for v in ddf["result"]],
+            "opponent": [name_of.get(s, s) for s in ddf["opponent"]],
+            "weapon": ddf["weapon"].to_numpy(),
+            "hs": ["✓" if v else "" for v in ddf["headshot"]],
+            "distance": ddf["distance"].to_numpy(),
+            "first": [fmt_first(v) for v in ddf["first"]],
+            "aim_err": ddf["my_err"].to_numpy(),
+            "my_shots": ddf["my_shots"].to_numpy(),
+            "opp_shots": ddf["opp_shots"].to_numpy(),
+            "duration": ddf["duration_s"].to_numpy(),
+            "speed": ddf["my_speed"].to_numpy(),
+            "errhw": ddf["my_err_hw"].to_numpy(),
+            "side": ddf["my_side"].to_numpy(),
+            "flags": flags,
+            "tick": ddf["tick"].to_numpy(),
+        }
+        du_cfg_all = {
+            "round": st.column_config.NumberColumn(du_labels["round"], format="%d"),
+            "result": st.column_config.TextColumn(du_labels["result"], width="small"),
+            "opponent": st.column_config.TextColumn(
+                du_labels["opponent"], pinned=True, width="medium"
+            ),
+            "weapon": st.column_config.TextColumn(du_labels["weapon"], width="small"),
+            "hs": st.column_config.Column(du_labels["hs"], width="small"),
+            "distance": st.column_config.NumberColumn(
+                du_labels["distance"], format="%d u"
+            ),
+            "first": st.column_config.TextColumn(du_labels["first"], width="small"),
+            "aim_err": st.column_config.NumberColumn(
+                du_labels["aim_err"], format="%.1f°"
+            ),
+            "my_shots": st.column_config.NumberColumn(
+                du_labels["my_shots"], format="%d"
+            ),
+            "opp_shots": st.column_config.NumberColumn(
+                du_labels["opp_shots"], format="%d"
+            ),
+            "duration": st.column_config.NumberColumn(
+                du_labels["duration"], format="%.2f s"
+            ),
+            "speed": st.column_config.NumberColumn(
+                du_labels["speed"], format="%d u/s"
+            ),
+            "errhw": st.column_config.NumberColumn(du_labels["errhw"], format="%.2f"),
+            "side": st.column_config.TextColumn(du_labels["side"], width="small"),
+            "flags": st.column_config.TextColumn(du_labels["flags"], width="medium"),
+            "tick": st.column_config.NumberColumn(
+                du_labels["tick"], format="%d", width="small"
+            ),
+        }
+        _du_basic = [
+            "round",
+            "result",
+            "opponent",
+            "weapon",
+            "hs",
+            "distance",
+            "first",
+            "aim_err",
+        ]
+        _du_shown = list(du_labels) if du_full else _du_basic
+        disp = pd.DataFrame({du_labels[k]: du_cells[k] for k in _du_shown})
         du_sel = st.dataframe(
             disp,
+            column_config={du_labels[k]: du_cfg_all[k] for k in _du_shown},
             hide_index=True,
             width="stretch",
             on_select="rerun",

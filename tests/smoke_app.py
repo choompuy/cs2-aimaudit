@@ -472,6 +472,18 @@ def scenario_matrix():
                     f"player {NAMES[sid]}",
                     lambda s=sid: at.selectbox(key="me").select(s).run(),
                 )
+            for tk in ("ov_full", "du_full"):
+                if widget(at, "toggle", tk) is not None:
+                    act(
+                        at,
+                        f"{tk} on",
+                        lambda tk=tk: at.toggle(key=tk).set_value(True).run(),
+                    )
+                    act(
+                        at,
+                        f"{tk} off",
+                        lambda tk=tk: at.toggle(key=tk).set_value(False).run(),
+                    )
             for i in range(3):
                 if widget(at, "selectbox", "tl_duel") is not None:
                     act(
@@ -479,6 +491,40 @@ def scenario_matrix():
                         f"timeline duel #{i}",
                         lambda i=i: at.selectbox(key="tl_duel").select(i).run(),
                     )
+
+
+def scenario_tables():
+    """
+    D4 (UX redesign): Basic/Full table switches, and the overview table
+    must survive a row-selection state (the browser sends it on click;
+    AppTest cannot fire on_select callbacks, but the state must not crash
+    the app either).
+    """
+    print("== tables: Basic/Full switches, row selection state ==")
+    at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "tables.dem")
+    check("runs without exception", not at.exception, err_of(at))
+    check("overview toggle exists", widget(at, "toggle", "ov_full") is not None)
+    check("duels toggle exists", widget(at, "toggle", "du_full") is not None)
+    act(at, "overview: all columns", lambda: at.toggle(key="ov_full").set_value(True).run())
+    act(at, "duels: all columns", lambda: at.toggle(key="du_full").set_value(True).run())
+    act(at, "both back to basic", lambda: (
+        at.toggle(key="ov_full").set_value(False),
+        at.toggle(key="du_full").set_value(False),
+        at.run(),
+    ))
+    # the same widget state the browser sends after a row click on the
+    # overview table: the app must render (the on_select callback itself
+    # only runs in a real browser session)
+    at.session_state["ov_table"] = {"selection": {"rows": [2], "columns": []}}
+    at.run()
+    check("row-selection state does not crash", not at.exception, err_of(at))
+    # russian labels are ~20-30% longer - the tables must hold
+    act(at, "tables in russian", lambda: at.selectbox(key="lang").select("ru").run())
+    act(at, "russian + all columns", lambda: (
+        at.toggle(key="ov_full").set_value(True),
+        at.toggle(key="du_full").set_value(True),
+        at.run(),
+    ))
 
 
 def run_real(path):
@@ -520,6 +566,7 @@ def main():
         scenario_long25()
         scenario_quoted_path()
         scenario_bad_input()
+        scenario_tables()
         if arg == "--all":
             scenario_matrix()
     print(f"\n{PASS} passed, {FAIL} failed")
