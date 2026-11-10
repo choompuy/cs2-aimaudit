@@ -159,12 +159,14 @@ def make_match():
 
 
 def make_match_sides():
-    """4 players, 2 rounds with a halftime swap.
+    """
+    4 players, 2 rounds with a halftime swap.
 
     Round 1: S1,S2 = T (team_num 2); S3,S4 = CT (3). Round 2: swapped.
     Static player_info keeps the END-of-match teams (S1,S2 = CT), which is
     exactly the trap the per-round side logic must fix.
     """
+
     player_info = pd.DataFrame(
         {
             "steamid": [int(s) for s in IDS],
@@ -176,9 +178,7 @@ def make_match_sides():
         "weapon_fire": pd.DataFrame(
             {
                 "tick": [100, 110, 300],
-                "user_steamid": pd.array(
-                    [int(S1), int(S3), int(S3)], dtype="uint64"
-                ),
+                "user_steamid": pd.array([int(S1), int(S3), int(S3)], dtype="uint64"),
                 "user_name": ["Alpha", "Charlie", "Charlie"],
                 "weapon": ["weapon_ak47"] * 3,
                 "total_rounds_played": [0, 0, 1],
@@ -211,7 +211,9 @@ def make_match_sides():
         for sid in IDS:
             first_half = tick < 200
             tn[(tick, sid)] = (
-                (2 if sid in (S1, S2) else 3) if first_half else (3 if sid in (S1, S2) else 2)
+                (2 if sid in (S1, S2) else 3)
+                if first_half
+                else (3 if sid in (S1, S2) else 2)
             )
             rows.append(
                 {
@@ -696,7 +698,11 @@ check(
 )
 
 m_tr = make_match()
-m_tr["header"] = {"map_name": "de_mirage", "playback_ticks": 6400, "playback_time": 50.0}
+m_tr["header"] = {
+    "map_name": "de_mirage",
+    "playback_ticks": 6400,
+    "playback_time": 50.0,
+}
 FakeParser.demos["match128.dem"] = m_tr
 demo128 = core.load_demo("match128.dem")
 check("demo.tickrate == 128", demo128.tickrate == 128)
@@ -705,7 +711,9 @@ sp128 = float(
         "speed"
     ].iloc[0]
 )
-check("speed scales with tickrate (4u/tick -> 512 u/s)", abs(sp128 - 512.0) < 1e-6, sp128)
+check(
+    "speed scales with tickrate (4u/tick -> 512 u/s)", abs(sp128 - 512.0) < 1e-6, sp128
+)
 d128 = core.build_duels(demo128, 3.0)
 check("duel found at 128 tick", len(d128) == 1)
 check(
@@ -769,7 +777,9 @@ summ_s = core.player_summary(demo_s, duels_s, shots_s, 40)
 a_row = summ_s[summ_s["sid"] == S1].iloc[0]
 check("summary sides T→CT", a_row["sides"] == "T→CT", a_row["sides"])
 chk_s = {c["id"]: c for c in core.data_checks(demo_s, shots_s, duels_s)}
-check("sides check ok when data present", chk_s["sides"]["level"] == "ok", chk_s["sides"])
+check(
+    "sides check ok when data present", chk_s["sides"]["level"] == "ok", chk_s["sides"]
+)
 
 # team_num unavailable -> static fallback + warn check
 m_s2 = make_match_sides()
@@ -784,8 +794,15 @@ check(
     s1s2["side"] == "CT",
     s1s2["side"],
 )
-chk_s2 = {c["id"]: c for c in core.data_checks(demo_s2, shots_s2, core.build_duels(demo_s2, 3.0))}
-check("sides check warns when missing", chk_s2["sides"]["level"] == "warn", chk_s2["sides"])
+chk_s2 = {
+    c["id"]: c
+    for c in core.data_checks(demo_s2, shots_s2, core.build_duels(demo_s2, 3.0))
+}
+check(
+    "sides check warns when missing",
+    chk_s2["sides"]["level"] == "warn",
+    chk_s2["sides"],
+)
 
 # ------------------------------------------------- stats: wilson + ranks
 print("== wilson_ci ==")
@@ -799,7 +816,9 @@ check("wilson 10/10", abs(lo - 72.2460) < 0.01 and hi == 100.0, (lo, hi))
 lo, hi = core.wilson_ci(62, 100)
 check("wilson 62/100", abs(lo - 52.2096) < 0.01 and abs(hi - 70.9026) < 0.01, (lo, hi))
 lo, hi = core.wilson_ci(3, 8)
-check("wilson 3/8 wide", abs(lo - 13.6842) < 0.01 and abs(hi - 69.4262) < 0.01, (lo, hi))
+check(
+    "wilson 3/8 wide", abs(lo - 13.6842) < 0.01 and abs(hi - 69.4262) < 0.01, (lo, hi)
+)
 check("wilson n=0 -> nan", all(pd.isna(x) for x in core.wilson_ci(0, 0)))
 check("wilson nan-safe", all(pd.isna(x) for x in core.wilson_ci(np.nan, 5)))
 for k, n in ((0, 10), (5, 10), (62, 100), (99, 100)):
@@ -825,7 +844,10 @@ check("rank low best", core.rank_in_lobby(rdf, "p3", "risky", "low") == (1, 3))
 check("rank low best 2nd", core.rank_in_lobby(rdf, "p2", "risky", "low") == (3, 3))
 check("rank unknown player -> None", core.rank_in_lobby(rdf, "px", "accuracy") is None)
 check("rank NaN player -> None", core.rank_in_lobby(rdf, "p3", "accuracy") is None)
-check("rank single player -> None", core.rank_in_lobby(rdf.iloc[:1], "p1", "accuracy") is None)
+check(
+    "rank single player -> None",
+    core.rank_in_lobby(rdf.iloc[:1], "p1", "accuracy") is None,
+)
 check("rank missing col -> None", core.rank_in_lobby(rdf, "p1", "nope") is None)
 
 # ------------------------------------------------- weapon classes / filters
@@ -842,12 +864,40 @@ check(
     "classes cover the backlog list",
     {w for ws in core.WEAPON_CLASSES.values() for w in ws}
     == {
-        "ak47", "m4a1", "m4a1_silencer", "famas", "galilar", "aug", "sg556",
-        "awp", "ssg08", "scar20", "g3sg1",
-        "mac10", "mp9", "mp7", "mp5sd", "ump45", "p90", "bizon",
-        "glock", "hkp2000", "usp_silencer", "p250", "fiveseven", "tec9",
-        "cz75a", "deagle", "elite", "revolver",
-        "nova", "xm1014", "mag7", "sawedoff", "m249", "negev",
+        "ak47",
+        "m4a1",
+        "m4a1_silencer",
+        "famas",
+        "galilar",
+        "aug",
+        "sg556",
+        "awp",
+        "ssg08",
+        "scar20",
+        "g3sg1",
+        "mac10",
+        "mp9",
+        "mp7",
+        "mp5sd",
+        "ump45",
+        "p90",
+        "bizon",
+        "glock",
+        "hkp2000",
+        "usp_silencer",
+        "p250",
+        "fiveseven",
+        "tec9",
+        "cz75a",
+        "deagle",
+        "elite",
+        "revolver",
+        "nova",
+        "xm1014",
+        "mag7",
+        "sawedoff",
+        "m249",
+        "negev",
     },
 )
 
@@ -878,24 +928,33 @@ fs_hurts = pd.DataFrame({"attacker_steamid": ["p1"], "weapon": ["ak47"]})
 
 # no filter -> copies, same content
 s0, d0, h0 = core.apply_filters(fs_shots, fs_duels, fs_hurts, None)
-check("no filter: shots unchanged", len(s0) == 5 and list(s0["weapon"]) == list(fs_shots["weapon"]))
+check(
+    "no filter: shots unchanged",
+    len(s0) == 5 and list(s0["weapon"]) == list(fs_shots["weapon"]),
+)
 check("no filter: duels unchanged", len(d0) == 2)
 check("no filter: hurts unchanged", len(h0) == 1)
 check("no filter: copies", s0 is not fs_shots)
 
 # weapons
-s1, d1, h1 = core.apply_filters(fs_shots, fs_duels, fs_hurts, core.Filters(weapons={"ak47"}))
+s1, d1, h1 = core.apply_filters(
+    fs_shots, fs_duels, fs_hurts, core.Filters(weapons={"ak47"})
+)
 check("weapons filter shots", list(s1["weapon"]) == ["ak47", "ak47"])
 check("weapons filter duels", list(d1["weapon"]) == ["ak47"])
 check("weapons filter hurts", list(h1["weapon"]) == ["ak47"])
 
 # classes
-s2, d2, _ = core.apply_filters(fs_shots, fs_duels, fs_hurts, core.Filters(classes={"sniper", "pistol"}))
+s2, d2, _ = core.apply_filters(
+    fs_shots, fs_duels, fs_hurts, core.Filters(classes={"sniper", "pistol"})
+)
 check("classes filter shots", list(s2["weapon"]) == ["awp", "deagle"])
 check("classes filter duels", list(d2["weapon"]) == ["awp"])
 
 # weapons + classes = union
-s3, _, _ = core.apply_filters(fs_shots, fs_duels, None, core.Filters(weapons={"awp"}, classes={"rifle"}))
+s3, _, _ = core.apply_filters(
+    fs_shots, fs_duels, None, core.Filters(weapons={"awp"}, classes={"rifle"})
+)
 check("weapons+classes union", list(s3["weapon"]) == ["ak47", "awp", "ak47", "m4a1"])
 
 # rounds
@@ -913,7 +972,9 @@ check(
 )
 
 # dist (shots use 'dist', duels 'distance'; NaN dropped)
-s6, d6, _ = core.apply_filters(fs_shots, fs_duels, None, core.Filters(dist=(500.0, 1500.0)))
+s6, d6, _ = core.apply_filters(
+    fs_shots, fs_duels, None, core.Filters(dist=(500.0, 1500.0))
+)
 check("dist filter shots", list(s6["dist"]) == [700.0, 1200.0])
 check("dist filter duels", list(d6["distance"]) == [800.0])
 
@@ -960,7 +1021,10 @@ _, dp, _ = core.apply_filters(
 # fs_duels has rounds 1,2 -> only round 1 survives
 check("rounds_set filter duels", list(dp["round"]) == [1])
 dsp, _, _ = core.apply_filters(
-    pd.DataFrame({"round": [1, 2, 13, 14]}), pd.DataFrame(), None, core.Filters(rounds_set={1, 13})
+    pd.DataFrame({"round": [1, 2, 13, 14]}),
+    pd.DataFrame(),
+    None,
+    core.Filters(rounds_set={1, 13}),
 )
 check("rounds_set filter frames", list(dsp["round"]) == [1, 13])
 
@@ -987,31 +1051,53 @@ check("duck nan -> 0", core._duck_amount(row(0, 0, 0, duck=np.nan)) == 0.0)
 shooter = row(0, 0, 0)
 target_stand = row(1000, 0, 0)
 err_ss = core.angle_err(shooter, target_stand)  # head 2u below eyes
-check("stand/stand err ~ 0.11 deg", abs(err_ss - np.degrees(np.arctan(2 / 1000))) < 1e-9, err_ss)
+check(
+    "stand/stand err ~ 0.11 deg",
+    abs(err_ss - np.degrees(np.arctan(2 / 1000))) < 1e-9,
+    err_ss,
+)
 target_duck = row(1000, 0, 0, duck=1.0)
 err_sd = core.angle_err(shooter, target_duck)  # head 20u below eyes
-check("target crouched: err ~ 1.15 deg", abs(err_sd - np.degrees(np.arctan(20 / 1000))) < 1e-9, err_sd)
+check(
+    "target crouched: err ~ 1.15 deg",
+    abs(err_sd - np.degrees(np.arctan(20 / 1000))) < 1e-9,
+    err_sd,
+)
 shooter_duck = row(0, 0, 0, duck=1.0)
 err_ds = core.angle_err(shooter_duck, target_stand)  # head 16u ABOVE crouched eyes
-check("shooter crouched: err ~ 0.92 deg", abs(err_ds - np.degrees(np.arctan(16 / 1000))) < 1e-9, err_ds)
+check(
+    "shooter crouched: err ~ 0.92 deg",
+    abs(err_ds - np.degrees(np.arctan(16 / 1000))) < 1e-9,
+    err_ds,
+)
 err_dd = core.angle_err(shooter_duck, target_duck)
 check("both crouched ~ stand/stand", abs(err_dd - err_ss) < 1e-9, err_dd)
 
 ha = core.head_ang(1000.0)
 check("head_ang 1000u ~ 1.031 deg", abs(ha - 1.0313) < 1e-3, ha)
-check("head_ang 2000 ≈ half of 1000 (small-angle)", abs(core.head_ang(2000.0) - ha / 2) < 1e-3)
+check(
+    "head_ang 2000 ≈ half of 1000 (small-angle)",
+    abs(core.head_ang(2000.0) - ha / 2) < 1e-3,
+)
 check("head_ang nan", pd.isna(core.head_ang(np.nan)))
 check("head_ang 0 -> nan", pd.isna(core.head_ang(0.0)))
 ha_arr = core.head_ang(pd.Series([500.0, 1000.0, np.nan]))
 check(
     "head_ang vector",
-    abs(ha_arr[0] - 2 * ha) < 1e-3 and abs(ha_arr[1] - ha) < 1e-9 and pd.isna(ha_arr[2]),
+    abs(ha_arr[0] - 2 * ha) < 1e-3
+    and abs(ha_arr[1] - ha) < 1e-9
+    and pd.isna(ha_arr[2]),
     ha_arr,
 )
 # duel-level: killer_err ~5 deg (punch) at dist 800, head_ang(800)=1.289
 kerr = duels.iloc[0]["killer_err"]
-check("killer would_head False (punch pushes out)", not bool(duels.iloc[0]["killer_would_head"]))
-check("victim would_head True (aimed straight)", bool(duels.iloc[0]["victim_would_head"]))
+check(
+    "killer would_head False (punch pushes out)",
+    not bool(duels.iloc[0]["killer_would_head"]),
+)
+check(
+    "victim would_head True (aimed straight)", bool(duels.iloc[0]["victim_would_head"])
+)
 check(
     "killer err_hw ~ err/1.289 (3..5)",
     3.0 < duels.iloc[0]["killer_err_hw"] < 5.0,
@@ -1040,7 +1126,11 @@ m_d2 = make_match()
 m_d2["unsupported"] = {"duck_amount"}
 FakeParser.demos["duck2.dem"] = m_d2
 demo_d2 = core.load_demo("duck2.dem")
-check("duck unsupported: ticks parsed anyway", len(demo_d2.ticks) == 22, len(demo_d2.ticks))
+check(
+    "duck unsupported: ticks parsed anyway",
+    len(demo_d2.ticks) == 22,
+    len(demo_d2.ticks),
+)
 check("duck unsupported: no duck col", "duck_amount" not in demo_d2.ticks.columns)
 check("duck unsupported: punch still there", "punch_pitch" in demo_d2.ticks.columns)
 
@@ -1124,8 +1214,13 @@ check(
     (s1_cs.loc[121, "speed"], s1_cs.loc[121, "speed_prev"], s1_cs.loc[121, "stop"]),
 )
 check("speed_prev wired", abs(s1_cs.loc[121, "speed_prev"] - 256.0) < 1e-6)
-check("counter-strafe tap with S against +X motion", bool(s1_cs.loc[121, "counter_strafe"]))
-check("no tap when moving (no opposing key)", not bool(s1_cs.loc[120, "counter_strafe"]))
+check(
+    "counter-strafe tap with S against +X motion",
+    bool(s1_cs.loc[121, "counter_strafe"]),
+)
+check(
+    "no tap when moving (no opposing key)", not bool(s1_cs.loc[120, "counter_strafe"])
+)
 check("standing shots have no tap", not bool(s1_cs.loc[100, "counter_strafe"]))
 
 # same geometry but holding W (FORWARD, supports the motion) -> no tap
@@ -1154,10 +1249,13 @@ print("== duel shots by crosshair proximity ==")
 
 
 def make_match_aim(s4_pos=(0.0, 800.0)):
-    """S1 (T) kills S3 (CT) at tick 200. In the window S1 fires:
+    """
+    S1 (T) kills S3 (CT) at tick 200. In the window S1 fires:
     t=100 aimed at S3 (yaw 0), t=150 aimed 90 deg away (yaw 90 - at S4
     when S4 sits north, at empty space otherwise), t=160 aimed at S3
-    again. S3 fires t=120 at S1 and t=130 without a position row."""
+    again. S3 fires t=120 at S1 and t=130 without a position row.
+    """
+
     player_info = pd.DataFrame(
         {
             "steamid": [int(s) for s in IDS],
@@ -1168,9 +1266,7 @@ def make_match_aim(s4_pos=(0.0, 800.0)):
     fires = pd.DataFrame(
         {
             "tick": [100, 150, 160, 120, 130],
-            "user_steamid": pd.array(
-                [int(S1)] * 3 + [int(S3)] * 2, dtype="uint64"
-            ),
+            "user_steamid": pd.array([int(S1)] * 3 + [int(S3)] * 2, dtype="uint64"),
             "user_name": ["Alpha"] * 3 + ["Charlie"] * 2,
             "weapon": ["weapon_ak47"] * 5,
             "total_rounds_played": [0] * 5,
@@ -1215,7 +1311,9 @@ def make_match_aim(s4_pos=(0.0, 800.0)):
             )
     # drop S3's rows at 130/129: the shot without position data must be kept
     ticks = pd.DataFrame(rows)
-    ticks = ticks[~((ticks["steamid"] == f64_sid(S3)) & (ticks["tick"].isin([129, 130])))]
+    ticks = ticks[
+        ~((ticks["steamid"] == f64_sid(S3)) & (ticks["tick"].isin([129, 130])))
+    ]
     return {
         "player_info": player_info,
         "header": {"map_name": "de_mirage"},
@@ -1246,7 +1344,9 @@ check(
     (da["victim_shots"], da["victim_shots_raw"]),
 )
 check("first from filtered shots", da["first"] == "killer")
-check("low_conf when a shot went at another enemy", bool(da["low_conf"]), da["low_conf"])
+check(
+    "low_conf when a shot went at another enemy", bool(da["low_conf"]), da["low_conf"]
+)
 check(
     "first tick = first AIMED shot",
     da["killer_first_tick"] == 100,
@@ -1296,5 +1396,38 @@ try:
 except ValueError as e:
     check("raises no_events", "no_events" in str(e))
 
+print("== corrupt archives ==")
+_cd = tempfile.mkdtemp()
+_parts = lambda: {
+    f
+    for f in os.listdir(tempfile.gettempdir())
+    if f.startswith("cs2_aimaudit_") and f.endswith(".part")
+}  # noqa: E731
+_parts_before = _parts()
+_good = bz2.compress(b"PBDEMS2\0" + os.urandom(4000))
+for _name, _data in (
+    ("trunc.dem.bz2", _good[: len(_good) // 2]),
+    ("garbage.dem.bz2", b"not a bz2 file"),
+    ("garbage.dem.gz", b"not a gzip file"),
+    ("garbage.zip", b"PK not really a zip"),
+    ("empty.dem.bz2", b""),
+):
+    _p = os.path.join(_cd, _name)
+    with open(_p, "wb") as _f:
+        _f.write(_data)
+    try:
+        core.decompressed_demo(_p)
+        check(f"{_name}: raises", False)
+    except ValueError:
+        check(f"{_name}: ValueError (the app catches it)", True)
+    except Exception as _e:  # noqa: BLE001
+        check(f"{_name}: ValueError", False, f"got {type(_e).__name__}")
+check(
+    "no new .part leftovers after failed unpack",
+    not (_parts() - _parts_before),
+    str(sorted(_parts() - _parts_before)[:2]),
+)
+
 print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)

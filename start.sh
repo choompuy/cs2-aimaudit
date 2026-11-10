@@ -27,5 +27,12 @@ python -m pip install --quiet -r requirements.txt || {
   exit 1
 }
 
+# Streamlit asks for an email on its very first run and waits for Enter.
+# An empty credentials file skips that prompt.
+if [ ! -f "$HOME/.streamlit/credentials.toml" ]; then
+  mkdir -p "$HOME/.streamlit"
+  printf '[general]\nemail = ""\n' > "$HOME/.streamlit/credentials.toml"
+fi
+
 echo "[3/3] Starting CS2-AimAudit, a browser tab will open ..."
 python -m streamlit run app.py

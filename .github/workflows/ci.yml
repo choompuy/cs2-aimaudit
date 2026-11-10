@@ -28,3 +28,5 @@ jobs:
         run: python tests/test_core.py
       - name: UI consistency checks
         run: python tests/check_ui.py
+      - name: UI smoke test (real app.py on synthetic demos)
+        run: python tests/smoke_app.py aim.dem match.dem sides.dem warmup_only.dem

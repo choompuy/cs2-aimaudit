@@ -729,6 +729,30 @@ def _zstandard_module():
     return zstandard
 
 
+def _unpack(ext: str, p: str, tmp: str) -> None:
+    """Stream-decompress archive `p` into file `tmp` (may raise on corrupt input)."""
+    if ext == ".bz2":
+        with bz2.open(p, "rb") as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    elif ext == ".gz":
+        with gzip.open(p, "rb") as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    elif ext == ".zst":
+        zstd = _zstandard_module()
+        with open(p, "rb") as src, open(tmp, "wb") as dst:
+            with zstd.ZstdDecompressor().stream_reader(src) as rdr:
+                shutil.copyfileobj(rdr, dst)
+    else:  # .zip
+        with zipfile.ZipFile(p) as z:
+            members = sorted(n for n in z.namelist() if n.lower().endswith(".dem"))
+            if not members:
+                raise ValueError(
+                    f"No .dem file inside the archive: {os.path.basename(p)}"
+                )
+            with z.open(members[0]) as src, open(tmp, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+
 def decompressed_demo(path: str) -> str:
     """
     Path to a plain .dem for `path`, decompressing transparently.
@@ -760,26 +784,23 @@ def decompressed_demo(path: str) -> str:
     if os.path.exists(target) and os.path.getsize(target) > 0:
         return target  # cached from an earlier run
     tmp = target + ".part"
-    if ext == ".bz2":
-        with bz2.open(p, "rb") as src, open(tmp, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-    elif ext == ".gz":
-        with gzip.open(p, "rb") as src, open(tmp, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-    elif ext == ".zst":
-        zstd = _zstandard_module()
-        with open(p, "rb") as src, open(tmp, "wb") as dst:
-            with zstd.ZstdDecompressor().stream_reader(src) as rdr:
-                shutil.copyfileobj(rdr, dst)
-    else:  # .zip
-        with zipfile.ZipFile(p) as z:
-            members = sorted(n for n in z.namelist() if n.lower().endswith(".dem"))
-            if not members:
-                raise ValueError(
-                    f"No .dem file inside the archive: {os.path.basename(p)}"
-                )
-            with z.open(members[0]) as src, open(tmp, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+
+    def _drop_part() -> None:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+    try:
+        _unpack(ext, p, tmp)
+    except ValueError:
+        _drop_part()
+        raise
+    except Exception as e:  # noqa: BLE001 - truncated/corrupt archive, bad zip, zstd error...
+        _drop_part()
+        raise ValueError(
+            f"Cannot unpack {os.path.basename(p)}: {type(e).__name__}: {e}"
+        ) from e
     if not os.path.exists(tmp) or os.path.getsize(tmp) == 0:
         try:
             os.remove(tmp)

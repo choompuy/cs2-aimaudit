@@ -41,6 +41,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem Streamlit asks for an email on its very first run and waits for Enter.
+rem An empty credentials file skips that prompt.
+if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
+    if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit"
+    > "%USERPROFILE%\.streamlit\credentials.toml" echo [general]
+    >> "%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
+)
+
 echo [3/3] Starting CS2-AimAudit, a browser tab will open ...
 python -m streamlit run app.py
 

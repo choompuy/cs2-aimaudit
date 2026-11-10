@@ -169,7 +169,10 @@ with st.expander(t("path_expander")):
         t("path_label"), placeholder=t("path_ph"), key="demo_path", help=t("path_help")
     )
 
-path_in = str(st.session_state.get("demo_path", "")).strip()
+# Explorer's "Copy as path" wraps the path in quotes; also accept ~ and %VARS%
+path_in = str(st.session_state.get("demo_path", "")).strip().strip("\"'").strip()
+if path_in:
+    path_in = os.path.expandvars(os.path.expanduser(path_in))
 if path_in:
     if not os.path.isfile(path_in):
         st.error(t("err_path_missing", path=path_in))
@@ -307,7 +310,14 @@ with st.container(border=True):
         st.session_state["flt_preset"] = "all"
     if st.session_state.get("flt_side") not in ("all", "T", "CT"):
         st.session_state["flt_side"] = "all"
-    if n_rounds >= 1:
+    # st.slider raises StreamlitInvalidMinMaxError when min_value == max_value,
+    # which kills the whole app on a one-round demo (or any demo where every
+    # shot lands in round 1 because total_rounds_played never arrives). A
+    # single round needs no range filter, so the slider starts at 2 rounds.
+    if n_rounds >= 2:
+        # no `value=`: the clamp block above always puts the (normalized)
+        # range into session_state, and passing both a default and the
+        # session-state value makes Streamlit log a warning.
         rv = st.session_state.get("flt_rounds") or (1, n_rounds)
         try:
             lo_r = max(1, min(int(rv[0]), n_rounds))
@@ -344,7 +354,9 @@ with st.container(border=True):
         st.session_state["flt_preset"] = "all"
 
     fr1, fr2, fr3, fr4 = st.columns([3, 2, 2, 2])
-    if n_rounds >= 1:
+    if (
+        n_rounds >= 2
+    ):  # a slider needs min < max (1-round demos have nothing to range over)
         fr1.slider(
             t("flt_rounds"),
             1,
