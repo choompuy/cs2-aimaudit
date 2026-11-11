@@ -359,3 +359,94 @@ user_team_name` and warmup filter via `is_warmup_period == False`.
   debug_report, missing events.
 - `tests/check_ui.py` — cross-checks t() keys in app.py ↔ i18n en/ru,
   format placeholders, presence of all core.\* and columns.
+
+## 12. Real-demo round encoding — step 2A diagnostics (2026-11-11)
+
+Sources: two real demos parsed with `tools/inspect_rounds.py`
+(demoparser2 0.42.1, the version pinned in requirements.txt):
+
+- `faceit_mirage.dem.zst` — FACEIT, de_mirage (17 played rounds, 13-x end)
+- `competitive_mirage.dem.bz2` — Valve Competitive/Premier, de_mirage
+  (16 played rounds, 13-x end)
+
+### 12.1 Event availability (both demos, 48 events each)
+
+- **`round_start` and `round_end` DO NOT EXIST** in CS2 demos as exposed by
+  demoparser2 (`list_game_events()`), so step 2B4 cannot add them. There is
+  no `winner`/`reason` field anywhere → **round winner and score are NOT
+  reliably available via events; do not show them** (degrade silently).
+- Round boundary events that DO exist: `round_freeze_end`,
+  `round_prestart` / `round_poststart`, `round_officially_ended`,
+  `cs_pre_restart`, `begin_new_match`, `round_announce_last_round_half`,
+  `round_announce_match_point`, `round_announce_warmup`,
+  `cs_win_panel_match`.
+- `round_freeze_end` / `begin_new_match` columns: only `tick` plus whatever
+  is merged via `other=` (`total_rounds_played`, `is_warmup_period`).
+- Valve demo also has `rank_update`, `bullet_damage`, `player_bullet_hit`;
+  FACEIT demo has `bomb_defused`, `chat_message`, `player_blind` — event
+  sets differ slightly per server, never assume an event is present.
+
+### 12.2 FACEIT: knife round (the defect we must fix)
+
+| tick | what happens |
+| --- | --- |
+| 1280 | `round_freeze_end` — knife round starts. `trp=0`, **`is_warmup_period=False`** (so the current warmup filter does NOT drop it) |
+| 1299+ | knife-only `weapon_fire` (knife/knife_t/knife_gut/knife_falchion) |
+| 2361–2658 | 6 knife `player_death`, all `trp=0` → **today they merge into round 1 (= pistol round), polluting K/D, duels, first-shot stats** |
+| 2836 | `round_announce_warmup`, `round_prestart`, `round_poststart` (post-knife warmup phase) |
+| 2920 | `cs_pre_restart` |
+| 2940 | **`begin_new_match`** — the live match officially starts here |
+| 2940–4635 | no deaths/fires at all (warmup/freeze) |
+| 4635 | `round_freeze_end` — **pistol round (live round 1)**, `trp=0` again |
+| 10260+ | `trp=1,2,...,16` — rounds 2..17 |
+
+Key facts:
+
+- The counter never resets *during* the knife round; instead the whole match
+  restarts via `begin_new_match` **after** the knife round, and `trp` starts
+  from 0 again. Both the knife round and the pistol round sit at `trp=0`;
+  **`trp` alone cannot tell them apart — the tick of `begin_new_match` can.**
+- All 6 knife kills happen strictly before `begin_new_match` (2940).
+- `is_warmup_period=False` on every event in this demo (even during the
+  post-knife warmup phase there are no fire/death rows to carry it).
+- A knife kill also occurs mid-match (tick 32750, `trp=4`): step 2B2 must
+  filter duels by weapon, not by round.
+- Confirmed on a second FACEIT demo (de_inferno, 19 rounds): same shape, plus
+  a warmup round AFTER the knife round and before `begin_new_match` - its
+  `round_freeze_end` IS flagged `is_warmup_period=True` (knife round is not).
+  So: `excluded` = {knife_round: 1, warmup: 1} there; the old warmup filter
+  alone dropped only the warmup round, never the knife round.
+- MR12 checks out on real data: round 13 (`trp=12`) fired only
+  glock/usp_silencer (second pistol round), round 14 = full buys.
+
+### 12.3 Valve Competitive/Premier: no knife round
+
+| tick | what happens |
+| --- | --- |
+| 66 | `begin_new_match` — essentially at demo start |
+| 1441 | `round_freeze_end` — pistol round immediately (glock x91 / usp_silencer fires) |
+| 6553+ | `trp=1..15` — rounds 2..16, monotonic, no resets |
+
+No knife round, no warmup, no restarts. Everything with `tick >= 66` is live.
+
+### 12.4 Proposed detection for step 2B
+
+1. **Live-match start** = tick of the **last** `begin_new_match` event (use
+   the last one: a mid-match restart genuinely restarts the match). If the
+   event is absent, keep everything (fallback below).
+2. Everything with `tick < live_start` is excluded, counted per cause for the
+   UI banner: rounds with `is_warmup_period=True` → warmup; round segments
+   before `live_start` that are not warmup → knife round; the rest → restart.
+   Excluded round count = number of `round_freeze_end` with `tick < live_start`
+   (1 for the FACEIT demo above, 0 for the Valve one).
+3. Round number for live events = `total_rounds_played + 1`.
+4. **Fallback without `begin_new_match`** (old/3rd-party demos): the first
+   round segment (bounded by `round_freeze_end`) with zero gun fires and
+   knife-only deaths is the knife round → exclude it too.
+5. Halves/OT (B3) from `demo.sides` swaps; MR12 (1-12 / 13-24, pistols 1 and
+   13) stays the fallback — verified correct on the FACEIT demo.
+6. Duels (B2): exclude knife/grenade/world/zeus/C4 kills from `build_duels`
+   (mid-match knife kills exist); K/D on Overview stays all-weapon and is
+   labelled as such.
+
+Reproduce: `python tools/inspect_rounds.py faceit.dem.zst premier.dem.bz2`.

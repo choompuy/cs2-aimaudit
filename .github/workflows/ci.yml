@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources
-        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py
+        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py tools/inspect_rounds.py
       - name: Core tests (synthetic demo, no .dem needed)
         run: python tests/test_core.py
       - name: UI consistency checks
@@ -50,7 +50,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources
-        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py
+        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py tools/inspect_rounds.py
       - name: Full UI smoke test
         run: python tests/smoke_app.py --all
 
@@ -69,7 +69,7 @@ jobs:
       - name: Install the lowest allowed versions
         run: uv pip install --resolution lowest-direct -r requirements.txt --system
       - name: Byte-compile sources
-        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py
+        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py tools/inspect_rounds.py
       - name: Core tests (synthetic demo, no .dem needed)
         run: python tests/test_core.py
       - name: UI consistency checks

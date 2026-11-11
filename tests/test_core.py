@@ -314,7 +314,7 @@ core.DemoParser = FakeParser  # monkeypatch
 demo = core.load_demo("match.dem")
 check("warmup fires dropped", len(demo.fires) == 6, f"got {len(demo.fires)}")
 check(
-    "warmup_dropped counted", demo.warmup_dropped.get("fires") == 2, demo.warmup_dropped
+    "warmup excluded", demo.excluded.get("warmup") == 1, demo.excluded
 )
 check("warmup death dropped", len(demo.deaths) == 1, f"got {len(demo.deaths)}")
 check("non-warmup hurts kept (3 of 4)", len(demo.hurts) == 3, f"got {len(demo.hurts)}")
@@ -494,7 +494,7 @@ txt = json.dumps(rep, ensure_ascii=False, default=str)
 check("json serializable", len(txt) > 1000)
 rr = json.loads(txt)
 check("report counts", rr["counts"]["shots"] == 6 and rr["counts"]["duels"] == 1)
-check("warmup in report", rr["counts"]["warmup_dropped"]["fires"] == 2)
+check("warmup in report", rr["counts"]["excluded"]["warmup"] == 1)
 check("punch flag in report", rr["counts"]["punch_available"] is True)
 check("my shots in report", len(rr["me"]["shots"]) == 3)
 
@@ -1530,6 +1530,193 @@ check(
     not (_parts() - _parts_before),
     str(sorted(_parts() - _parts_before)[:2]),
 )
+
+# ------------------------------------------- step 2B: knife round / rounds
+print("== knife round / live match start ==")
+
+NAMES = {S1: "Alpha", S2: "Bravo", S3: "Charlie", S4: "Delta"}
+NAMES_I = {int(s): NAMES[s] for s in IDS}
+
+
+def make_live_match(bnm_tick, knife=True, pistol_trp=0, warmup_round=False):
+    """
+    FACEIT-shaped demo: [knife round] [warmup round] begin_new_match,
+    then two live rounds (one duel each, S1 kills S3 at 500u). Knife
+    round sits at trp=0 before bnm_tick; `pistol_trp` is the counter
+    value of the first live round (0 = the restart reset it, 1 = the
+    counter kept counting the knife round).
+    """
+
+    def fire(tick, sid, w, trp, warm):
+        return (tick, int(sid), NAMES[sid], w, trp, warm)
+
+    def death(tick, a, u, w, trp, warm):
+        return (tick, int(a), NAMES[a], int(u), NAMES[u], w, trp, warm, True, 500)
+
+    def hurt(tick, a, u, w, trp, warm):
+        return (tick, int(a), NAMES[a], int(u), NAMES[u], w, 1, trp, warm)
+
+    ev_fires, ev_deaths, ev_hurts, fe = [], [], [], []
+    if knife:
+        fe.append((100, False))
+        ev_fires += [fire(110, S1, "weapon_knife", 0, False),
+                     fire(120, S3, "weapon_knife_t", 0, False)]
+        ev_deaths.append(death(130, S1, S3, "knife", 0, False))
+    if warmup_round:
+        fe.append((300, True))
+        ev_fires.append(fire(310, S1, "weapon_m4a1", 0, True))
+    for t0, trp in ((700, pistol_trp), (900, pistol_trp + 1)):
+        fe.append((t0 - 50, False))
+        ev_fires += [fire(t0, S1, "weapon_ak47", trp, False),
+                     fire(t0 + 2, S1, "weapon_ak47", trp, False),
+                     fire(t0 + 5, S3, "weapon_ak47", trp, False)]
+        ev_hurts.append(hurt(t0 + 2, S1, S3, "weapon_ak47", trp, False))
+        ev_deaths.append(death(t0 + 10, S1, S3, "weapon_ak47", trp, False))
+
+    events = {
+        "weapon_fire": pd.DataFrame(
+            ev_fires,
+            columns=["tick", "user_steamid", "user_name", "weapon",
+                     "total_rounds_played", "is_warmup_period"],
+        ).assign(user_steamid=lambda d: pd.array(d["user_steamid"], dtype="uint64")),
+        "player_hurt": pd.DataFrame(
+            ev_hurts,
+            columns=["tick", "attacker_steamid", "attacker_name", "user_steamid",
+                     "user_name", "weapon", "hitgroup", "total_rounds_played",
+                     "is_warmup_period"],
+        ).assign(
+            attacker_steamid=lambda d: pd.array(d["attacker_steamid"], dtype="float64"),
+            user_steamid=lambda d: pd.array(d["user_steamid"], dtype="float64"),
+        ),
+        "player_death": pd.DataFrame(
+            ev_deaths,
+            columns=["tick", "attacker_steamid", "attacker_name", "user_steamid",
+                     "user_name", "weapon", "total_rounds_played",
+                     "is_warmup_period", "headshot", "distance"],
+        ).assign(
+            attacker_steamid=lambda d: pd.array(d["attacker_steamid"], dtype="float64"),
+            user_steamid=lambda d: pd.array(d["user_steamid"], dtype="float64"),
+        ),
+        "round_freeze_end": pd.DataFrame(
+            fe, columns=["tick", "is_warmup_period"]
+        ).assign(total_rounds_played=0),
+    }
+    if bnm_tick is not None:
+        events["begin_new_match"] = pd.DataFrame(
+            {"tick": [bnm_tick], "is_warmup_period": [False],
+             "total_rounds_played": [0]}
+        )
+    # tick rows for the two live duels (S1 vs S3 at 500u, standing still);
+    # ticks are requested at every fire tick and fire tick - 1
+    rows = []
+    for t in list(range(649, 711)) + list(range(849, 911)):
+        for sid, (x, yaw) in ((S1, (0.0, 0.0)), (S3, (500.0, 180.0))):
+            rows.append(
+                {"tick": t, "steamid": f64_sid(sid), "name": NAMES[sid],
+                 "X": x, "Y": 0.0, "Z": 0.0, "pitch": 0.0, "yaw": yaw,
+                 "is_alive": True, "aim_punch_angle": "0 0 0"}
+            )
+    return {
+        "player_info": pd.DataFrame(
+            {"steamid": [int(s) for s in IDS], "name": [NAMES[s] for s in IDS],
+             "team_number": [2, 2, 3, 3]}
+        ),
+        "header": {"map_name": "de_mirage"},
+        "events": events,
+        "ticks": pd.DataFrame(rows),
+        "unsupported": set(),
+    }
+
+
+def _extra_death(tick, a, u, w, trp):
+    return pd.DataFrame(
+        [{"tick": tick, "attacker_steamid": int(a), "attacker_name": NAMES[a],
+          "user_steamid": int(u), "user_name": NAMES[u], "weapon": w,
+          "total_rounds_played": trp, "is_warmup_period": False,
+          "headshot": False, "distance": 500}],
+    ).astype({"attacker_steamid": "float64", "user_steamid": "float64"})
+
+
+# 1) knife round + begin_new_match, counter reset by the restart (FACEIT)
+FakeParser.demos["knife_reset.dem"] = make_live_match(500, knife=True, pistol_trp=0)
+dk = core.load_demo("knife_reset.dem")
+check("knife_reset excluded",
+      dk.excluded == {"warmup": 0, "knife_round": 1, "restart": 0}, dk.excluded)
+check("knife kill dropped", len(dk.deaths) == 2, f"got {len(dk.deaths)}")
+check("knife_reset 6 gun fires", len(dk.fires) == 6, f"got {len(dk.fires)}")
+sk = core.add_risk(core.shots_table(dk), 40)
+check("knife_reset rounds start at 1",
+      sorted(sk["round"].unique()) == [1, 2], sorted(sk["round"].unique()))
+check("knife_reset duels: 2 (no knife)", len(core.build_duels(dk, 3.0)) == 2)
+
+# 2) knife round, no begin_new_match, counter kept counting
+FakeParser.demos["knife_cont.dem"] = make_live_match(None, knife=True, pistol_trp=1)
+dc = core.load_demo("knife_cont.dem")
+check("knife_cont excluded", dc.excluded["knife_round"] == 1, dc.excluded)
+check("knife_cont knife dropped", len(dc.deaths) == 2, f"got {len(dc.deaths)}")
+sc = core.add_risk(core.shots_table(dc), 40)
+check("knife_cont pistol renumbered to 1",
+      sorted(sc["round"].unique()) == [1, 2], sorted(sc["round"].unique()))
+
+# 3) no knife round at all (Valve-like): nothing excluded
+FakeParser.demos["noknife.dem"] = make_live_match(50, knife=False, pistol_trp=0)
+dn = core.load_demo("noknife.dem")
+check("noknife excluded empty", not any(dn.excluded.values()), dn.excluded)
+sn = core.add_risk(core.shots_table(dn), 40)
+check("noknife rounds 1-2", sorted(sn["round"].unique()) == [1, 2])
+
+# 4) knife round + warmup round after it (the faceit2 shape)
+FakeParser.demos["knife_warm.dem"] = make_live_match(
+    500, knife=True, warmup_round=True, pistol_trp=0
+)
+dw = core.load_demo("knife_warm.dem")
+check("knife_warm excluded",
+      dw.excluded == {"warmup": 1, "knife_round": 1, "restart": 0}, dw.excluded)
+check("knife_warm fires are live-only", len(dw.fires) == 6, f"got {len(dw.fires)}")
+
+# 5) mid-match knife and grenade kills: not duels, but K/D counts them
+m9 = make_live_match(500, knife=False, pistol_trp=0)
+m9["events"]["player_death"] = pd.concat(
+    [
+        m9["events"]["player_death"],
+        _extra_death(800, S3, S1, "knife", 0),
+        _extra_death(801, S3, S2, "hegrenade", 0),
+    ],
+    ignore_index=True,
+)
+FakeParser.demos["mixed.dem"] = m9
+dm = core.load_demo("mixed.dem")
+dm_duels = core.build_duels(dm, 3.0)
+check("mixed: knife/nade kills are not duels", len(dm_duels) == 2, f"got {len(dm_duels)}")
+sm = core.player_summary(dm, dm_duels, core.add_risk(core.shots_table(dm), 40), 40)
+check("mixed: K/D counts knife+nade kills",
+      sm[sm["sid"] == S3].iloc[0]["kills"] == 2, sm[sm["sid"] == S3].iloc[0]["kills"])
+check("mixed: deaths include knife/nade",
+      sm[sm["sid"] == S1].iloc[0]["deaths"] == 1, sm[sm["sid"] == S1].iloc[0]["deaths"])
+
+# 6) halves from sides: MR12 with overtime, MR15, gaps, fallbacks
+print("== halves / presets from sides ==")
+_s = {r: {s: ("T" if (s in (S1, S2)) == (r <= 12 or r >= 25) else "CT")
+          for s in IDS} for r in range(1, 27)}
+check("halves MR12+OT", core.halves_from_sides(_s, 26)
+      == [(1, 12), (13, 24), (25, 26)], core.halves_from_sides(_s, 26))
+check("halves empty sides", core.halves_from_sides({}, 26) == [])
+_g = {r: _s[r] for r in (1, 2, 5, 13, 14)}  # gap 5 -> 13: boundary unknowable
+check("halves gap not guessed", core.halves_from_sides(_g, 14) == [])
+_m15 = {r: {s: ("T" if (s in (S1, S2)) == (r <= 15) else "CT") for s in IDS}
+        for r in range(1, 19)}
+check("halves MR15", core.halves_from_sides(_m15, 18) == [(1, 15), (16, 18)],
+      core.halves_from_sides(_m15, 18))
+_h = core.halves_from_sides(_s, 26)
+check("bounds first (data)", core.round_bounds(26, "first", _h) == (1, 12))
+check("bounds second (data)", core.round_bounds(26, "second", _h) == (13, 24))
+check("bounds ot (data)", core.round_bounds(26, "ot", _h) == (25, 26))
+check("bounds MR15 second", core.round_bounds(18, "second",
+      core.halves_from_sides(_m15, 18)) == (16, 18))
+check("pistols (data)", core.pistol_rounds(26, _h) == {1, 13, 25})
+check("pistols MR15", core.pistol_rounds(18, core.halves_from_sides(_m15, 18)) == {1, 16})
+check("bounds MR12 fallback", core.round_bounds(26, "second") == (13, 24))
+check("pistols MR12 fallback", core.pistol_rounds(26) == {1, 13, 25})
 
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":

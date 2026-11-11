@@ -5,6 +5,7 @@ Analysis logic lives in core.py, translations in i18n.py. Only UI here.
 
 import base64
 import functools
+import html
 import json
 import os
 import subprocess
@@ -321,6 +322,23 @@ if trp is not None:
 if info:
     st.caption(" · ".join(info))
 
+# pre-match rounds that were dropped (knife round / warmup / restarts) -
+# step 2B6: one honest line instead of silently "lost" rounds
+_excl = getattr(demo, "excluded", {}) or {}
+_excl_parts = []
+if _excl.get("warmup"):
+    _excl_parts.append(t("excl_warmup", n=_excl["warmup"]))
+if _excl.get("knife_round"):
+    _excl_parts.append(t("excl_knife", n=_excl["knife_round"]))
+if _excl.get("restart"):
+    _excl_parts.append(t("excl_restart", n=_excl["restart"]))
+if _excl_parts:
+    st.caption(
+        f'<span title="{html.escape(t("excl_help"))}">'
+        f"{html.escape(t('excluded_line', parts=', '.join(_excl_parts)))}</span>",
+        unsafe_allow_html=True,
+    )
+
 name_of = dict(zip(demo.players["sid"], demo.players["name"]))
 team_of = dict(zip(demo.players["sid"], demo.players["team"]))
 plist = demo.players.assign(
@@ -451,6 +469,9 @@ demo_weapons = sorted(shots["weapon"].astype(str).unique())
 present_classes = sorted({core.weapon_class(w) for w in demo_weapons})
 n_rounds = int(shots["round"].max()) if len(shots) else 0
 has_sides = bool(demo.sides)
+# data-driven halves (MR15 / overtime lengths) when sides are known;
+# [] falls back to the MR12 assumption everywhere below
+halves = core.halves_from_sides(demo.sides, n_rounds)
 # drop selections that do not exist in this demo (e.g. from another file
 # or from a shared URL of another match)
 if "flt_weapons" in st.session_state:
@@ -461,8 +482,14 @@ if "flt_classes" in st.session_state:
     st.session_state["flt_classes"] = [
         c for c in st.session_state["flt_classes"] if c in set(present_classes)
     ]
+# a preset is offered only when the match actually has that part: with
+# sides, halves decide; without them the MR12 heuristics on round count
 preset_opts = ["all"] + (["pistols"] if n_rounds >= 2 else [])
-if n_rounds >= 2 * core.ROUNDS_PER_HALF + 1:
+if len(halves) >= 2:
+    preset_opts = ["all", "first", "second"] + preset_opts[1:]
+    if len(halves) >= 3:
+        preset_opts.insert(3, "ot")
+elif n_rounds >= 2 * core.ROUNDS_PER_HALF + 1:
     preset_opts = ["all", "first", "second", "ot", "pistols"]
 elif n_rounds >= core.ROUNDS_PER_HALF + 1:
     preset_opts = ["all", "first", "second", "pistols"]
@@ -487,12 +514,31 @@ if n_rounds >= 2:
         st.session_state["flt_rounds"] = (1, n_rounds)
 
 
+def _preset_label(p: str) -> str:
+    """Preset option label with the actual round numbers of this match."""
+    h = halves or []
+    if p == "first":
+        lo, hi = h[0] if h else (1, core.ROUNDS_PER_HALF)
+        return t("fp_first", lo=lo, hi=hi)
+    if p == "second":
+        lo, hi = h[1] if len(h) > 1 else (core.ROUNDS_PER_HALF + 1, 2 * core.ROUNDS_PER_HALF)
+        return t("fp_second", lo=lo, hi=hi)
+    if p == "ot":
+        lo = h[2][0] if len(h) > 2 else 2 * core.ROUNDS_PER_HALF + 1
+        return t("fp_ot", lo=lo)
+    if p == "pistols":
+        rounds = sorted(core.pistol_rounds(n_rounds, halves or None))
+        shown = ", ".join(map(str, rounds[:4])) + ("…" if len(rounds) > 4 else "")
+        return t("fp_pistols", rounds=shown)
+    return t("fp_all")
+
+
 def _apply_preset():
     p = st.session_state.get("flt_preset", "all")
     if p == "pistols":
         st.session_state["flt_rounds"] = (1, max(n_rounds, 1))
     else:
-        st.session_state["flt_rounds"] = core.round_bounds(n_rounds, p)
+        st.session_state["flt_rounds"] = core.round_bounds(n_rounds, p, halves or None)
 
 
 def _slider_custom():
@@ -536,7 +582,7 @@ if st.session_state.get("flt_classes"):
 if has_sides and st.session_state.get("flt_side") != "all":
     _chips.append((st.session_state["flt_side"], _clr("flt_side", "all")))
 if st.session_state.get("flt_preset", "all") != "all":
-    _chips.append((t(f"fp_{st.session_state['flt_preset']}"), _clr_rounds))
+    _chips.append((_preset_label(st.session_state["flt_preset"]), _clr_rounds))
 elif n_rounds >= 2 and tuple(st.session_state.get("flt_rounds") or ()) != (
     1,
     n_rounds,
@@ -582,7 +628,7 @@ with _fcols[0].popover(t("flt_title")):
     fr2.selectbox(
         t("flt_preset"),
         preset_opts,
-        format_func=lambda p: t(f"fp_{p}"),
+        format_func=_preset_label,
         key="flt_preset",
         on_change=_apply_preset,
     )
@@ -619,7 +665,7 @@ if _chips:
 preset = st.session_state.get("flt_preset", "all")
 round_kwargs: dict = {}
 if preset == "pistols":
-    round_kwargs["rounds_set"] = core.pistol_rounds(n_rounds)
+    round_kwargs["rounds_set"] = core.pistol_rounds(n_rounds, halves or None)
 elif n_rounds >= 1:
     rv = tuple(st.session_state.get("flt_rounds") or (1, n_rounds))
     if rv != (1, n_rounds):
@@ -799,7 +845,9 @@ if page == "overview":
             ov_labels["player"], pinned=True, width="medium"
         ),
         "team": st.column_config.TextColumn(ov_labels["team"], width="small"),
-        "kd": st.column_config.TextColumn(ov_labels["kd"], width="small"),
+        "kd": st.column_config.TextColumn(
+            ov_labels["kd"], width="small", help=t("col_kd_help")
+        ),
         "kills": st.column_config.NumberColumn(ov_labels["kills"], format="%d"),
         "deaths": st.column_config.NumberColumn(ov_labels["deaths"], format="%d"),
         "shots": st.column_config.NumberColumn(ov_labels["shots"], format="%d"),

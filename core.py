@@ -234,15 +234,72 @@ def weapon_class(w) -> str:
 ROUNDS_PER_HALF = 12
 
 
-def round_bounds(n_rounds: int, preset: str) -> tuple[int, int]:
+def halves_from_sides(sides: dict, n_rounds: int) -> list[tuple[int, int]]:
+    """
+    Inclusive (lo, hi) round ranges of the halves (including every overtime
+    half), derived from the per-round sides: a half boundary is a round in
+    which (almost) every player with known sides swapped T<->CT. Returns []
+    when sides are missing or no full swap is found - the caller then falls
+    back to the MR12 assumption in round_bounds/pistol_rounds.
+
+    A pair of rounds is only compared when both are known AND consecutive:
+    with a gap (rounds without any events) the swap position is unknowable,
+    and guessing it would misplace the halves.
+    """
+    if not sides:
+        return []
+    rounds = sorted(r for r in sides if isinstance(r, int) and r >= 1)
+    if not rounds:
+        return []
+    bounds = []
+    for prev, cur in zip(rounds, rounds[1:]):
+        if cur != prev + 1:
+            continue
+        known = swapped = 0
+        for sid, s_prev in sides[prev].items():
+            s_cur = sides[cur].get(sid)
+            if s_prev in ("T", "CT") and s_cur in ("T", "CT"):
+                known += 1
+                if s_prev != s_cur:
+                    swapped += 1
+        if known >= 2 and swapped >= 0.75 * known:
+            bounds.append(cur)
+    if not bounds:
+        return []
+    n = max(int(n_rounds), 1)
+    out = []
+    lo = rounds[0]
+    for b in bounds + [n + 1]:
+        hi = min(b - 1, n)
+        if lo <= hi:
+            out.append((lo, hi))
+        lo = b
+    return out
+
+
+def round_bounds(n_rounds: int, preset: str, halves=None) -> tuple[int, int]:
     """
     Inclusive 1-based round range of a preset for a match of `n_rounds`
-    rounds ('all', 'first', 'second', 'ot'). MR12 assumption: first half
-    1-12, second 13-24, overtime 25+. A preset beyond the match gives an
-    empty range (lo > hi) on purpose - the UI simply does not offer it.
+    rounds ('all', 'first', 'second', 'ot'). `halves` are the data-driven
+    (lo, hi) ranges from halves_from_sides; when given they define the
+    halves (MR15, overtime lengths and all), otherwise MR12 is assumed:
+    first half 1-12, second 13-24, overtime 25+. A preset beyond the match
+    gives an empty range (lo > hi) on purpose - the UI simply does not
+    offer it.
     """
 
     n = max(int(n_rounds), 1)
+    if halves:
+        if preset == "first":
+            lo, hi = halves[0]
+        elif preset == "second" and len(halves) >= 2:
+            lo, hi = halves[1]
+        elif preset == "ot" and len(halves) >= 3:
+            lo, hi = halves[2][0], n
+        else:  # 'all' / anything unknown
+            lo, hi = 1, n
+        hi = max(lo, min(hi, n))
+        return (lo, hi)
     if preset == "first":
         lo, hi = 1, ROUNDS_PER_HALF
     elif preset == "second":
@@ -255,8 +312,14 @@ def round_bounds(n_rounds: int, preset: str) -> tuple[int, int]:
     return (lo, hi)
 
 
-def pistol_rounds(n_rounds: int) -> set[int]:
-    """First round of each half incl. overtime halves (MR12: 1, 13, 25, ...)."""
+def pistol_rounds(n_rounds: int, halves=None) -> set[int]:
+    """
+    First round of each half incl. overtime halves. With `halves` from
+    halves_from_sides that is data-driven (MR15 -> {1, 16}); the MR12
+    fallback gives {1, 13, 25, ...}.
+    """
+    if halves:
+        return {lo for lo, hi in halves if lo <= max(int(n_rounds), 1)}
     return {
         r for r in range(1, max(int(n_rounds), 1) + 1) if (r - 1) % ROUNDS_PER_HALF == 0
     }
@@ -993,7 +1056,10 @@ class Demo:
     hurts: pd.DataFrame  # gun damage to enemies only, warmup excluded
     ticks: pd.DataFrame  # POS (+punch/alive) of all players at every gun-fire
     #                      tick AND tick-1; `speed` is our own position delta
-    warmup_dropped: dict = field(default_factory=dict)
+    excluded: dict = field(default_factory=dict)
+    #                      rounds dropped before the live match: {warmup,
+    #                      knife_round, restart: round counts} - see
+    #                      docs/DEMOPARSER_NOTES.md section 12
     tickrate: int = TICKRATE  # from the demo header (fallback: 64)
     sides: dict = field(default_factory=dict)  # round(1-based) -> sid -> T/CT
 
@@ -1057,7 +1123,16 @@ def load_demo(path: str, progress=None) -> Demo:
     say("events")
     ev = dict(
         p.parse_events(
-            ["player_death", "weapon_fire", "player_hurt"],
+            [
+                "player_death",
+                "weapon_fire",
+                "player_hurt",
+                # round/match structure (docs/DEMOPARSER_NOTES.md s.12):
+                # begin_new_match marks the live-match start (FACEIT knife
+                # rounds sit before it), round_freeze_end bounds the rounds
+                "begin_new_match",
+                "round_freeze_end",
+            ],
             other=["total_rounds_played", "is_warmup_period"],
         )
     )
@@ -1087,11 +1162,11 @@ def load_demo(path: str, progress=None) -> Demo:
                 )
 
     # warmup shots/kills/damage are not part of the match -> drop them
-    warmup_dropped: dict[str, int] = {}
+    warmup_rows: dict[str, int] = {}
     for name, df in (("deaths", deaths), ("fires", fires), ("hurts", hurts)):
         if "is_warmup_period" in df.columns and len(df):
             mask = df["is_warmup_period"].fillna(False).astype(bool)
-            warmup_dropped[name] = int(mask.sum())
+            warmup_rows[name] = int(mask.sum())
             if mask.any():
                 if name == "deaths":
                     deaths = deaths[~mask].copy()
@@ -1099,6 +1174,132 @@ def load_demo(path: str, progress=None) -> Demo:
                     fires = fires[~mask].copy()
                 else:
                     hurts = hurts[~mask].copy()
+
+    # ------------------------------------------- live match start (step 2B1)
+    # FACEIT-style demos open with a knife round (often followed by a warmup
+    # round) that is NOT flagged is_warmup_period; the live match begins at
+    # the LAST begin_new_match. Everything before that tick is dropped and
+    # counted per cause for the UI banner. Fallback without the event: the
+    # first round segment with zero gun fires and knife-only kills is the
+    # knife round. See docs/DEMOPARSER_NOTES.md section 12.
+    excluded: dict[str, int] = {"warmup": 0, "knife_round": 0, "restart": 0}
+
+    def _between(df, lo, hi):
+        if df is None or not len(df) or "tick" not in df.columns:
+            return pd.DataFrame()
+        return df[(df["tick"] >= lo) & (df["tick"] < hi)]
+
+    def _has_gun_fire(df) -> bool:
+        return bool(len(df)) and "weapon" in df.columns and df["weapon"].map(is_gun).any()
+
+    def _knife_only(df) -> bool:
+        """At least one kill and every kill by knife/bayonet."""
+        if not len(df) or "weapon" not in df.columns:
+            return False
+        w = df["weapon"].map(norm_weapon)
+        kn = w.str.contains("knife", na=False) | w.eq("bayonet")
+        return bool(kn.any() and kn.all())
+
+    def _has_knife_death(df) -> bool:
+        if not len(df) or "weapon" not in df.columns:
+            return False
+        w = df["weapon"].map(norm_weapon)
+        return bool((w.str.contains("knife", na=False) | w.eq("bayonet")).any())
+
+    bnm = ev.get("begin_new_match", pd.DataFrame())
+    freeze = ev.get("round_freeze_end", pd.DataFrame())
+    fe_rows = []
+    if len(freeze) and "tick" in freeze.columns:
+        t = pd.to_numeric(freeze["tick"], errors="coerce")
+        warm = (
+            freeze["is_warmup_period"].fillna(False).astype(bool)
+            if "is_warmup_period" in freeze.columns
+            else pd.Series(False, index=freeze.index)
+        )
+        fe_rows = sorted(
+            (int(tt), bool(ww)) for tt, ww in zip(t.dropna(), warm[t.notna()])
+        )
+    live_start = None
+    if len(bnm) and "tick" in bnm.columns:
+        t = pd.to_numeric(bnm["tick"], errors="coerce").dropna()
+        if len(t):
+            live_start = int(t.max())
+
+    if live_start is not None and live_start > 0:
+        pre = [r for r in fe_rows if r[0] < live_start]
+        for i, (fe_tick, fe_warm) in enumerate(pre):
+            seg_end = pre[i + 1][0] if i + 1 < len(pre) else live_start
+            if fe_warm:
+                excluded["warmup"] += 1
+            elif not _has_gun_fire(
+                _between(fires, fe_tick, seg_end)
+            ) and _has_knife_death(_between(deaths, fe_tick, seg_end)):
+                excluded["knife_round"] += 1
+            else:
+                excluded["restart"] += 1
+        if len(deaths) and "tick" in deaths.columns:
+            deaths = deaths[deaths["tick"] >= live_start].copy()
+        if len(fires) and "tick" in fires.columns:
+            fires = fires[fires["tick"] >= live_start].copy()
+        if len(hurts) and "tick" in hurts.columns:
+            hurts = hurts[hurts["tick"] >= live_start].copy()
+    elif fe_rows or not any(warmup_rows.values()):
+        # no begin_new_match: knife fallback on the FIRST round segment
+        # (freeze_end-bounded when available, else the trp=0 rows). The
+        # gate is strict - no gun shots and knife-only kills - so a pistol
+        # round is never mistaken for a knife round.
+        if fe_rows:
+            lo = fe_rows[0][0]
+            hi = fe_rows[1][0] if len(fe_rows) > 1 else float("inf")
+            seg_fires, seg_deaths = _between(fires, lo, hi), _between(deaths, lo, hi)
+            later_fires = fires[fires["tick"] >= hi] if len(fires) else fires
+            if (
+                not _has_gun_fire(seg_fires)
+                and _knife_only(seg_deaths)
+                and _has_gun_fire(later_fires)
+            ):
+                excluded["knife_round"] = 1
+                deaths = deaths[(deaths["tick"] < lo) | (deaths["tick"] >= hi)].copy()
+                fires = fires[(fires["tick"] < lo) | (fires["tick"] >= hi)].copy()
+                hurts = hurts[(hurts["tick"] < lo) | (hurts["tick"] >= hi)].copy()
+            excluded["warmup"] = sum(1 for _, w in fe_rows if w)
+        else:
+            r0d = _round_col(deaths)
+            f0 = fires[_round_col(fires) == 0] if len(fires) else fires
+            f1 = fires[_round_col(fires) > 0] if len(fires) else fires
+            if (
+                len(deaths)
+                and not _has_gun_fire(f0)
+                and _knife_only(deaths[r0d == 0])
+                and _has_gun_fire(f1)
+            ):
+                excluded["knife_round"] = 1
+                deaths = deaths[_round_col(deaths) != 0].copy()
+                fires = fires[_round_col(fires) != 0].copy()
+                if len(hurts) and "total_rounds_played" in hurts.columns:
+                    hurts = hurts[_round_col(hurts) != 0].copy()
+    if not fe_rows and any(warmup_rows.values()):
+        # warmup rows were dropped but there are no round boundary events:
+        # report the activity without pretending to know the round count
+        excluded["warmup"] = max(excluded["warmup"], 1)
+
+    # first live round must be round 1: when the counter kept counting the
+    # excluded round (knife round without a begin_new_match restart), shift
+    # total_rounds_played so the first remaining round is 0
+    if live_start is not None or excluded["knife_round"]:
+        trp_min = None
+        for df in (deaths, fires, hurts):
+            if "total_rounds_played" in df.columns and len(df):
+                v = pd.to_numeric(df["total_rounds_played"], errors="coerce")
+                v = v[v >= 0]
+                if len(v):
+                    trp_min = int(v.min()) if trp_min is None else min(trp_min, int(v.min()))
+        if trp_min:
+            for df in (deaths, fires, hurts):
+                if "total_rounds_played" in df.columns and len(df):
+                    df["total_rounds_played"] = (
+                        pd.to_numeric(df["total_rounds_played"], errors="coerce") - trp_min
+                    )
 
     teams = dict(zip(players["sid"], players["team"]))
     # NOTE: boolean-mask filtering an ALREADY-empty DataFrame drops all its
@@ -1158,7 +1359,7 @@ def load_demo(path: str, progress=None) -> Demo:
     tickrate = tickrate_from_header(header)
     td = _add_speed(td, tickrate)
     return Demo(
-        path, header, players, deaths, fires, hurts, td, warmup_dropped, tickrate, sides
+        path, header, players, deaths, fires, hurts, td, excluded, tickrate, sides
     )
 
 
@@ -1416,6 +1617,12 @@ def build_duels(
         & d["user_steamid"].isin(names)
         & (d["attacker_steamid"] != d["user_steamid"])
     ]
+    # duels are gun fights: knife / grenade / zeus / world / C4 kills have
+    # no shots to analyse (a mid-match knife kill is a real thing, and it
+    # must not appear as a "duel without shots"). Overview K/D still counts
+    # every enemy kill - player_summary reads demo.deaths directly.
+    if "weapon" in d.columns and len(d):
+        d = d[d["weapon"].map(is_gun)]
     out = []
     for r in d.itertuples():
         k, v, t = r.attacker_steamid, r.user_steamid, int(r.tick)
@@ -1595,12 +1802,40 @@ def player_summary(
     hurts: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     res = []
+    dth = demo.deaths
+    have_d = len(dth) and {"attacker_steamid", "user_steamid"} <= set(dth.columns)
+    teams = demo.teams
     for p in demo.players.itertuples():
         sh = shots[shots["sid"] == p.sid]
         hi = _hurts_of(demo, p.sid, hurts)
         dd = duels_for(duels, p.sid) if len(duels) else pd.DataFrame()
-        kills = int((duels["killer"] == p.sid).sum()) if len(duels) else 0
-        deaths = int((duels["victim"] == p.sid).sum()) if len(duels) else 0
+        if have_d:
+            # K/D like the in-game scoreboard: every ENEMY kill/death with
+            # any weapon (knife and grenades included), whole match. Duels
+            # above are gun-only, so the two must not be mixed silently.
+            # Static teams are fine here: teammates share the label before
+            # and after the halftime swap. World/suicide deaths have no
+            # known attacker and stay out, teamkills stay out both ways.
+            ta = dth["attacker_steamid"].map(teams)
+            tu = dth["user_steamid"].map(teams)
+            enemy = ta.notna() & tu.notna() & (ta != tu)
+            kills = int(
+                (
+                    (dth["attacker_steamid"] == p.sid)
+                    & (dth["attacker_steamid"] != dth["user_steamid"])
+                    & enemy
+                ).sum()
+            )
+            deaths = int(
+                (
+                    (dth["user_steamid"] == p.sid)
+                    & (dth["attacker_steamid"] != dth["user_steamid"])
+                    & enemy
+                ).sum()
+            )
+        else:
+            kills = int((duels["killer"] == p.sid).sum()) if len(duels) else 0
+            deaths = int((duels["victim"] == p.sid).sum()) if len(duels) else 0
         kd = dd[dd["result"] == "kill"] if len(dd) else dd
         fs = dd[dd["first"].isin(["me", "opponent"])] if len(dd) else dd
         known = (
@@ -1938,7 +2173,7 @@ def debug_report(
             "ticks_rows": len(demo.ticks),
             "shots": len(shots),
             "duels": len(duels),
-            "warmup_dropped": demo.warmup_dropped,
+            "excluded": demo.excluded,
             "punch_available": "punch_pitch" in demo.ticks.columns,
         },
         "event_columns": {

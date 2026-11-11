@@ -399,6 +399,81 @@ def scenario_quoted_path():
     check("single-quoted path: no error element", not at.error)
 
 
+def scenario_knife_round():
+    """FACEIT shape: a knife round before begin_new_match (step 2B)."""
+    print("== knife-round demo (live match start, banner) ==")
+
+    def make_knife_match(rounds):
+        d = make_match(rounds)
+        ev = d["events"]
+        # knife round at ticks 100-130, live match restarts at 500
+        ev["weapon_fire"] = pd.concat(
+            [
+                pd.DataFrame(
+                    {
+                        "tick": [110, 120],
+                        "user_steamid": pd.array([int(S1), int(S3)], dtype="uint64"),
+                        "user_name": [NAMES[S1], NAMES[S3]],
+                        "weapon": ["weapon_knife", "weapon_knife_t"],
+                        "total_rounds_played": [0, 0],
+                        "is_warmup_period": [False, False],
+                    }
+                ),
+                ev["weapon_fire"],
+            ],
+            ignore_index=True,
+        )
+        ev["player_death"] = pd.concat(
+            [
+                pd.DataFrame(
+                    {
+                        "tick": [130],
+                        "attacker_steamid": pd.array([int(S1)], dtype="float64"),
+                        "attacker_name": [NAMES[S1]],
+                        "user_steamid": pd.array([int(S3)], dtype="float64"),
+                        "user_name": [NAMES[S3]],
+                        "weapon": ["knife"],
+                        "headshot": [False],
+                        "distance": [500],
+                        "total_rounds_played": [0],
+                        "is_warmup_period": [False],
+                    }
+                ),
+                ev["player_death"],
+            ],
+            ignore_index=True,
+        )
+        ev["begin_new_match"] = pd.DataFrame(
+            {"tick": [500], "is_warmup_period": [False], "total_rounds_played": [0]}
+        )
+        ev["round_freeze_end"] = pd.DataFrame(
+            {
+                "tick": [100] + [1000 * r - 50 for r in rounds],
+                "is_warmup_period": [False] * (1 + len(rounds)),
+                "total_rounds_played": [0] * (1 + len(rounds)),
+            }
+        )
+        return d
+
+    at = open_demo(make_knife_match([1, 2]), "knife_round.dem")
+    check("runs without exception", not at.exception, err_of(at))
+    banners = [c.value for c in at.caption if "span title=" in str(c.value)]
+    check("excluded banner shown", len(banners) == 1, banners)
+    check(
+        "banner says knife round (1)",
+        any("knife round (1)" in b for b in banners),
+        banners,
+    )
+    # the knife kill must not leak into the live data: one duel per round
+    goto(at, "duels")
+    check("no knife duel leaked", not at.exception, err_of(at))
+    # the same banner in russian
+    at = open_demo(make_knife_match([1, 2]), "knife_round.dem", lang="ru")
+    check("ru: runs without exception", not at.exception, err_of(at))
+    banners_ru = [c.value for c in at.caption if "span title=" in str(c.value)]
+    check("ru: banner shown", any("ножевой раунд (1)" in b for b in banners_ru), banners_ru)
+
+
 def scenario_bad_input():
     print("== bad input ==")
     at = fresh_at(demo_path="/no/such/demo.dem")
@@ -605,6 +680,7 @@ def main():
         scenario_one_round()
         scenario_two_rounds()
         scenario_long25()
+        scenario_knife_round()
         scenario_quoted_path()
         scenario_bad_input()
         scenario_tables()
