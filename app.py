@@ -64,6 +64,7 @@ _URL_KEYS = (
     ("preset", "flt_preset"),
     ("side", "flt_side"),
     ("res", "flt_res"),
+    ("dist", "flt_dist"),
     ("page", "page"),
 )
 
@@ -461,10 +462,11 @@ def style_figure(
 
 
 # ------------------------------------------------------ global filter bar
-# The filters sit in one popover; active filters show as dismissible
-# chips beside it with a Reset, and every page repeats the same summary
-# as a one-line context bar. All metrics below are computed on the
-# FILTERED frames.
+# A persistent panel (no popover): Side / Rounds / Distance segmented
+# controls plus weapon class pills; the Result control exists only on
+# the duels pages, and the guide page shows no panel at all. Active
+# filters repeat as dismissible chips with a Reset. All metrics below
+# are computed on the FILTERED frames.
 demo_weapons = sorted(shots["weapon"].astype(str).unique())
 present_classes = sorted({core.weapon_class(w) for w in demo_weapons})
 n_rounds = int(shots["round"].max()) if len(shots) else 0
@@ -472,6 +474,20 @@ has_sides = bool(demo.sides)
 # data-driven halves (MR15 / overtime lengths) when sides are known;
 # [] falls back to the MR12 assumption everywhere below
 halves = core.halves_from_sides(demo.sides, n_rounds)
+# which controls a page needs: the panel renders above the nav, but the
+# page is already known from session_state (the nav widget only
+# re-binds it on the next run)
+page_now = st.session_state.get("page") or "overview"
+show_result = page_now in ("duels", "timeline")
+show_panel = page_now != "guide"
+# distance bands reuse the stop-quality thresholds: close is inside
+# SAFE_DIST (run-and-gun territory), long is beyond STRICT_DIST
+DIST_KEYS = ("all", "close", "mid", "long")
+DIST_RANGES = {
+    "close": (0.0, core.SAFE_DIST),
+    "mid": (core.SAFE_DIST, core.STRICT_DIST),
+    "long": (core.STRICT_DIST, float("inf")),
+}
 # drop selections that do not exist in this demo (e.g. from another file
 # or from a shared URL of another match)
 if "flt_weapons" in st.session_state:
@@ -484,6 +500,7 @@ if "flt_classes" in st.session_state:
     ]
 # a preset is offered only when the match actually has that part: with
 # sides, halves decide; without them the MR12 heuristics on round count
+# (Custom needs the range slider, i.e. at least two rounds)
 preset_opts = ["all"] + (["pistols"] if n_rounds >= 2 else [])
 if len(halves) >= 2:
     preset_opts = ["all", "first", "second"] + preset_opts[1:]
@@ -493,6 +510,34 @@ elif n_rounds >= 2 * core.ROUNDS_PER_HALF + 1:
     preset_opts = ["all", "first", "second", "ot", "pistols"]
 elif n_rounds >= core.ROUNDS_PER_HALF + 1:
     preset_opts = ["all", "first", "second", "pistols"]
+if n_rounds >= 2:
+    preset_opts.append("custom")
+# ---- state migration: old links / old session keys keep working
+# res used to be a multiselect list ["kill","death"] -> both/kill/death
+_res = st.session_state.get("flt_res")
+if isinstance(_res, (list, tuple, set)):
+    st.session_state["flt_res"] = (
+        "kill"
+        if "kill" in _res and "death" not in _res
+        else "death"
+        if "death" in _res and "kill" not in _res
+        else "both"
+    )
+elif _res not in ("both", "kill", "death"):
+    st.session_state["flt_res"] = "both"
+# dist is new: anything unknown resets to "all"
+if st.session_state.get("flt_dist") not in DIST_KEYS:
+    st.session_state["flt_dist"] = "all"
+# an old link could carry preset=all with a slider-moved range: that
+# state is called Custom now (only when the link actually carried a
+# range - a fresh session has no flt_rounds yet)
+if (
+    st.session_state.get("flt_preset", "all") == "all"
+    and st.session_state.get("flt_rounds") is not None
+    and n_rounds >= 2
+    and tuple(st.session_state["flt_rounds"]) != (1, n_rounds)
+):
+    st.session_state["flt_preset"] = "custom"
 if st.session_state.get("flt_preset") not in preset_opts:
     st.session_state["flt_preset"] = "all"
 if st.session_state.get("flt_side") not in ("all", "T", "CT"):
@@ -521,7 +566,9 @@ def _preset_label(p: str) -> str:
         lo, hi = h[0] if h else (1, core.ROUNDS_PER_HALF)
         return t("fp_first", lo=lo, hi=hi)
     if p == "second":
-        lo, hi = h[1] if len(h) > 1 else (core.ROUNDS_PER_HALF + 1, 2 * core.ROUNDS_PER_HALF)
+        lo, hi = (
+            h[1] if len(h) > 1 else (core.ROUNDS_PER_HALF + 1, 2 * core.ROUNDS_PER_HALF)
+        )
         return t("fp_second", lo=lo, hi=hi)
     if p == "ot":
         lo = h[2][0] if len(h) > 2 else 2 * core.ROUNDS_PER_HALF + 1
@@ -530,11 +577,15 @@ def _preset_label(p: str) -> str:
         rounds = sorted(core.pistol_rounds(n_rounds, halves or None))
         shown = ", ".join(map(str, rounds[:4])) + ("…" if len(rounds) > 4 else "")
         return t("fp_pistols", rounds=shown)
+    if p == "custom":
+        return t("flt_custom")
     return t("fp_all")
 
 
 def _apply_preset():
     p = st.session_state.get("flt_preset", "all")
+    if p == "custom":
+        return  # the slider owns the range; keep whatever it holds
     if p == "pistols":
         st.session_state["flt_rounds"] = (1, max(n_rounds, 1))
     else:
@@ -542,8 +593,9 @@ def _apply_preset():
 
 
 def _slider_custom():
-    # manual range -> the preset label no longer applies
-    st.session_state["flt_preset"] = "all"
+    # a manual range IS the Custom preset now (it used to fall back to
+    # "all", which hid that a range was active)
+    st.session_state["flt_preset"] = "custom"
 
 
 def _clr(key, value):
@@ -563,9 +615,14 @@ def _clr_rounds():
 def _reset_filters():
     st.session_state["flt_weapons"] = []
     st.session_state["flt_classes"] = []
-    st.session_state["flt_res"] = []
+    st.session_state["flt_res"] = "both"
     st.session_state["flt_side"] = "all"
+    st.session_state["flt_dist"] = "all"
     _clr_rounds()
+
+
+def _dist_label(v: str) -> str:
+    return t("all") if v == "all" else t(f"flt_dist_{v}")
 
 
 # one dismissible chip per active filter: (label, clear callback)
@@ -581,43 +638,111 @@ if st.session_state.get("flt_classes"):
     )
 if has_sides and st.session_state.get("flt_side") != "all":
     _chips.append((st.session_state["flt_side"], _clr("flt_side", "all")))
-if st.session_state.get("flt_preset", "all") != "all":
-    _chips.append((_preset_label(st.session_state["flt_preset"]), _clr_rounds))
-elif n_rounds >= 2 and tuple(st.session_state.get("flt_rounds") or ()) != (
-    1,
-    n_rounds,
-):
+if st.session_state.get("flt_preset", "all") == "custom":
     _rv = tuple(st.session_state.get("flt_rounds") or ())
-    _chips.append((f"{t('flt_rounds')} {_rv[0]}–{_rv[1]}", _clr_rounds))
-if st.session_state.get("flt_res"):
     _chips.append(
         (
-            ", ".join(fmt_result(v) for v in st.session_state["flt_res"]),
-            _clr("flt_res", []),
+            t("flt_custom") + (f" {_rv[0]}–{_rv[1]}" if len(_rv) == 2 else ""),
+            _clr_rounds,
         )
     )
+elif st.session_state.get("flt_preset", "all") != "all":
+    _chips.append((_preset_label(st.session_state["flt_preset"]), _clr_rounds))
+if st.session_state.get("flt_dist", "all") != "all":
+    _chips.append(
+        (_dist_label(st.session_state["flt_dist"]), _clr("flt_dist", "all"))
+    )
+if show_result and st.session_state.get("flt_res", "both") != "both":
+    _chips.append(
+        (fmt_result(st.session_state["flt_res"]), _clr("flt_res", "both"))
+    )
 
-_fcols = st.columns([1.1] + [1.6] * len(_chips) + ([0.9] if _chips else []))
-with _fcols[0].popover(t("flt_title")):
-    fc1, fc2 = st.columns(2)
-    fc1.multiselect(
-        t("flt_weapons"),
-        demo_weapons,
-        key="flt_weapons",
-        help=t("flt_weapons_help"),
+# Streamlit deletes widget state when the widget is absent from a run:
+# re-assign the keys of the controls this page does not show, so a
+# page switch never loses a selection
+if not show_result:
+    st.session_state["flt_res"] = st.session_state.get("flt_res", "both")
+if not show_panel:
+    for _k, _d in (
+        ("flt_weapons", []),
+        ("flt_classes", []),
+        ("flt_side", "all"),
+        ("flt_preset", "all"),
+        ("flt_dist", "all"),
+        ("flt_res", "both"),
+    ):
+        st.session_state[_k] = st.session_state.get(_k, _d)
+
+if show_panel:
+    st.caption(t("flt_title"))
+    _seg = st.columns(
+        ([1.0] if has_sides else []) + [2.0, 1.6] + ([1.1] if show_result else [])
     )
-    fc2.multiselect(
-        t("flt_classes"),
-        present_classes,
-        format_func=lambda c: t(f"wc_{c}"),
-        key="flt_classes",
-        help=t("flt_classes_help"),
-    )
-    fr1, fr2, fr3, fr4 = st.columns([3, 2, 2, 2])
-    if (
-        n_rounds >= 2
-    ):  # a slider needs min < max (1-round demos have nothing to range over)
-        fr1.slider(
+    _c = 0
+    if has_sides:
+        with _seg[_c]:
+            st.segmented_control(
+                t("flt_side"),
+                ["all", "T", "CT"],
+                format_func=lambda v: t("all") if v == "all" else v,
+                key="flt_side",
+                help=t("flt_side_help"),
+            )
+        _c += 1
+    with _seg[_c]:
+        st.segmented_control(
+            t("flt_rounds"),
+            preset_opts,
+            format_func=_preset_label,
+            key="flt_preset",
+            on_change=_apply_preset,
+            help=t("flt_rounds_help"),
+        )
+    _c += 1
+    with _seg[_c]:
+        st.segmented_control(
+            t("flt_dist"),
+            list(DIST_KEYS),
+            format_func=_dist_label,
+            key="flt_dist",
+            help=t("flt_dist_help"),
+        )
+    _c += 1
+    if show_result:
+        with _seg[_c]:
+            st.segmented_control(
+                t("flt_res"),
+                ["both", "kill", "death"],
+                format_func=lambda v: (
+                    t("res_both") if v == "both" else fmt_result(v)
+                ),
+                key="flt_res",
+                help=t("flt_res_help"),
+            )
+    # one weapons control: class chips + a More popover with the single
+    # guns, combined with OR (core.Filters unions weapons and classes)
+    _wp, _wm = st.columns([4.6, 1.0])
+    with _wp:
+        st.pills(
+            t("flt_classes"),
+            present_classes,
+            selection_mode="multi",
+            format_func=lambda c: t(f"wc_{c}"),
+            key="flt_classes",
+            help=t("flt_classes_help"),
+        )
+    with _wm:
+        with st.popover(t("flt_more"), use_container_width=True):
+            st.multiselect(
+                t("flt_weapons"),
+                demo_weapons,
+                key="flt_weapons",
+                help=t("flt_weapons_help"),
+            )
+    # the range slider exists only in Custom mode (and only when a range
+    # is possible at all); moving it keeps Custom selected
+    if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
+        st.slider(
             t("flt_rounds"),
             1,
             n_rounds,
@@ -625,49 +750,35 @@ with _fcols[0].popover(t("flt_title")):
             help=t("flt_rounds_help"),
             on_change=_slider_custom,
         )
-    fr2.selectbox(
-        t("flt_preset"),
-        preset_opts,
-        format_func=_preset_label,
-        key="flt_preset",
-        on_change=_apply_preset,
-    )
-    if has_sides:
-        fr3.selectbox(
-            t("flt_side"),
-            ["all", "T", "CT"],
-            format_func=lambda v: t("all") if v == "all" else v,
-            key="flt_side",
-            help=t("flt_side_help"),
+    # active filters: one dismissible chip each + a Reset
+    if _chips:
+        _fcols = st.columns([1.6] * len(_chips) + [0.9])
+        for _i, (_label, _fn) in enumerate(_chips):
+            _fcols[_i].button(
+                f"{_label} ✕",
+                on_click=_fn,
+                key=f"flt_chip_{_i}",
+                use_container_width=True,
+            )
+        _fcols[-1].button(
+            t("flt_reset"),
+            on_click=_reset_filters,
+            key="flt_reset",
+            use_container_width=True,
         )
-    fr4.multiselect(
-        t("flt_res"),
-        ["kill", "death"],
-        format_func=fmt_result,
-        key="flt_res",
-        help=t("flt_res_help"),
-    )
-for _i, (_label, _fn) in enumerate(_chips):
-    _fcols[_i + 1].button(
-        f"{_label} ✕",
-        on_click=_fn,
-        key=f"flt_chip_{_i}",
-        use_container_width=True,
-    )
-if _chips:
-    _fcols[-1].button(
-        t("flt_reset"),
-        on_click=_reset_filters,
-        key="flt_reset",
-        use_container_width=True,
-    )
 
 preset = st.session_state.get("flt_preset", "all")
 round_kwargs: dict = {}
 if preset == "pistols":
     round_kwargs["rounds_set"] = core.pistol_rounds(n_rounds, halves or None)
-elif n_rounds >= 1:
+elif preset == "custom" and n_rounds >= 2:
     rv = tuple(st.session_state.get("flt_rounds") or (1, n_rounds))
+    if rv != (1, n_rounds):
+        round_kwargs["rounds"] = rv
+elif preset in ("first", "second", "ot"):
+    # bounds come from the preset itself, so a URL-restored preset works
+    # even though its on_change callback never fired
+    rv = core.round_bounds(n_rounds, preset, halves or None)
     if rv != (1, n_rounds):
         round_kwargs["rounds"] = rv
 filters = core.Filters(
@@ -678,21 +789,24 @@ filters = core.Filters(
         if has_sides and st.session_state.get("flt_side") != "all"
         else None
     ),
+    dist=DIST_RANGES.get(st.session_state.get("flt_dist", "all")),
     **round_kwargs,
 )
 shots_f, duels_f, hurts_f = core.apply_filters(shots, duels_all, demo.hurts, filters)
-res_sel = set(st.session_state.get("flt_res") or [])
+# the kill/death filter follows its control: it lives on the duels
+# pages, so it applies there (other pages show all duels)
+res_sel = set()
+if show_result and st.session_state.get("flt_res", "both") != "both":
+    res_sel = {st.session_state["flt_res"]}
 
 
 def _ctx_bar():
     """
-    One line of context at the top of every page - which filters
-    are active and how much data is in view.
+    One line of context at the top of every page - how much data is in
+    view. The active filters themselves are always visible as chips in
+    the panel above the navigation.
     """
-    parts = [lbl for lbl, _fn in _chips]
     line = t("flt_n", shots=len(shots_f), duels=len(duels_f))
-    if parts:
-        line = " · ".join(parts) + " — " + line
     if not filters.empty():
         line += " " + t("flt_n_all", shots=len(shots), duels=len(duels_all))
     st.caption(line)
@@ -707,13 +821,15 @@ url_view = {
     "rounds": list(st.session_state.get("flt_rounds") or ()),
     "preset": preset,
     "side": st.session_state.get("flt_side", "all"),
-    "res": st.session_state.get("flt_res") or [],
+    "res": st.session_state.get("flt_res", "both"),
+    "dist": st.session_state.get("flt_dist", "all"),
     "page": st.session_state.get("page", "overview"),
 }
 non_default = (
     url_view["weapons"]
     or url_view["classes"]
-    or url_view["res"]
+    or url_view["res"] != "both"
+    or url_view["dist"] != "all"
     or url_view["side"] != "all"
     or url_view["preset"] != "all"
     or url_view["page"] != "overview"
@@ -730,8 +846,8 @@ summary = core.player_summary(
 )
 
 my_duels = core.duels_for(duels_f, me) if len(duels_f) else pd.DataFrame()
-# kill/death filter is a per-player concept: it applies to the selected
-# player's duels on every tab (the all-players Overview keeps both)
+# kill/death filter is a per-player concept: it follows the Result
+# control (Duels / Timeline); the all-players Overview keeps both
 if res_sel and len(my_duels):
     my_duels = my_duels[my_duels["result"].isin(res_sel)]
 status.update(label=t("loaded"), state="complete")

@@ -151,7 +151,9 @@ def run(argv: list[str]) -> int:
             wanted = [e for e in WANTED + EXTRA if e in available]
             missing = [e for e in WANTED if e not in available]
             if missing:
-                print(f"### wanted events absent in this demo/demoparser2: {', '.join(missing)}")
+                print(
+                    f"### wanted events absent in this demo/demoparser2: {', '.join(missing)}"
+                )
             if not wanted:
                 dfs = {}
             else:

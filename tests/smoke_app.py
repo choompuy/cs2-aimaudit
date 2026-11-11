@@ -19,7 +19,10 @@ demos, last player) is redirected to a temp dir - the real
 ~/.cs2-aimaudit/state.json is never touched.
 """
 
+import base64
+import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -282,16 +285,39 @@ def n_presets(at):
     so only the count and the selected raw value are language-neutral).
     """
 
-    sb = widget(at, "selectbox", "flt_preset")
+    sb = widget(at, "segmented_control", "flt_preset")
     return (len(sb.options), sb.value) if sb else (0, None)
 
 
-# preset selectbox contents by option count (see app.py: preset_opts)
+# preset segmented control contents by option count (see app.py:
+# preset_opts; Custom needs n_rounds >= 2 and is always last). 5 comes
+# from sides-derived halves without overtime (e.g. a 13-x FACEIT game).
 _PRESETS_BY_COUNT = {
     1: ("all",),
-    2: ("all", "pistols"),
-    5: ("all", "first", "second", "ot", "pistols"),
+    3: ("all", "pistols", "custom"),
+    5: ("all", "first", "second", "pistols", "custom"),
+    6: ("all", "first", "second", "ot", "pistols", "custom"),
 }
+
+
+def _pack_view(d: dict) -> str:
+    """The app's ?f= packing, replicated for old/new link tests."""
+    return (
+        base64.urlsafe_b64encode(
+            json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+
+
+def _shots_shown(at):
+    """Shot count from the context line ('Showing: N shots ...')."""
+    for c in at.caption:
+        m = re.search(r"Showing: (\d+) shots", c.value)
+        if m:
+            return int(m.group(1))
+    return None
 
 
 # ---------------------------------------------------------------- scenarios
@@ -325,41 +351,69 @@ def scenario_one_round():
 
 
 def scenario_two_rounds():
-    print("== two-round demo (slider, pistols preset, filters) ==")
+    print("== two-round demo (presets, custom slider, filters) ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "two_rounds.dem")
     check("runs without exception", not at.exception, err_of(at))
-    check("round-range slider shown", widget(at, "slider", "flt_rounds") is not None)
-    check("presets all+pistols", n_presets(at) == (2, "all"))
+    check(
+        "no slider while preset=All (slider lives in Custom)",
+        widget(at, "slider", "flt_rounds") is None,
+    )
+    check("presets all+pistols+custom", n_presets(at) == (3, "all"))
     act(
         at,
         "pistols preset",
-        lambda: at.selectbox(key="flt_preset").select("pistols").run(),
+        lambda: at.segmented_control(key="flt_preset").select("pistols").run(),
+    )
+    check("preset switched to pistols", at.session_state["flt_preset"] == "pistols")
+    act(
+        at,
+        "custom preset",
+        lambda: at.segmented_control(key="flt_preset").select("custom").run(),
+    )
+    check(
+        "custom shows the range slider",
+        widget(at, "slider", "flt_rounds") is not None,
     )
     act(
         at,
         "manual range (2,2)",
         lambda: at.slider(key="flt_rounds").set_value((2, 2)).run(),
     )
+    check("slider keeps Custom selected", at.session_state["flt_preset"] == "custom")
     act(
         at,
-        "weapon filter awp",
+        "weapon filter awp (More popover)",
         lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
     )
     act(
         at,
-        "class filter sniper",
-        lambda: at.multiselect(key="flt_classes").set_value(["sniper"]).run(),
+        "class chips sniper",
+        lambda: at.pills(key="flt_classes").select("sniper").run(),
+    )
+    check(
+        "side control is a segmented control",
+        widget(at, "segmented_control", "flt_side") is not None,
+    )
+    act(
+        at,
+        "side filter T",
+        lambda: at.segmented_control(key="flt_side").select("T").run(),
+    )
+    check(
+        "result control not on the overview page",
+        widget(at, "segmented_control", "flt_res") is None,
+    )
+    goto(at, "duels")
+    check(
+        "result control on the duels page",
+        widget(at, "segmented_control", "flt_res") is not None,
     )
     act(
         at,
         "result filter death (no such duels)",
-        lambda: at.multiselect(key="flt_res").set_value(["death"]).run(),
+        lambda: at.segmented_control(key="flt_res").select("death").run(),
     )
-    check(
-        "side filter shown (sides parsed)",
-        widget(at, "selectbox", "flt_side") is not None,
-    )
-    act(at, "side filter T", lambda: at.selectbox(key="flt_side").select("T").run())
+    check("death filter leaves the page clean", not at.exception, err_of(at))
 
 
 def scenario_long25():
@@ -369,22 +423,140 @@ def scenario_long25():
     )
     check("runs without exception", not at.exception, err_of(at))
     check(
-        "all five presets offered",
-        n_presets(at) == (5, "all"),
+        "all six presets offered",
+        n_presets(at) == (6, "all"),
     )
     for p in ("first", "second", "ot", "pistols"):
         act(
             at,
             f"preset {p}",
-            lambda p=p: at.selectbox(key="flt_preset").select(p).run(),
+            lambda p=p: at.segmented_control(key="flt_preset").select(p).run(),
         )
     act(
         at,
         "side filter CT (round 13 only)",
-        lambda: at.selectbox(key="flt_side").select("CT").run(),
+        lambda: at.segmented_control(key="flt_side").select("CT").run(),
     )
     goto(at, "timeline")
     act(at, "timeline duel 1 of 3", lambda: at.selectbox(key="tl_duel").select(1).run())
+
+
+def scenario_filter_panel():
+    """Step 3: persistent panel, distance bands, reset, page scope, links."""
+    print("== filter panel (persistent, distance, reset, links) ==")
+    at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel.dem")
+    check("runs without exception", not at.exception, err_of(at))
+    for k in ("flt_side", "flt_preset", "flt_dist"):
+        check(
+            f"{k} segmented control visible",
+            widget(at, "segmented_control", k) is not None,
+        )
+    check("class pills visible", widget(at, "pills", "flt_classes") is not None)
+    base = _shots_shown(at)
+    check("context line shows the shot count", bool(base), str(base))
+    act(
+        at,
+        "weapon filter awp",
+        lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
+    )
+    filtered = _shots_shown(at)
+    check(
+        "filtered count reported and smaller",
+        filtered is not None and 0 <= filtered < base,
+        f"{filtered} of {base}",
+    )
+    for band in ("close", "mid", "long"):
+        act(
+            at,
+            f"distance band {band}",
+            lambda b=band: at.segmented_control(key="flt_dist").select(b).run(),
+        )
+        check(f"band {band} leaves the app clean", not at.exception, err_of(at))
+    check("reset button offered", widget(at, "button", "flt_reset") is not None)
+    act(at, "reset filters", lambda: at.button(key="flt_reset").click().run())
+    check("reset restores the full view", _shots_shown(at) == base, str(_shots_shown(at)))
+    check("reset cleared the distance band", at.session_state.get("flt_dist") == "all")
+    check("reset cleared the weapon filter", at.session_state.get("flt_weapons") == [])
+    # Result is a duels-page control; its value must survive page hops
+    check(
+        "no result control on the overview page",
+        widget(at, "segmented_control", "flt_res") is None,
+    )
+    goto(at, "duels")
+    act(
+        at,
+        "result kills only",
+        lambda: at.segmented_control(key="flt_res").select("kill").run(),
+    )
+    goto(at, "overview")
+    check(
+        "result value survives other pages",
+        at.session_state.get("flt_res") == "kill",
+    )
+    check(
+        "result control still hidden on the overview",
+        widget(at, "segmented_control", "flt_res") is None,
+    )
+    # the guide page hides the whole panel but keeps every selection
+    act(
+        at,
+        "side filter T before the guide",
+        lambda: at.segmented_control(key="flt_side").select("T").run(),
+    )
+    goto(at, "guide")
+    check(
+        "guide hides the panel",
+        widget(at, "segmented_control", "flt_preset") is None,
+    )
+    goto(at, "overview")
+    check(
+        "side filter survives the guide page",
+        at.session_state.get("flt_side") == "T",
+    )
+    # old link format (res as a multiselect list, preset=all with a
+    # slider-moved range) must open as the equivalent new state
+    at2 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at2.session_state["demo_path"] = os.path.join(DEMO_DIR, "panel.dem")
+    at2.query_params["f"] = _pack_view(
+        {
+            "lang": "en",
+            "me": None,
+            "weapons": [],
+            "classes": [],
+            "rounds": [2, 2],
+            "preset": "all",
+            "side": "T",
+            "res": ["death"],
+            "page": "overview",
+        }
+    )
+    at2.run()
+    check("old link opens without exception", not at2.exception, err_of(at2))
+    check(
+        "old preset=all + range becomes Custom",
+        at2.session_state.get("flt_preset") == "custom",
+    )
+    check(
+        "old res list ['death'] becomes 'death'",
+        at2.session_state.get("flt_res") == "death",
+    )
+    check("old link keeps the side filter", at2.session_state.get("flt_side") == "T")
+    check("migrated link shows the custom slider", widget(at2, "slider", "flt_rounds") is not None)
+    # new link round-trip: filter -> URL -> fresh app
+    at3 = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel3.dem")
+    act(
+        at3,
+        "distance band mid (for the link)",
+        lambda: at3.segmented_control(key="flt_dist").select("mid").run(),
+    )
+    link = at3.query_params.get("f")
+    check("filtered view is packed into the URL", bool(link))
+    at4 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at4.session_state["demo_path"] = os.path.join(DEMO_DIR, "panel3.dem")
+    at4.query_params["f"] = link
+    at4.run()
+    check("link restores without exception", not at4.exception, err_of(at4))
+    check("link restores the distance band", at4.session_state.get("flt_dist") == "mid")
 
 
 def scenario_quoted_path():
@@ -478,7 +650,11 @@ def scenario_knife_round():
     at = open_demo(make_knife_match([1, 2]), "knife_round.dem", lang="ru")
     check("ru: runs without exception", not at.exception, err_of(at))
     banners_ru = [c.value for c in at.caption if "span title=" in str(c.value)]
-    check("ru: banner shown", any("ножевой раунд (1)" in b for b in banners_ru), banners_ru)
+    check(
+        "ru: banner shown",
+        any("ножевой раунд (1)" in b for b in banners_ru),
+        banners_ru,
+    )
 
 
 def scenario_bad_input():
@@ -530,7 +706,9 @@ def scenario_matrix():
                 act(
                     at,
                     f"preset {p}",
-                    lambda p=p: at.selectbox(key="flt_preset").select(p).run(),
+                    lambda p=p: at.segmented_control(key="flt_preset")
+                    .select(p)
+                    .run(),
                 )
             for wep in ("ak47", "awp", "deagle"):
                 act(
@@ -544,22 +722,25 @@ def scenario_matrix():
                 act(
                     at,
                     f"class {cls}",
-                    lambda c=cls: at.multiselect(key="flt_classes")
-                    .set_value([c])
-                    .run(),
+                    lambda c=cls: at.pills(key="flt_classes").set_value([c]).run(),
                 )
             for side in ("T", "CT"):
-                if widget(at, "selectbox", "flt_side") is not None:
+                if widget(at, "segmented_control", "flt_side") is not None:
                     act(
                         at,
                         f"side {side}",
-                        lambda s=side: at.selectbox(key="flt_side").select(s).run(),
+                        lambda s=side: at.segmented_control(key="flt_side")
+                        .select(s)
+                        .run(),
                     )
-            for res in (["kill"], ["death"], ["kill", "death"]):
+            goto(at, "duels")
+            for res in ("kill", "death", "both"):
                 act(
                     at,
                     f"result {res}",
-                    lambda r=res: at.multiselect(key="flt_res").set_value(r).run(),
+                    lambda r=res: at.segmented_control(key="flt_res")
+                    .select(r)
+                    .run(),
                 )
             for sid in IDS:
                 act(
@@ -660,18 +841,24 @@ def run_real(path):
     print(f"  (loaded and rendered in {time.time() - t0:.1f}s)")
     if at.exception:
         return
-    sb = widget(at, "selectbox", "me")
-    # .options holds formatted labels ("Name (T)"); select_index picks raw sids
-    for i in range(len(sb.options) if sb else 0):
+    # AppTest's select_index applies the app's format_func to the already
+    # formatted label ("Name (T)" -> "Name (T) (?)"), so players are
+    # selected by their RAW sid from a light parse_player_info() call
+    # (DemoParser needs the decompressed file, like the app itself)
+    info = core.DemoParser(core.decompressed_demo(path)).parse_player_info()
+    sids = sorted({str(int(s)) for s in pd.Series(info["steamid"]).dropna()})
+    for sid in (s for s in sids if s != "0"):
         act(
-            at, f"player #{i}", lambda i=i: at.selectbox(key="me").select_index(i).run()
+            at,
+            f"player {sid}",
+            lambda s=sid: at.selectbox(key="me").select(s).run(),
         )
     presets = _PRESETS_BY_COUNT.get(n_presets(at)[0], ())
     for p in presets:
         act(
             at,
             f"preset {p}",
-            lambda p=p: at.selectbox(key="flt_preset").select(p).run(),
+            lambda p=p: at.segmented_control(key="flt_preset").select(p).run(),
         )
 
 
@@ -687,6 +874,7 @@ def main():
         scenario_one_round()
         scenario_two_rounds()
         scenario_long25()
+        scenario_filter_panel()
         scenario_knife_round()
         scenario_quoted_path()
         scenario_bad_input()

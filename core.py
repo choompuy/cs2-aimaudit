@@ -1190,7 +1190,9 @@ def load_demo(path: str, progress=None) -> Demo:
         return df[(df["tick"] >= lo) & (df["tick"] < hi)]
 
     def _has_gun_fire(df) -> bool:
-        return bool(len(df)) and "weapon" in df.columns and df["weapon"].map(is_gun).any()
+        return (
+            bool(len(df)) and "weapon" in df.columns and df["weapon"].map(is_gun).any()
+        )
 
     def _knife_only(df) -> bool:
         """At least one kill and every kill by knife/bayonet."""
@@ -1293,12 +1295,15 @@ def load_demo(path: str, progress=None) -> Demo:
                 v = pd.to_numeric(df["total_rounds_played"], errors="coerce")
                 v = v[v >= 0]
                 if len(v):
-                    trp_min = int(v.min()) if trp_min is None else min(trp_min, int(v.min()))
+                    trp_min = (
+                        int(v.min()) if trp_min is None else min(trp_min, int(v.min()))
+                    )
         if trp_min:
             for df in (deaths, fires, hurts):
                 if "total_rounds_played" in df.columns and len(df):
                     df["total_rounds_played"] = (
-                        pd.to_numeric(df["total_rounds_played"], errors="coerce") - trp_min
+                        pd.to_numeric(df["total_rounds_played"], errors="coerce")
+                        - trp_min
                     )
 
     teams = dict(zip(players["sid"], players["team"]))
