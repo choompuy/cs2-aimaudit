@@ -28,6 +28,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Player names and event fields can contain any Unicode: never let a
+# legacy Windows codepage (cp1252) crash the diagnostics dump.
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
+
 from demoparser2 import DemoParser  # noqa: E402
 
 from core import decompressed_demo  # noqa: E402

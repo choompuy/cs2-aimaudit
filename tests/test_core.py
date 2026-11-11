@@ -19,6 +19,12 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# Windows consoles default to legacy codepages (cp1252) and the output
+# below prints → and ≈: force UTF-8 instead of crashing. CI sets
+# PYTHONUTF8=1 as well - this covers a local run on a stock console.
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
 import core  # noqa: E402
 
 PASS = 0

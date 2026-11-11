@@ -28,6 +28,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# The Russian scenarios print Cyrillic, which a cp1252 console (stock
+# Windows) cannot encode: force UTF-8. CI sets PYTHONUTF8=1 as well -
+# this covers local runs.
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
+
 import pandas as pd  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 

@@ -450,3 +450,23 @@ No knife round, no warmup, no restarts. Everything with `tick >= 66` is live.
    labelled as such.
 
 Reproduce: `python tools/inspect_rounds.py faceit.dem.zst premier.dem.bz2`.
+
+### 12.5 Step 2B verified end-to-end on the real demos (2026-11-11)
+
+After implementing 2B1-2B6, all three real demos were run through the full
+pipeline (`load_demo` → `shots_table` → `build_duels` → `player_summary` →
+`data_checks`) — 41/41 checks pass:
+
+| demo | `excluded` | live rounds | halves | pistols |
+| --- | --- | --- | --- | --- |
+| faceit_mirage (de_mirage) | `{warmup: 0, knife_round: 1, restart: 0}` | 17 | 1-12 / 13-17 | 1, 13 |
+| faceit2 (de_inferno) | `{warmup: 1, knife_round: 1, restart: 0}` | 19 | 1-12 / 13-19 | 1, 13 |
+| competitive_mirage (Valve) | `{warmup: 0, knife_round: 0, restart: 0}` | 16 | 1-12 / 13-16 | 1, 13 |
+
+- The knife round's 6 kills no longer leak into the pistol round; the
+  mid-match knife kill (tick 32750) stays in `deaths` for the all-weapon K/D
+  but produces no duel.
+- Halves/pistols are derived from `sides` swaps (B3) and land exactly on the
+  MR12 grid in all three demos.
+- Raw `total_rounds_played` in live data is 0-based (first live round = 0,
+  last = rounds-1); the UI keeps adding +1 (gotcha 9.4).

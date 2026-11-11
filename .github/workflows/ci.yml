@@ -11,6 +11,13 @@ on:
     - cron: "23 5 * * 1"
   workflow_dispatch:
 
+env:
+  # Windows runners default to cp1252 for consoles/pipes, while the test
+  # output contains →, ≈ and Cyrillic: UTF-8 mode keeps the prints from
+  # UnicodeEncodeError. The test scripts reconfigure stdout/stderr as a
+  # belt-and-suspenders fallback for local Windows runs.
+  PYTHONUTF8: "1"
+
 jobs:
   tests:
     strategy:
