@@ -380,10 +380,10 @@ def _cell_style(styler, css_fn, subset):
     return styler.map(css_fn, subset=subset)
 
 
-def _pct_col(label):
+def _pct_col(label, help=None):
     """A 0-100 percentage column with a progress bar (units live in the cell)."""
     return st.column_config.ProgressColumn(
-        label, min_value=0, max_value=100, format="%.1f%%"
+        label, min_value=0, max_value=100, format="%.1f%%", help=help
     )
 
 
@@ -842,6 +842,11 @@ my_duels = core.duels_for(duels_f, me) if len(duels_f) else pd.DataFrame()
 # control (Duels / Timeline); the all-players Overview keeps both
 if res_sel and len(my_duels):
     my_duels = my_duels[my_duels["result"].isin(res_sel)]
+# round-impact layer (notes s.16): opening duels, trades, multi-kills,
+# assists - whole-match like the K/D in the summary; the only filter
+# that can apply is the round range (the openings table on the Duels page)
+openings = core.openings_table(demo)
+impact = core.impact_stats(demo)
 status.update(label=t("loaded"), state="complete")
 
 
@@ -925,6 +930,7 @@ if page == "overview":
         "risky": t("col_risky"),
         "first_shot": t("col_first_shot"),
         "first_acc": t("col_first_acc"),
+        "open_rate": t("col_open"),
         "sides": t("col_sides"),
         "aim_err": t("col_aim_err"),
         "duration": t("col_duration"),
@@ -946,6 +952,7 @@ if page == "overview":
         "risky": ov["risky"].to_numpy(),
         "first_shot": ov["first_shot"].to_numpy(),
         "first_acc": ov["first_acc"].to_numpy(),
+        "open_rate": ov["open_rate"].to_numpy(),
         "sides": ov["sides"].to_numpy(),
         "aim_err": ov["aim_err"].to_numpy(),
         "duration": ov["duration"].to_numpy(),
@@ -969,6 +976,7 @@ if page == "overview":
         "risky": _pct_col(ov_labels["risky"]),
         "first_shot": _pct_col(ov_labels["first_shot"]),
         "first_acc": _pct_col(ov_labels["first_acc"]),
+        "open_rate": _pct_col(ov_labels["open_rate"], help=t("col_open_help")),
         "sides": st.column_config.TextColumn(ov_labels["sides"]),
         "aim_err": st.column_config.NumberColumn(ov_labels["aim_err"], format="%.1f°"),
         "duration": st.column_config.NumberColumn(
@@ -1000,6 +1008,7 @@ if page == "overview":
         "risky",
         "first_shot",
         "first_acc",
+        "open_rate",
         "sides",
         "aim_err",
         "duration",
@@ -1064,6 +1073,9 @@ elif page == "shooting":
     )
     risky_pct = sh_me.loc[known, "risky"].mean() * 100 if known.any() else np.nan
     fs = dd[dd["first"].isin(["me", "opponent"])] if len(dd) else dd
+    # round-impact row of the selected player (whole match, notes s.16)
+    imp_me = impact[impact["sid"] == me]
+    imp_me = imp_me.iloc[0] if len(imp_me) else None
     first_pct = (fs["first"] == "me").mean() * 100 if len(fs) else np.nan
     dur = dd["duration_s"].median() if len(dd) else np.nan
     err = dd["my_err"].median() if len(dd) else np.nan
@@ -1127,6 +1139,22 @@ elif page == "shooting":
         n_lost = int((dth_df["first"] == "opponent").sum())
         if n_lost and n_lost / len(dth_df) >= 0.5:
             tips.append((1, t("tip_lost_first", n=n_lost, m=len(dth_df)), "lost"))
+    # opening-duel verdict: only when the player actually takes openings
+    # often enough (>= 5) and keeps losing them (<= 30% won)
+    if imp_me is not None and imp_me["open_attempts"] >= 5:
+        _o_rate = imp_me["open_rate"]
+        if pd.notna(_o_rate) and _o_rate <= 30.0:
+            tips.append(
+                (
+                    1,
+                    t(
+                        "tip_openings",
+                        won=int(imp_me["open_wins"]),
+                        n=int(imp_me["open_attempts"]),
+                    ),
+                    None,
+                )
+            )
     # discipline tips - appended AFTER the established verdicts, so
     # at equal severity the aim / first-shot coaching keeps its top-3 place
     if fl_known >= 20 and fl_n >= 3 and fl_n / fl_known >= 0.08:
@@ -1274,6 +1302,51 @@ elif page == "shooting":
         c = st.columns(4)
         c[0].metric(t("m_kd"), f"{kills} / {dths}", help=t("m_kd_help"))
         c[1].metric(t("m_dur"), num(dur, 2), help=t("m_dur_help"))
+        st.markdown(f"**{t('sec_impact')}**")
+        c = st.columns(4)
+        c[0].metric(
+            t("m_open"),
+            (
+                f"{int(imp_me['open_wins'])} / "
+                f"{int(imp_me['open_attempts'] - imp_me['open_wins'])}"
+                if imp_me is not None
+                else t("none_val")
+            ),
+            help=t("m_open_help"),
+        )
+        c[1].metric(
+            t("m_open_rate"),
+            pct(imp_me["open_rate"]) if imp_me is not None else t("none_val"),
+            help=t("m_open_rate_help"),
+        )
+        c[2].metric(
+            t("m_trade_kills"),
+            num(imp_me["trade_kills"], 0) if imp_me is not None else t("none_val"),
+            help=t("m_trade_kills_help"),
+        )
+        c[3].metric(
+            t("m_traded"),
+            pct(imp_me["traded_pct"]) if imp_me is not None else t("none_val"),
+            help=t("m_traded_help"),
+        )
+        c = st.columns(4)
+        for _i, _mk in enumerate(("m_k2", "m_k3", "m_k4", "m_k5")):
+            c[_i].metric(
+                t(_mk),
+                num(imp_me[_mk[2:]], 0) if imp_me is not None else t("none_val"),
+                help=t("m_k2_help"),
+            )
+        c = st.columns(2)
+        c[0].metric(
+            t("m_assists"),
+            num(imp_me["assists"], 0) if imp_me is not None else t("none_val"),
+            help=t("m_assists_help"),
+        )
+        c[1].metric(
+            t("m_flash"),
+            num(imp_me["flash_assists"], 0) if imp_me is not None else t("none_val"),
+            help=t("m_flash_help"),
+        )
 
     if len(dd):
         k_err = dd.loc[dd["result"] == "kill", "my_err"].median()
@@ -1610,6 +1683,65 @@ elif page == "duels":
                 hide_index=True,
                 width="stretch",
             )
+
+    # opening duels - how every round started, for the whole match (both
+    # teams; ★ marks the selected player). Independent of the player's
+    # own duels above: shown even when they have none. Only the round
+    # filter applies - weapon/side filters have no meaning for a
+    # kill-by-kill view of the round structure.
+    op = openings
+    if len(op):
+        if filters.rounds is not None:
+            _lo, _hi = filters.rounds
+            op = op[(op["round"] >= _lo) & (op["round"] <= _hi)]
+        if filters.rounds_set:
+            op = op[op["round"].isin(filters.rounds_set)]
+    if len(op):
+        st.divider()
+        st.markdown(f"**{t('open_title')}**")
+        st.caption(t("open_caption"))
+        st.dataframe(
+            pd.DataFrame(
+                {
+                    t("col_round"): op["round"].to_numpy(),
+                    t("col_round_sec"): op["round_sec"].to_numpy(),
+                    t("col_killer"): [
+                        ("★ " if s == me else "") + name_of.get(s, s)
+                        for s in op["killer"]
+                    ],
+                    t("col_victim"): [
+                        ("★ " if s == me else "") + name_of.get(s, s)
+                        for s in op["victim"]
+                    ],
+                    t("col_weapon"): ["—" if w == core.NA else w for w in op["weapon"]],
+                    t("col_hs"): ["✓" if v else "" for v in op["headshot"]],
+                    t("col_zone_k"): [z if z else "—" for z in op["killer_zone"]],
+                    t("col_zone_v"): [z if z else "—" for z in op["victim_zone"]],
+                }
+            ),
+            column_config={
+                t("col_round"): st.column_config.NumberColumn(
+                    t("col_round"), format="%d"
+                ),
+                t("col_round_sec"): st.column_config.NumberColumn(
+                    t("col_round_sec"), format="%.1f s", help=t("col_round_sec_help")
+                ),
+                t("col_killer"): st.column_config.TextColumn(
+                    t("col_killer"), width="medium"
+                ),
+                t("col_victim"): st.column_config.TextColumn(
+                    t("col_victim"), width="medium"
+                ),
+                t("col_weapon"): st.column_config.TextColumn(
+                    t("col_weapon"), width="small"
+                ),
+                t("col_hs"): st.column_config.Column(t("col_hs"), width="small"),
+                t("col_zone_k"): st.column_config.TextColumn(t("col_zone_k")),
+                t("col_zone_v"): st.column_config.TextColumn(t("col_zone_v")),
+            },
+            hide_index=True,
+            width="stretch",
+        )
 
 
 # ------------------------------------------------------------- timeline

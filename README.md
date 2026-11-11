@@ -13,9 +13,10 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 
 ## Features
 
-- **Overview** — every player in one table: K/D, accuracy, HS%, shots on the move, "risky shots", shoots-first rate, aim error, duel duration. Tick a row's checkbox to analyze that player; the **All columns** toggle adds the detail metrics.
+- **Overview** — every player in one table: K/D, accuracy, HS%, shots on the move, "risky shots", shoots-first rate, aim error, duel duration. Tick a row's checkbox to analyze that player; the **All columns** toggle adds the detail metrics (incl. first-shot accuracy and opening-duel winrate).
 - **Shooting** — hit zones, speed at each shot, a speed-vs-distance scatter with the acceptable-speed curve, per-weapon stats.
-- **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded.
+- **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded. Below: your duels by map zone and how every round started (opening duels, both teams).
+- **Impact** — per player: opening duels won/lost, trade kills, traded deaths, 2k–5k rounds, assists and flash assists.
 - **Timeline** — speed / yaw / pitch / held keys around any duel, cut at the moment of death (input recorded after death is a demo-parser artifact, not real play).
 - **Risk model** — a shot is _risky_ when your speed exceeded what is acceptable at that distance to the nearest living enemy: any speed point-blank, near-stationary at long range. Both distances are configurable.
 - **Data report** — built-in anomaly checks (impossible speeds, unresolved SteamIDs, missing positions…) plus a JSON export to attach to bug reports.
@@ -59,6 +60,8 @@ All parsing and analysis happen inside the app on your machine. CS2-AimAudit mak
 - **Aim error** — the angle between your crosshair (recoil punch included) and the enemy head at your first shot of a duel. A few degrees or less means the crosshair was already on the head.
 - **Shoots first** — how often you fired first in duels where someone fired.
 - **First-shot accuracy** — hit rate on the first shot of an engagement (no shot of yours in the previous ~0.35 s). Reflects crosshair placement; the median mouse movement before those shots (sensitivity-relative) shows how much you swing before committing.
+- **Opening duel winrate** — how often you win the round's first enemy kill when you are in it (as the killer or the victim). The entry player's number; a low one means you should peek behind utility or let a teammate take the first contact.
+- **Trades** — a kill is a trade kill when it avenges a teammate's death within 5 s (same round); "traded deaths" is the share of your own deaths avenged that way — a teammate stat, not a solo verdict.
 - **Duel time** — from the first shot of the duel to the kill/death. Long duels with many shots point to spray/aim problems.
 - **Timeline** — look for: shooting while moving, big last-moment aim corrections, crouch/walk timing.
 

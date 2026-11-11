@@ -1198,6 +1198,155 @@ def scenario_first_shots():
     )
 
 
+def scenario_impact():
+    """
+    Round-impact layer: opening duels, trades, multi-kills, assists.
+    30 rounds, Alpha kills Charlie every round: Alpha opens 30/30 (100%,
+    no verdict), Charlie opens 0/30 (the tip_openings verdict), nobody
+    trades, assists degrade to '-' (the fake match has no assister
+    columns). The openings table on the Duels page lists every round,
+    marks the selected player with a star and follows the round filter.
+    """
+    print("== impact (openings, trades, multi-kills) ==")
+    at = open_demo(make_match(list(range(1, 31))), "impact.dem")
+    check("runs without exception", not at.exception, err_of(at))
+
+    # Charlie: 30 opening deaths, 0 won -> the tip; Alpha: 30/30 -> none
+    act(
+        at,
+        "switch player (Charlie)",
+        lambda: at.selectbox(key="me").select(S3).run(),
+    )
+    goto(at, "shooting")
+    tips_txt = "\n".join(m.value for m in at.markdown)
+    check("openings tip shown for Charlie", "opening duel and keep losing" in tips_txt)
+    act(
+        at,
+        "all metrics",
+        lambda: at.toggle(key="sh_all").set_value(True).run(),
+    )
+    labels = {m.label: m for m in at.metric}
+    m = labels.get("Opening duels (W / L)")
+    check(
+        "opening tile 0 / 30",
+        m is not None and m.value == "0 / 30",
+        m.value if m else "",
+    )
+    m = labels.get("Opening winrate")
+    check("opening winrate 0%", m is not None and m.value == "0%", m.value if m else "")
+    m = labels.get("Trade kills")
+    check("trade kills 0", m is not None and m.value == "0", m.value if m else "")
+    m = labels.get("Traded deaths")
+    check("traded deaths 0%", m is not None and m.value == "0%", m.value if m else "")
+    m = labels.get("Assists")
+    check(
+        "assists dash without column",
+        m is not None and m.value == "—",
+        m.value if m else "",
+    )
+
+    act(
+        at,
+        "switch player (Alpha)",
+        lambda: at.selectbox(key="me").select(S1).run(),
+    )
+    tips_txt = "\n".join(m.value for m in at.markdown)
+    check(
+        "no openings tip for Alpha (100%)",
+        "opening duel and keep losing" not in tips_txt,
+    )
+    labels = {m.label: m for m in at.metric}
+    m = labels.get("Opening duels (W / L)")
+    check(
+        "opening tile 30 / 0",
+        m is not None and m.value == "30 / 0",
+        m.value if m else "",
+    )
+    m = labels.get("Opening winrate")
+    check(
+        "opening winrate 100%",
+        m is not None and m.value == "100%",
+        m.value if m else "",
+    )
+
+    # overview "All columns": the opening winrate column
+    goto(at, "overview")
+    act(
+        at,
+        "overview all columns",
+        lambda: at.toggle(key="ov_full").set_value(True).run(),
+    )
+    ov = widget(at, "dataframe", "ov_table")
+    check(
+        "overview opening column",
+        ov is not None and "Opening winrate" in list(ov.value.columns),
+    )
+    if ov is not None and "Opening winrate" in list(ov.value.columns):
+        oc = ov.value["Opening winrate"]
+        check(
+            "overview opening: 100 / 0 for the pair, NaN for the rest",
+            int(oc.notna().sum()) == 2 and sorted(oc.dropna().tolist()) == [0.0, 100.0],
+            oc.tolist(),
+        )
+
+    # Duels page: the openings table (30 rows, Alpha starred as killer)
+    goto(at, "duels")
+    otabs = [d.value for d in at.dataframe if "Killer" in list(d.value.columns)]
+    check("openings table rendered", len(otabs) == 1, [list(v.columns) for v in otabs])
+    if otabs:
+        o = otabs[0]
+        check(
+            "openings: 30 rows, Alpha starred, Charlie victim",
+            len(o) == 30
+            and (o["Killer"] == "★ Alpha").all()
+            and (o["Victim"] == "Charlie").all(),
+            o.head(2).to_dict(),
+        )
+
+    # round filter: first half preset -> 12 opening rows
+    act(
+        at,
+        "round preset first half",
+        lambda: ctl(at, "segmented_control", "flt_preset").select("first").run(),
+    )
+    otabs = [d.value for d in at.dataframe if "Killer" in list(d.value.columns)]
+    check(
+        "openings follow the round filter",
+        len(otabs) == 1 and len(otabs[0]) == 12,
+        [len(v) for v in otabs],
+    )
+    act(
+        at,
+        "round preset back to all",
+        lambda: ctl(at, "segmented_control", "flt_preset").select("all").run(),
+    )
+
+    # russian labels render
+    act(
+        at,
+        "impact tables in russian",
+        lambda: at.selectbox(key="lang").select("ru").run(),
+    )
+    otabs = [d.value for d in at.dataframe if "Убийца" in list(d.value.columns)]
+    check(
+        "ru: openings table localized",
+        len(otabs) == 1,
+        [list(v.columns) for v in otabs],
+    )
+    goto(at, "shooting")
+    act(
+        at,
+        "all metrics (ru)",
+        lambda: at.toggle(key="sh_all").set_value(True).run(),
+    )
+    labels = {m.label: m for m in at.metric}
+    check(
+        "ru impact tiles",
+        "Первые дуэли (W / L)" in labels and "Процент входов" in labels,
+        list(labels)[:8],
+    )
+
+
 def scenario_scoreboard():
     """
     The debug expander gets the scoreboard cross-check: the game's own
@@ -1283,6 +1432,7 @@ def main():
         scenario_tables()
         scenario_context()
         scenario_first_shots()
+        scenario_impact()
         scenario_scoreboard()
         if arg == "--all":
             scenario_matrix()

@@ -2340,6 +2340,275 @@ check(
 check("bounds MR12 fallback", core.round_bounds(26, "second") == (13, 24))
 check("pistols MR12 fallback", core.pistol_rounds(26) == {1, 13, 25})
 
+# ------------------------------------------- impact: openings / trades
+# 6 players (3v3, no side swap). Script (trade window 5 s = 320 ticks
+# at tickrate 64):
+#   R1 (trp 0): 100 suicide C3 (attacker NA - must be skipped for the
+#                   opening); 120 T1 kills C1  <- opening 1 (T1 wins)
+#               300 C2 kills T1  <- avenges C1 within 180 t: trade (C2)
+#               620 T2 kills C2  <- exactly +320 after T1's death:
+#                                   boundary trade (T2), T1's death traded
+#   R2 (trp 1): 800 TEAMKILL T1 kills T2 (assister T3 - must not count)
+#               900 C1 kills T1  <- opening 2 (C1 wins)
+#              1221 T2 kills C1  <- +321 after T1's death: NOT a trade
+#   R3 (trp 2): 2000 T2 kills C1 <- opening 3 (T2 wins)
+#              2290 T1 kills C2, 2310 T1 kills C3  <- T1 2-kill round
+#   R4 (trp 3): 2320 T3 kills C3 (assister T2, no flash) <- opening 4
+#              2400 T3 kills C1 (assister T2, flash) ; 2410 T3 kills C2
+#                                   <- T3 3-kill round (k3)
+# The 2310/2320 pair is 10 ticks apart but in different rounds: a kill
+# right after the round switch is never a trade (same-round rule).
+print("== impact: openings / trades / multi-kills ==")
+
+
+def make_match_impact():
+    T1, T2, T3 = "76561111111111121", "76561111111111122", "76561111111111123"
+    C1, C2, C3 = S4, S3, "76561111111111124"  # S3/S4 reused as CT here
+    imp_ids = [T1, T2, T3, C1, C2, C3]
+    imp_names = {
+        T1: "TeeOne",
+        T2: "TeeTwo",
+        T3: "TeeThree",
+        C1: "CeeOne",
+        C2: "CeeTwo",
+        C3: "CeeThree",
+    }
+    teams_num = {T1: 2, T2: 2, T3: 2, C1: 3, C2: 3, C3: 3}
+
+    # tick, round(trp), attacker, victim, weapon, assister, flash, round_sec
+    D = [
+        (100, 0, None, C3, "world", None, False, 35.0),
+        (120, 0, T1, C1, "weapon_ak47", None, False, 35.0),
+        (300, 0, C2, T1, "weapon_ak47", None, False, 37.0),
+        (620, 0, T2, C2, "weapon_ak47", None, False, 40.0),
+        (800, 1, T1, T2, "weapon_ak47", T3, False, 22.0),
+        (900, 1, C1, T1, "weapon_ak47", None, False, 23.0),
+        (1221, 1, T2, C1, "weapon_ak47", None, False, 25.0),
+        (2000, 2, T2, C1, "weapon_ak47", None, False, 31.0),
+        (2290, 2, T1, C2, "weapon_ak47", None, False, 36.0),
+        (2310, 2, T1, C3, "weapon_ak47", None, False, 36.0),
+        (2320, 3, T3, C3, "weapon_ak47", T2, False, 5.0),
+        (2400, 3, T3, C1, "weapon_ak47", T2, True, 6.0),
+        (2410, 3, T3, C2, "weapon_ak47", None, False, 6.0),
+    ]
+    deaths = pd.DataFrame(
+        {
+            "tick": [d[0] for d in D],
+            "attacker_steamid": pd.array(
+                [np.nan if d[2] is None else int(d[2]) for d in D], dtype="float64"
+            ),
+            "attacker_name": [imp_names.get(d[2]) for d in D],
+            "user_steamid": pd.array([int(d[3]) for d in D], dtype="float64"),
+            "user_name": [imp_names[d[3]] for d in D],
+            "weapon": [d[4] for d in D],
+            "headshot": [False] * len(D),
+            "distance": [500] * len(D),
+            "total_rounds_played": [d[1] for d in D],
+            "is_warmup_period": [False] * len(D),
+            "assister_steamid": pd.array(
+                [np.nan if d[5] is None else int(d[5]) for d in D], dtype="float64"
+            ),
+            "assister_name": [imp_names.get(d[5]) for d in D],
+            "assistedflash": [d[6] for d in D],
+            "attacker_last_place_name": ["BombsiteA" if d[2] else "Palace" for d in D],
+            "user_last_place_name": ["Middle"] * len(D),
+            "round_start_time": [100.0] * len(D),
+            "game_time": [100.0 + d[7] for d in D],
+        }
+    )
+    # one gun fire per killer around each scripted kill (load_demo needs
+    # at least one); tick rows exist for the shooter at t and t+1
+    _fk = {}
+    for d in D:
+        if d[2] is not None:
+            _fk.setdefault((d[0] - 1, d[2]), d[1])
+    fire_t = sorted(_fk)
+    fires = pd.DataFrame(
+        {
+            "tick": [t for t, _ in fire_t],
+            "user_steamid": pd.array([int(s) for _, s in fire_t], dtype="uint64"),
+            "user_name": [imp_names[s] for _, s in fire_t],
+            "weapon": ["weapon_ak47"] * len(fire_t),
+            "total_rounds_played": [_fk[k] for k in fire_t],
+            "is_warmup_period": [False] * len(fire_t),
+        }
+    )
+    rows = []
+    for t, sid in fire_t:
+        for tt in (t, t + 1):
+            rows.append(
+                {
+                    "tick": tt,
+                    "steamid": f64_sid(sid),
+                    "name": imp_names[sid],
+                    "X": 0.0,
+                    "Y": 0.0,
+                    "Z": 0.0,
+                    "pitch": 0.0,
+                    "yaw": 0.0,
+                    "is_alive": True,
+                    "aim_punch_angle": "0 0 0",
+                    "team_num": teams_num[sid],
+                }
+            )
+    return {
+        "player_info": pd.DataFrame(
+            {
+                "steamid": [int(s) for s in imp_ids],
+                "name": [imp_names[s] for s in imp_ids],
+                "team_number": [teams_num[s] for s in imp_ids],
+            }
+        ),
+        "header": {"map_name": "de_mirage", "server_name": "impact"},
+        "events": {
+            "weapon_fire": fires,
+            "player_hurt": pd.DataFrame(),
+            "player_death": deaths,
+        },
+        "ticks": pd.DataFrame(rows),
+        "unsupported": set(),
+    }
+
+
+_m_imp = make_match_impact()
+FakeParser.demos["impact.dem"] = _m_imp
+imp_demo = core.load_demo("impact.dem")
+op = core.openings_table(imp_demo)
+check(
+    "openings: one per round, suicides/TK skipped",
+    len(op) == 4 and op["round"].tolist() == [1, 2, 3, 4],
+    op.get("round").tolist() if len(op) else "empty",
+)
+check(
+    "openings: killers",
+    op["killer"].tolist()
+    == [
+        "76561111111111121",
+        S4,
+        "76561111111111122",
+        "76561111111111123",
+    ],
+)
+check(
+    "openings: victims",
+    op["victim"].tolist() == [S4, "76561111111111121", S4, "76561111111111124"],
+)
+check(
+    "openings: killer side",
+    op["killer_side"].tolist() == ["T", "CT", "T", "T"],
+)
+check(
+    "openings: zone + round clock",
+    op.loc[0, "killer_zone"] == "BombsiteA"
+    and op.loc[0, "victim_zone"] == "Middle"
+    and abs(op.loc[0, "round_sec"] - 35.0) < 0.01,
+)
+
+ist = core.impact_stats(imp_demo).set_index("sid")
+_I1 = "76561111111111121"  # TeeOne: opening killer R1, victim R2, 2k round
+_I2 = "76561111111111122"  # TeeTwo: boundary trade, 2 assists (1 flash)
+_I3 = "76561111111111123"  # TeeThree: 3-kill round
+_C2 = S3  # CeeTwo: avenges CeeOne
+_C3 = "76561111111111124"  # CeeThree: opening victim R4, never wins one
+check(
+    "open attempts (killer or victim)",
+    ist.loc[_I1, "open_attempts"] == 2
+    and ist.loc[S4, "open_attempts"] == 3
+    and ist.loc[_I2, "open_attempts"] == 1
+    and ist.loc[_C3, "open_attempts"] == 1,
+)
+check(
+    "open wins",
+    ist.loc[_I1, "open_wins"] == 1
+    and ist.loc[S4, "open_wins"] == 1
+    and ist.loc[_I3, "open_wins"] == 1
+    and ist.loc[_C3, "open_wins"] == 0,
+)
+check(
+    "open rate",
+    ist.loc[_I1, "open_rate"] == 50.0
+    and ist.loc[_I2, "open_rate"] == 100.0
+    and ist.loc[_C3, "open_rate"] == 0.0,
+)
+check(
+    "open rate NA without attempts",
+    np.isnan(ist.loc[_C2, "open_rate"]),
+)
+check(
+    "trades: avenger + exact +320 boundary",
+    ist.loc[_C2, "trade_kills"] == 1 and ist.loc[_I2, "trade_kills"] == 1,
+)
+check(
+    "trades: no trade at +321",
+    ist.loc[_I1, "traded_deaths"] == 1 and ist.loc[S4, "traded_deaths"] == 1,
+)
+check(
+    "trades: same-round rule (kill after the round switch)",
+    ist.loc[_I1, "trade_kills"] == 0 and ist.loc[_C3, "traded_deaths"] == 0,
+)
+check(
+    "traded pct",
+    ist.loc[S4, "traded_pct"] == 25.0
+    and ist.loc[_I1, "traded_pct"] == 50.0
+    and ist.loc[_C2, "traded_pct"] == 0.0
+    and ist.loc[_C3, "traded_pct"] == 0.0
+    and np.isnan(ist.loc[_I2, "traded_pct"]),
+)
+check(
+    "multi-kills: 2k and 3k rounds",
+    ist.loc[_I1, "k2"] == 1 and ist.loc[_I3, "k3"] == 1 and ist.loc[_I2, "k2"] == 0,
+)
+check("multi-kills: no 4k/5k", ist[["k4", "k5"]].to_numpy().sum() == 0)
+check(
+    "assists: flash split, teamkill assist ignored",
+    ist.loc[_I2, "assists"] == 2
+    and ist.loc[_I2, "flash_assists"] == 1
+    and ist.loc[_I3, "assists"] == 0,
+)
+# old demo without assister columns -> NA, never 0
+ist_old = core.impact_stats(demo).set_index("sid")
+check(
+    "assists NA without the column",
+    ist_old["assists"].isna().all() and ist_old["flash_assists"].isna().all(),
+)
+# summary + debug report wiring
+summ_imp = core.player_summary(
+    imp_demo,
+    core.build_duels(imp_demo),
+    core.shots_table(imp_demo),
+    40.0,
+)
+_r1 = summ_imp[summ_imp["sid"] == _I1].iloc[0]
+check("player_summary open_rate", _r1["open_rate"] == 50.0)
+rep_imp = core.debug_report(
+    imp_demo,
+    core.shots_table(imp_demo),
+    core.build_duels(imp_demo),
+    _I1,
+    {"thr": 40.0},
+)
+check(
+    "debug_report counts",
+    rep_imp["counts"]["openings"] == 4 and rep_imp["counts"]["trade_kills"] == 2,
+)
+# demo without any deaths: everything degrades, nothing crashes
+FakeParser.demos["impact_nodeaths.dem"] = {
+    **_m_imp,
+    "events": {**_m_imp["events"], "player_death": pd.DataFrame()},
+}
+nd = core.load_demo("impact_nodeaths.dem")
+check("no deaths: openings empty", len(core.openings_table(nd)) == 0)
+ist_nd = core.impact_stats(nd).set_index("sid")
+check(
+    "no deaths: impact NA/0",
+    ist_nd["open_attempts"].eq(0).all()
+    and ist_nd["open_rate"].isna().all()
+    and ist_nd["traded_pct"].isna().all()
+    and ist_nd["assists"].isna().all(),
+)
+summ_nd = core.player_summary(nd, core.build_duels(nd), core.shots_table(nd), 40.0)
+check("no deaths: summary open_rate NA", summ_nd["open_rate"].isna().all())
+
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":
     sys.exit(1 if FAIL else 0)

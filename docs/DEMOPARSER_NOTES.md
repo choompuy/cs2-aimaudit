@@ -347,16 +347,20 @@ user_team_name` and warmup filter via `is_warmup_period == False`.
 | K/D by map zone                       | `player=["last_place_name"]` (kda_per_zone)             | "where do I die most"                                                                                           | ✅ implemented (step 4: by-zone table, duels page)  |
 | Accuracy penalty                      | `accuracy_penalty`                                      | direct metric instead of heuristic                                                                              | candidate (skipped: overlaps speed/recoil)         |
 | Damage slow                           | `velo_modifier`                                         | duel context                                                                                                    | ✅ implemented (step 4: slowed at fire ticks)       |
+| Assists / flash assists               | `assister_steamid` + `assistedflash` on player_death    | impact stats per player                                                                                         | ✅ implemented (step 7: via fix_ids, notes s.16)    |
 
 ## 11. Tests
 
-- `tests/test_core.py` — 310 checks on a synthetic demo (mocked demoparser2):
+- `tests/test_core.py` — 362 checks on a synthetic demo (mocked demoparser2):
   warmup filter, teamkills, SteamID collision+names, REGRESSION of the
   "Heylaurens bug" (rounded floats in object dtype: 1/10 → 10/10), distances
   to living enemies, hit matching with tolerance window, own speeds
   (Δpos t-1→t, teleport cap, dead rows), risks, punch (3 formats + fallback),
   buttons (DUCK/JUMP from bitmask, partial rejections, is_alive), data_checks,
-  debug_report, missing events.
+  debug_report, missing events, first shots/mouse flicks, scoreboard
+  cross-check, impact layer (openings incl. suicide/TK skip, trades with the
+  exact +320-tick boundary and the +321 non-trade, same-round rule,
+  multi-kills, assists/flash split and NA without the column).
 - `tests/check_ui.py` — cross-checks t() keys in app.py ↔ i18n en/ru,
   format placeholders, presence of all core.\* and columns.
 
@@ -633,3 +637,60 @@ claiming). What ships is the behavioural share and raw data instead.
 - Reaction time (the other half of the s.10 candidate) is NOT feasible:
   it needs the moment the enemy became visible, and demos expose no
   visibility/occlusion data. Documented as closed.
+
+## 16. Step 7 — round impact: openings, trades, multi-kills, assists (2026-11-11)
+
+Analysis-layer feature (no new parse_ticks calls): everything comes from
+the already-parsed player_death rows. Probed on the three real demos
+before writing code (`scripts/probe_step7_impact.py`, outside the repo).
+
+### 16.1 Definitions (deliberately narrow and testable)
+
+- **Opening duel** = the round's first ENEMY-attributed death (attacker
+  known, enemy team, not a suicide). Rows without an enemy attacker
+  (suicides / world / teamkill) are skipped and the next valid death of
+  that round becomes the opening. Per player: attempts (killer OR
+  victim), wins (killer), `open_rate`.
+- **Trade** = a teammate of the victim kills the attacker within 5 s
+  (320 ticks at 64 tick) of the victim's death, same round. The
+  avenging definition - simple, self-contained, verifiable. `k2..k5` =
+  rounds with EXACTLY that many enemy kills.
+- **Assists** = `assister_steamid` on enemy kills (the parser returns it
+  as str on these demos, but it goes through fix_ids like every other
+  SteamID column - same float64/collision rules); `assistedflash` marks
+  the flash subset. No assister column -> NA, never 0.
+
+### 16.2 Probe results (3 real demos)
+
+- Openings found: 16/16 rounds (Valve MM), 19/20 and 17/18 (FACEIT).
+  The missing rounds: 3 and 2 rounds where the first death row is a
+  suicide/world kill - exactly the case the skip rule handles.
+- Opening winrates per player: 0-100% at 1-7 attempts per demo
+  (small samples - the UI tip fires only at >= 5 attempts).
+- Trades (5 s window): 23 / 24 / 19 trade kills per demo (~17-20% of
+  deaths traded) - in line with community stats, so the definition
+  behaves.
+- Multi-kill distribution sanity: mostly 1 kill per round, 13-27 rounds
+  with 2, 5-8 with 3, 2 with 4 per demo.
+- `assister_steamid`: str dtype, 36/55/38 non-null on enemy kills
+  (~5 assists per player); `assistedflash` truthy on only 2-3 kills per
+  demo - flash assists are a real but SPARSE number, shown as-is.
+
+### 16.3 What step 7 shipped
+
+- `openings_table(demo)`: one row per round (round, killer, victim,
+  sides, weapon, headshot, zones, round clock) - the Duels page table,
+  both teams, ★ marking the selected player, following the round filter
+  (weapon/side filters deliberately do not apply).
+- `impact_stats(demo)`: per player `open_attempts/open_wins/open_rate`,
+  `trade_kills/traded_deaths/traded_pct`, `k2..k5`, `assists`,
+  `flash_assists`. Whole-match by design (like the scoreboard K/D).
+- `player_summary.open_rate` (Overview "All columns"), "Impact" metric
+  section in the Shooting page, and `tip_openings`: >= 5 opening
+  attempts with <= 30% won -> a MED verdict ("peek behind a flash, or
+  let a teammate take the first contact"). No verdict on traded deaths:
+  that is a teammate stat (s.15.2 discipline - measure before claim).
+- `debug_report.counts`: `openings` + `trade_kills`.
+- One bug found by the synthetic test on the way: the trade lookup
+  originally keyed deaths by the ATTACKER of each row (his kills, not
+  his death) - fixed by keying `(round, victim) -> (tick, killer)`.

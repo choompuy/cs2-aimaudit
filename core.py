@@ -159,6 +159,9 @@ ENGAGE_GAP_TICKS = 22
 # ticks (~250 ms) before a first shot = how much the mouse was moving when
 # the player committed (docs/DEMOPARSER_NOTES.md s.15).
 FLICK_WIN_TICKS = 16
+# Trade window: a teammate avenging your death within this many seconds
+# counts as a trade (the usual community definition; notes s.16).
+TRADE_S = 5.0
 # Eye / head heights (units, above the pawn origin). Crouching lowers both
 # by ~18 units; we scale linearly with duck_amount (0..1).
 EYE_STAND, HEAD_STAND, DUCK_DROP = 64.0, 62.0, 18.0
@@ -1268,7 +1271,13 @@ def load_demo(path: str, progress=None) -> Demo:
     for df, pairs in (
         (
             deaths,
-            (("attacker_steamid", "attacker_name"), ("user_steamid", "user_name")),
+            (
+                ("attacker_steamid", "attacker_name"),
+                ("user_steamid", "user_name"),
+                # assists for the impact stats; the same float64/steamid
+                # collision rules apply as for the attacker column
+                ("assister_steamid", "assister_name"),
+            ),
         ),
         (fires, (("user_steamid", "user_name"),)),
         (
@@ -2105,6 +2114,192 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
     return pd.concat(parts).sort_values("tick").reset_index(drop=True)
 
 
+def _enemy_kill_rows(demo: Demo) -> pd.DataFrame:
+    """
+    Deaths with a known attacker of the ENEMY team (suicides / world /
+    teamkills out), with a 0-based `round_idx` column. The same enemy rule
+    as the scoreboard K/D in player_summary. The column name must stay a
+    valid namedtuple field (no leading underscore) because both consumers
+    iterate with itertuples().
+    """
+    d = demo.deaths
+    if (
+        not len(d)
+        or "attacker_steamid" not in d.columns
+        or "user_steamid" not in d.columns
+        or "tick" not in d.columns
+    ):
+        return pd.DataFrame()
+    teams = demo.teams
+    ta = d["attacker_steamid"].map(teams)
+    tu = d["user_steamid"].map(teams)
+    enemy = (
+        ta.notna()
+        & tu.notna()
+        & (ta != tu)
+        & (d["attacker_steamid"] != d["user_steamid"])
+    )
+    out = d[enemy].copy()
+    if not len(out):
+        return out
+    # NB: itertuples() below - keep the name namedtuple-safe
+    out["round_idx"] = (
+        out["total_rounds_played"].map(_safe_int)
+        if "total_rounds_played" in out.columns
+        else 0
+    )
+    return out.sort_values("tick").reset_index(drop=True)
+
+
+def openings_table(demo: Demo) -> pd.DataFrame:
+    """
+    The first enemy kill of every round - both teams, match context.
+
+    An 'opening duel' is the round's first death caused by an enemy:
+    suicides / world damage / teamkill rows are skipped and the next valid
+    death of that round becomes the opening (on the real demos 2-3 rounds
+    per match start with such a row, notes s.16). ANY weapon counts,
+    knife and grenades included - this is 'how the round started', not a
+    gun-duel metric; the Duels page table marks rows with the selected
+    player. Returns an empty frame when the demo has no enemy kills.
+    """
+    de = _enemy_kill_rows(demo)
+    if not len(de):
+        return pd.DataFrame()
+    first = de.groupby("round_idx", sort=True).head(1)
+    out = []
+    for r in first.itertuples():
+        rd = int(getattr(r, "round_idx", 0)) + 1
+        out.append(
+            {
+                "round": rd,
+                "tick": int(r.tick),
+                "killer": r.attacker_steamid,
+                "victim": r.user_steamid,
+                "killer_side": demo.side_at(rd, r.attacker_steamid),
+                "victim_side": demo.side_at(rd, r.user_steamid),
+                "weapon": norm_weapon(r.weapon) if "weapon" in first.columns else NA,
+                "weapon_class": (
+                    weapon_class(r.weapon) if "weapon" in first.columns else "other"
+                ),
+                "headshot": bool(getattr(r, "headshot", False)),
+                "distance": getattr(r, "distance", np.nan),
+                "killer_zone": _zone(getattr(r, "attacker_last_place_name", None)),
+                "victim_zone": _zone(getattr(r, "user_last_place_name", None)),
+                "round_sec": _row_round_sec(r),
+            }
+        )
+    return pd.DataFrame(out)
+
+
+def impact_stats(demo: Demo, trade_s: float = TRADE_S) -> pd.DataFrame:
+    """
+    Per-player round-impact numbers, all from the enemy-kill deaths:
+
+    - opening duels: attempts (killer OR victim of the round's first enemy
+      kill) and wins (the killer); `open_rate` is the win rate in %
+    - trades: `trade_kills` - killed the attacker of a teammate's death
+      within `trade_s` seconds, same round (the avenging definition);
+      `traded_deaths` - own deaths avenged that way, `traded_pct` their
+      share of enemy deaths (a teammate stat, labelled as such in the UI)
+    - multi-kills: `k2`..`k5` - rounds with exactly that many enemy kills
+    - assists: `assists` (assister of an enemy kill, any form) and
+      `flash_assists` (the subset flagged assistedflash); NaN when the
+      demo/parser has no assister column
+
+    Whole-match by design, like the K/D in player_summary: openings and
+    trades are round structure, not a per-shot metric the global filters
+    could meaningfully slice.
+    """
+    names = demo.names
+    res = {
+        sid: {
+            "sid": sid,
+            "open_attempts": 0,
+            "open_wins": 0,
+            "open_rate": np.nan,
+            "trade_kills": 0,
+            "traded_deaths": 0,
+            "deaths": 0,
+            "traded_pct": np.nan,
+            "k2": 0,
+            "k3": 0,
+            "k4": 0,
+            "k5": 0,
+            "assists": np.nan,
+            "flash_assists": np.nan,
+        }
+        for sid in names
+    }
+    de = _enemy_kill_rows(demo)
+    if len(de):
+        teams = demo.teams
+        # ---- openings
+        op = de.groupby("round_idx", sort=True).head(1)
+        for r in op.itertuples():
+            k, v = r.attacker_steamid, r.user_steamid
+            for sid in (k, v):
+                if sid in res:
+                    res[sid]["open_attempts"] += 1
+            if k in res:
+                res[k]["open_wins"] += 1
+        # ---- deaths + multi-kills (k2..k5: ROUNDS with exactly that
+        # many enemy kills - one 3-kill round adds 1 to k3, not 3)
+        for sid, n in de.groupby("user_steamid").size().items():
+            if sid in res:
+                res[sid]["deaths"] = int(n)
+        for (sid, _rd), n in (
+            de.groupby(["attacker_steamid", "round_idx"]).size().items()
+        ):
+            if sid in res and 2 <= int(n) <= 5:
+                res[sid][f"k{int(n)}"] += 1
+        # ---- trades: for each death, did a teammate kill its attacker
+        # within the window (same round)? death_of maps (round, VICTIM) ->
+        # (tick, killer): the attacker's own death row is the candidate
+        # avenging kill. The attacker dies at most once per round, so one
+        # candidate row is enough.
+        win = int(trade_s * demo.tickrate)
+        death_of: dict[tuple[int, str], tuple[int, object]] = {}
+        for r in de.itertuples():
+            death_of[(int(getattr(r, "round_idx", 0)), r.user_steamid)] = (
+                int(r.tick),
+                r.attacker_steamid,
+            )
+        for r in de.itertuples():
+            v, a = r.user_steamid, r.attacker_steamid
+            key = (int(getattr(r, "round_idx", 0)), a)
+            later = death_of.get(key)
+            if later is None:
+                continue
+            dt, avenger = later
+            if not (int(r.tick) < dt <= int(r.tick) + win):
+                continue
+            if avenger == v or teams.get(avenger) != teams.get(v):
+                continue
+            if avenger in res:
+                res[avenger]["trade_kills"] += 1
+            if v in res:
+                res[v]["traded_deaths"] += 1
+        # ---- assists
+        if "assister_steamid" in de.columns:
+            for sid in res:
+                res[sid]["assists"] = 0
+                res[sid]["flash_assists"] = 0
+            ast = de[de["assister_steamid"].isin(names)]
+            for sid, n in ast.groupby("assister_steamid").size().items():
+                res[sid]["assists"] = int(n)
+            if "assistedflash" in de.columns:
+                afl = ast[ast["assistedflash"].fillna(False).astype(bool)]
+                for sid, n in afl.groupby("assister_steamid").size().items():
+                    res[sid]["flash_assists"] = int(n)
+        for sid, s in res.items():
+            if s["open_attempts"]:
+                s["open_rate"] = round(s["open_wins"] / s["open_attempts"] * 100, 1)
+            if s["deaths"]:
+                s["traded_pct"] = round(s["traded_deaths"] / s["deaths"] * 100, 1)
+    return pd.DataFrame(res[s] for s in names)
+
+
 def player_summary(
     demo: Demo,
     duels: pd.DataFrame,
@@ -2118,6 +2313,9 @@ def player_summary(
     dth = demo.deaths
     have_d = len(dth) and {"attacker_steamid", "user_steamid"} <= set(dth.columns)
     teams = demo.teams
+    # opening-duel win rate (impact_stats, notes s.16): whole-match, like
+    # the K/D below - it is round structure, not a filterable shot metric
+    open_rate = impact_stats(demo).set_index("sid")["open_rate"].to_dict()
     for p in demo.players.itertuples():
         sh = shots[shots["sid"] == p.sid]
         hi = _hurts_of(demo, p.sid, hurts)
@@ -2193,6 +2391,9 @@ def player_summary(
                 "first_acc": (
                     round(fsh["hit"].mean() * 100, 1) if len(fsh) else np.nan
                 ),
+                # opening-duel win rate: share of the rounds' first enemy
+                # kills won (killer vs victim, notes s.16)
+                "open_rate": open_rate.get(p.sid, np.nan),
                 "aim_err": (
                     round(dd["my_err"].median(), 1)
                     if len(dd) and dd["my_err"].notna().any()
@@ -2544,6 +2745,8 @@ def debug_report(
         if len(shots) > shots_cap
         else ""
     )
+    _openings = openings_table(demo)
+    _impact = impact_stats(demo)
     return {
         "meta": {
             "app": "cs2-aimaudit",
@@ -2573,6 +2776,8 @@ def debug_report(
             "excluded": demo.excluded,
             "punch_available": "punch_pitch" in demo.ticks.columns,
             "mouse_rows": 0 if demo.mouse is None else len(demo.mouse),
+            "openings": len(_openings),
+            "trade_kills": int(_impact["trade_kills"].sum()) if len(_impact) else 0,
             "scoreboard_totals": (
                 _records(demo.totals) if demo.totals is not None else None
             ),
