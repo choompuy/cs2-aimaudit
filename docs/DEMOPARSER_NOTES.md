@@ -335,7 +335,7 @@ user_team_name` and warmup filter via `is_warmup_period == False`.
 | Recoil in aim error                   | `aim_punch_angle` in POS in parse_ticks                 | err is now "where the bullet could go", not just pre-recoil crosshair                                           | ✅ implemented (with fallback and 3 formats)       |
 | Distance risk model                   | own calculations (dist to nearest living enemy)         | "risky shots" accounting for distance                                                                           | ✅ implemented                                     |
 | Debug report                          | `data_checks` + `debug_report` (JSON)                   | user sends the JSON — we can see where data/logic lies                                                          | ✅ implemented                                     |
-| Stats cross-check                     | `round_end` + `*_total` aggregates (scoreboard)         | data_checks: our stats vs game stats                                                                            | candidate (see s.13: final-round lag)              |
+| Stats cross-check                     | `kills_total`/`deaths_total` at the last event tick | data_checks: our stats vs game stats                          | ✅ implemented (step 5, tolerance rules in s.14)   |
 | Blindness by ticks                    | `flash_duration`                                        | not just attackerblind on kills                                                                                 | ✅ implemented (step 4, at fire ticks)              |
 | Mouse reaction                        | `usercmd_mouse_dx/dy`                                   | reaction time and mouse flicks                                                                                  | candidate (risky, not in all demos)                |
 | **BUG: velocity with sparse ticks=**  | own Δpos(t-1→t)×64, is_alive, 600 cap                   | speed lied N-fold (N=tick gap), teleports = 35k+ u/s                                                            | ✅ fixed (confirmed by Rust sources and user data) |
@@ -513,16 +513,17 @@ was verified on every demo, not read from the docs.
 - `thrusmoke` kills do exist (16/132, 10/147); `noscope` / `penetrated` /
   `distance` are native player_death fields (all three demos).
 
-### 13.4 aggregates (kills_total ...) — the cross-check trap
+### 13.4 aggregates (kills_total ...) — the cross-check trap, CORRECTED in s.14
 
-`parse_ticks(["kills_total", ...], ticks=[last event tick])` matches our
-pipeline per player EXCEPT for exactly the players who killed in the FINAL
-round (ours = game + 1, e.g. 5 players on faceit_mirage, 2 on faceit2): the
-`*_total` aggregates are written once per round, so a sample taken inside the
-last round misses that round's kills. With no `round_end` events and no
-end-of-demo tick in the header (13.2), there is no reliable later tick to
-sample. The stats cross-check therefore stays a candidate; a naive
-implementation would warn on every demo.
+The step-4 probe concluded the aggregates lag our pipeline by the final
+round's kills and the cross-check "stays a candidate". That conclusion
+was an artifact of the probe itself (it counted `attacker_steamid == sid`
+without the enemy/suicide masks and matched float steamids via
+`astype(str)`). The step-5 probe (s.14) re-measured with the exact
+`player_summary` counting: **no final-round lag exists** — at the last
+event tick the aggregates match our numbers per player on all three
+demos. The original claim is kept here only so the correction is
+traceable.
 
 ### 13.5 What step 4 shipped
 
@@ -541,3 +542,37 @@ implementation would warn on every demo.
   shooting page (thresholds: ≥ 20 known shots and ≥ 8% flashed / ≥ 10% slowed).
 - `accuracy_penalty` was probed (51% of fire ticks > 0) but NOT shipped:
   unit-less for users and overlapping with the speed/risky metrics.
+
+## 14. Step 5 — scoreboard cross-check: what the aggregates really are (2026-11-11)
+
+Probed on all three real demos before implementation
+(`scripts/probe_scoreboard*.py`, outside the repo), every player, zero
+violations of the rules below.
+
+### 14.1 The rules (all 30 players, 3 demos)
+
+- `kills_total` at the last event tick == our enemy kills per player,
+  EXACTLY — knife, hegrenade and molotov kills included (one knife, two
+  hegrenade and two molotov kills across the demos all matched).
+- `deaths_total` == our raw `player_death` rows per player (victims in
+  the filtered, live-only table): suicides (`weapon=world`, attacker ==
+  victim) and world deaths (planted C4, attacker `NA`) are counted by
+  the game and must be counted by us as rows.
+- Both aggregates reset at `begin_new_match`: the pre-live knife-round
+  death we drop is equally absent from the game's counters.
+- The "written once per round" lag from s.13.4 does not exist: at the
+  tick of the last death of a round the round's kills are already in
+  (verified on rounds 14-20 of all three demos).
+
+### 14.2 The check (`data_checks` id `scoreboard`)
+
+- `load_demo` samples `parse_ticks(["kills_total", "deaths_total"],
+  ticks=[last event tick])` into `demo.totals`; any failure → `None` →
+  the check reports a skip ("ok", n=0), never a guess.
+- kills rule: `game <= ours <= game + non-gun kills + teamkills` — the
+  three probed demos count knife/nade/TK kills, other servers may not;
+  `game > ours` (we dropped kills) is always a mismatch.
+- deaths rule: `game == raw death rows` exactly.
+- level: fraction of mismatching players >= 25% → anomaly, >= 5% → warn.
+- `debug_report` carries `counts.scoreboard_totals` so a mismatching
+  foreign demo can be diagnosed from the exported JSON.

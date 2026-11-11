@@ -90,6 +90,27 @@ class FakeParser:
         return [(n, self.d["events"].get(n, pd.DataFrame()).copy()) for n in names]
 
     def parse_ticks(self, wanted_props, ticks=None, players=None):
+        # scoreboard aggregates (game kills_total / deaths_total), see
+        # tests/test_core.py::FakeParser; without a "totals" config the
+        # fake returns an empty frame and the app skips the check
+        if "kills_total" in wanted_props or "deaths_total" in wanted_props:
+            tot = self.d.get("totals")
+            rows = []
+            for t in ticks or []:
+                for sid, (nm, k, d) in (tot or {}).items():
+                    rows.append(
+                        {
+                            "tick": int(t),
+                            "steamid": f64_sid(sid),
+                            "name": nm,
+                            "kills_total": k,
+                            "deaths_total": d,
+                        }
+                    )
+            return pd.DataFrame(
+                rows,
+                columns=["tick", "steamid", "name", "kills_total", "deaths_total"],
+            )
         df = self.d["ticks"].copy()
         if ticks is not None:
             df = df[df["tick"].isin(set(int(t) for t in ticks))]
@@ -292,6 +313,17 @@ def widget(at, kind, key):
         w = getattr(at, kind)(key=key)
         return w if w else None
     except Exception:  # noqa: BLE001 - missing key -> None
+        # st.dataframe learned `key` in AppTest only on streamlit 1.57:
+        # on older versions every dataframe reports key=None, so a keyed
+        # lookup always fails. The duels table is the first dataframe on
+        # its page, so fall back to it when no dataframe carries a key.
+        if kind == "dataframe":
+            try:
+                dfs = list(at.dataframe)
+                if dfs and all(d.key is None for d in dfs):
+                    return dfs[0]
+            except Exception:  # noqa: BLE001
+                pass
         return None
 
 
@@ -995,6 +1027,41 @@ def scenario_context():
     check("ru: zone table localized", len(ztabs) == 1, [list(v.columns) for v in ztabs])
 
 
+def scenario_scoreboard():
+    """
+    The debug expander gets the scoreboard cross-check: the game's own
+    kills_total / deaths_total aggregates vs our tables (2-round match,
+    Alpha kills Charlie in both rounds).
+    """
+    print("== scoreboard cross-check (debug expander) ==")
+    d = make_match([1, 2])
+    d["totals"] = {
+        S1: ("Alpha", 2, 0),
+        S2: ("Bravo", 0, 0),
+        S3: ("Charlie", 0, 2),
+        S4: ("Delta", 0, 0),
+    }
+    at = open_demo(d, "score_ok.dem")
+    check("ok totals: no exception", not at.exception, err_of(at))
+    dbg = "\n".join(m.value for m in at.markdown)
+    check("scoreboard line rendered", "scoreboard counters" in dbg)
+    check("scoreboard reports 0 mismatches", "0 players with a K/D mismatch" in dbg)
+
+    # the game claims a kill we never found -> the check flags the player
+    d2 = make_match([1, 2])
+    d2["totals"] = {
+        S1: ("Alpha", 3, 0),
+        S2: ("Bravo", 0, 0),
+        S3: ("Charlie", 0, 2),
+        S4: ("Delta", 0, 0),
+    }
+    at = open_demo(d2, "score_bad.dem")
+    check("bad totals: no exception", not at.exception, err_of(at))
+    dbg = "\n".join(m.value for m in at.markdown)
+    check("scoreboard flags the mismatch", "1 players with a K/D mismatch" in dbg)
+    check("scoreboard names the player", "Alpha: K 2 vs 3" in dbg)
+
+
 def run_real(path):
     """Run the real app on a real demo: every player x every preset."""
     print(f"== real demo: {path} ==")
@@ -1044,6 +1111,7 @@ def main():
         scenario_bad_input()
         scenario_tables()
         scenario_context()
+        scenario_scoreboard()
         if arg == "--all":
             scenario_matrix()
     print(f"\n{PASS} passed, {FAIL} failed")

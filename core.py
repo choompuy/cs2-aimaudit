@@ -1099,6 +1099,11 @@ class Demo:
     #                      docs/DEMOPARSER_NOTES.md section 12
     tickrate: int = TICKRATE  # from the demo header (fallback: 64)
     sides: dict = field(default_factory=dict)  # round(1-based) -> sid -> T/CT
+    totals: pd.DataFrame | None = None
+    #                      game kills_total / deaths_total per player,
+    #                      sampled at the last event tick (None when the
+    #                      parser or props are unavailable) - input of the
+    #                      data_checks scoreboard cross-check, notes s.14
 
     def side_at(self, round_no: int, sid: str) -> str:
         """Player's side in a given round (falls back to the static team)."""
@@ -1442,8 +1447,50 @@ def load_demo(path: str, progress=None) -> Demo:
             )
     tickrate = tickrate_from_header(header)
     td = _add_speed(td, tickrate)
+    # scoreboard aggregates (notes s.14): the game's own kills_total /
+    # deaths_total at the last event tick, for the data_checks
+    # cross-check. Verified on the real demos: the game updates them
+    # live (a kill is already counted at the tick of the last death of
+    # its round) and resets both at begin_new_match, so the sample is
+    # directly comparable to our live-only tables. Any failure ->
+    # totals stays None and the check reports a skip, never a guess.
+    totals = None
+    _ev_max = [int(df["tick"].max()) for df in (deaths, fires, hurts) if len(df)]
+    if _ev_max:
+        try:
+            agg = p.parse_ticks(["kills_total", "deaths_total"], ticks=[max(_ev_max)])
+        except Exception:  # noqa: BLE001 - old parser / props unavailable
+            agg = None
+        if agg is not None and len(agg) and "steamid" in agg.columns:
+            agg = agg.copy()
+            agg["sid"] = fix_ids(
+                agg["steamid"],
+                flookup,
+                agg["name"] if "name" in agg.columns else None,
+                name_to_sid,
+            )
+            agg = agg.drop_duplicates(["sid"])
+            keep = ["sid"] + [
+                c for c in ("kills_total", "deaths_total") if c in agg.columns
+            ]
+            if len(keep) > 1:
+                totals = (
+                    agg[keep]
+                    .rename(columns={"kills_total": "kills", "deaths_total": "deaths"})
+                    .reset_index(drop=True)
+                )
     return Demo(
-        path, header, players, deaths, fires, hurts, td, excluded, tickrate, sides
+        path,
+        header,
+        players,
+        deaths,
+        fires,
+        hurts,
+        td,
+        excluded,
+        tickrate,
+        sides,
+        totals=totals,
     )
 
 
@@ -2250,6 +2297,78 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
             "vals": sorted(bad),
         }
     )
+
+    # 12. scoreboard cross-check (notes s.14): the game's own
+    # kills_total / deaths_total at the last event tick vs our tables.
+    # Verified on all three real demos, every player:
+    #   kills_total  == our enemy kills (knife/grenade kills included)
+    #   deaths_total == our raw death rows (suicides and world deaths
+    #                   included; pre-live knife/warmup rows excluded by
+    #                   both sides - both aggregates reset at
+    #                   begin_new_match)
+    # Non-gun kills and teamkills get slack in the kills rule: the three
+    # probed demos count both, but other servers/versions may not.
+    # game > ours (kills) is always a red flag: we dropped something.
+    tot = getattr(demo, "totals", None)
+    if tot is not None and len(tot) and len(demo.players):
+        dth = demo.deaths
+        have_d = len(dth) and {"attacker_steamid", "user_steamid"} <= set(dth.columns)
+        teams = demo.teams
+        tset = tot.drop_duplicates("sid").set_index("sid")
+        n_bad = 0
+        n_cmp = 0
+        worst: list[str] = []
+        if have_d:
+            ta = dth["attacker_steamid"].map(teams)
+            tu = dth["user_steamid"].map(teams)
+            enemy = ta.notna() & tu.notna() & (ta != tu)
+        for p in demo.players.itertuples():
+            if p.sid not in tset.index:
+                continue
+            g = tset.loc[p.sid]
+            n_cmp += 1
+            if have_d:
+                mine = dth["attacker_steamid"] == p.sid
+                gun_kill = mine & (dth["attacker_steamid"] != dth["user_steamid"])
+                ours_k = int((gun_kill & enemy).sum())
+                raw_d = int((dth["user_steamid"] == p.sid).sum())
+                mk = dth[gun_kill]
+                nongun = int((~mk["weapon"].map(is_gun)).sum()) if len(mk) else 0
+                tk = (
+                    int(
+                        (
+                            mk["attacker_steamid"].map(teams)
+                            == mk["user_steamid"].map(teams)
+                        ).sum()
+                    )
+                    if len(mk)
+                    else 0
+                )
+            else:
+                ours_k, raw_d, nongun, tk = 0, 0, 0, 0
+            ok_k = ok_d = True
+            if "kills" in tset.columns and pd.notna(g["kills"]):
+                gk = int(g["kills"])
+                ok_k = gk <= ours_k <= gk + nongun + tk
+            if "deaths" in tset.columns and pd.notna(g["deaths"]):
+                ok_d = int(g["deaths"]) == raw_d
+            if not (ok_k and ok_d):
+                n_bad += 1
+                worst.append(
+                    f"{p.name}: K {ours_k} vs {int(g['kills']) if pd.notna(g['kills']) else '?'}, "
+                    f"D {raw_d} vs {int(g['deaths']) if pd.notna(g['deaths']) else '?'}"
+                )
+        f = n_bad / max(n_cmp, 1)
+        checks.append(
+            {
+                "id": "scoreboard",
+                "level": lvl(f, 0.05, 0.25),
+                "n": n_bad,
+                "vals": worst[:3],
+            }
+        )
+    else:
+        checks.append({"id": "scoreboard", "level": "ok", "n": 0, "vals": []})
     return checks
 
 
@@ -2320,6 +2439,9 @@ def debug_report(
             "duels": len(duels),
             "excluded": demo.excluded,
             "punch_available": "punch_pitch" in demo.ticks.columns,
+            "scoreboard_totals": (
+                _records(demo.totals) if demo.totals is not None else None
+            ),
         },
         "event_columns": {
             "deaths": sorted(map(str, demo.deaths.columns)),

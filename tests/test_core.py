@@ -312,6 +312,28 @@ class FakeParser:
         bad = [p for p in wanted_props if p in self.d.get("unsupported", set())]
         if bad:
             raise RuntimeError(f"unknown props: {bad}")
+        # scoreboard aggregates: the game's kills_total / deaths_total at
+        # the requested tick(s). Config: {"totals": {sid: (name, k, d)}};
+        # without it the "parser" knows nothing -> empty frame (the real
+        # parser always returns the columns; both paths must be safe).
+        if "kills_total" in wanted_props or "deaths_total" in wanted_props:
+            tot = self.d.get("totals")
+            rows = []
+            for t in ticks or []:
+                for sid, (nm, k, d) in (tot or {}).items():
+                    rows.append(
+                        {
+                            "tick": int(t),
+                            "steamid": f64_sid(sid),
+                            "name": nm,
+                            "kills_total": k,
+                            "deaths_total": d,
+                        }
+                    )
+            return pd.DataFrame(
+                rows,
+                columns=["tick", "steamid", "name", "kills_total", "deaths_total"],
+            )
         df = self.d["ticks"].copy()
         if ticks is not None:
             df = df[df["tick"].isin(set(int(t) for t in ticks))]
@@ -602,6 +624,152 @@ check(
 )
 check("angles ok", checks["angles"]["level"] == "ok", checks["angles"])
 check("hitgroups ok", checks["hitgroups"]["level"] == "ok", checks["hitgroups"])
+# no "totals" in the demo config -> the fake returns an empty frame ->
+# demo.totals is None and the check reports a skip, never a guess
+check(
+    "scoreboard skipped without totals",
+    checks["scoreboard"] == {"id": "scoreboard", "level": "ok", "n": 0, "vals": []},
+    checks["scoreboard"],
+)
+check("totals None without config", demo.totals is None, type(demo.totals))
+
+# ---------------------------------- scoreboard cross-check (notes s.14)
+print("== data_checks: scoreboard cross-check ==")
+# match.dem live facts: S1 kills S3 once; raw death rows: S3 x1.
+# Warmup kill/death (S2->S4) dropped by our filter AND not counted by
+# the game (both aggregates reset when the live match starts).
+_tot_ok = {
+    S1: ("Alpha", 1, 0),
+    S2: ("Bravo", 0, 0),
+    S3: ("Charlie", 0, 1),
+    S4: ("Delta", 0, 0),
+}
+FakeParser.demos["tot_ok.dem"] = {**make_match(), "totals": _tot_ok}
+d_ok = core.load_demo("tot_ok.dem")
+check(
+    "totals frame columns",
+    d_ok.totals is not None
+    and {"sid", "kills", "deaths"} <= set(d_ok.totals.columns)
+    and len(d_ok.totals) == 4,
+    None if d_ok.totals is None else d_ok.totals.to_dict(),
+)
+ch = {
+    c["id"]: c
+    for c in core.data_checks(d_ok, core.shots_table(d_ok), core.build_duels(d_ok, 3.0))
+}
+check(
+    "scoreboard ok when totals match",
+    ch["scoreboard"]["level"] == "ok",
+    ch["scoreboard"],
+)
+check("scoreboard ok n=0", ch["scoreboard"]["n"] == 0, ch["scoreboard"])
+
+# game claims MORE kills than we found -> we dropped something -> anomaly
+FakeParser.demos["tot_bad.dem"] = {
+    **make_match(),
+    "totals": {**_tot_ok, S1: ("Alpha", 2, 0)},
+}
+d_bad = core.load_demo("tot_bad.dem")
+ch = {
+    c["id"]: c
+    for c in core.data_checks(
+        d_bad, core.shots_table(d_bad), core.build_duels(d_bad, 3.0)
+    )
+}
+check(
+    "scoreboard anomaly when game > ours",
+    ch["scoreboard"]["level"] == "anomaly" and ch["scoreboard"]["n"] == 1,
+    ch["scoreboard"],
+)
+check(
+    "scoreboard names the player",
+    ch["scoreboard"]["vals"] and "Alpha" in ch["scoreboard"]["vals"][0],
+    ch["scoreboard"].get("vals"),
+)
+
+# deaths must equal RAW death rows: a live suicide is not an enemy death
+# (player_summary skips it) but the game counts it
+_m_sui = make_match()
+_m_sui["events"]["player_death"] = pd.concat(
+    [
+        _m_sui["events"]["player_death"],
+        pd.DataFrame(
+            {
+                "tick": [122],
+                "attacker_steamid": pd.array([int(S2)], dtype="float64"),
+                "attacker_name": ["Bravo"],
+                "user_steamid": pd.array([int(S2)], dtype="float64"),
+                "user_name": ["Bravo"],
+                "weapon": ["world"],
+                "headshot": [False],
+                "distance": [0],
+                "total_rounds_played": [0],
+                "is_warmup_period": [False],
+                "attacker_last_place_name": ["TSpawn"],
+                "user_last_place_name": ["TSpawn"],
+                "round_start_time": [100.0],
+                "game_time": [137.5],
+            }
+        ),
+    ],
+    ignore_index=True,
+)
+FakeParser.demos["tot_sui.dem"] = {
+    **_m_sui,
+    "totals": {**_tot_ok, S2: ("Bravo", 0, 1)},
+}
+d_sui = core.load_demo("tot_sui.dem")
+sm_sui = core.player_summary(
+    d_sui, core.build_duels(d_sui, 3.0), core.shots_table(d_sui), 40
+)
+check(
+    "suicide not an enemy death in summary",
+    sm_sui[sm_sui["sid"] == S2].iloc[0]["deaths"] == 0,
+    sm_sui[sm_sui["sid"] == S2].to_dict(),
+)
+ch = {
+    c["id"]: c
+    for c in core.data_checks(
+        d_sui, core.shots_table(d_sui), core.build_duels(d_sui, 3.0)
+    )
+}
+check(
+    "scoreboard ok with a suicide death row",
+    ch["scoreboard"]["level"] == "ok",
+    ch["scoreboard"],
+)
+# ...but a game that did NOT count the suicide is a mismatch
+FakeParser.demos["tot_sui2.dem"] = {**_m_sui, "totals": _tot_ok}
+d_sui2 = core.load_demo("tot_sui2.dem")
+ch = {
+    c["id"]: c
+    for c in core.data_checks(
+        d_sui2, core.shots_table(d_sui2), core.build_duels(d_sui2, 3.0)
+    )
+}
+check(
+    "scoreboard catches an uncounted suicide",
+    ch["scoreboard"]["level"] == "anomaly" and ch["scoreboard"]["n"] == 1,
+    ch["scoreboard"],
+)
+
+# parser that does not know the props -> totals None, check skipped,
+# the POS chain untouched (the buttons lesson)
+_tn = make_match()
+_tn["unsupported"] = {"kills_total", "deaths_total"}
+FakeParser.demos["tot_none.dem"] = _tn
+d_tn = core.load_demo("tot_none.dem")
+check("totals None when parser rejects", d_tn.totals is None, type(d_tn.totals))
+check("shots still parsed", len(d_tn.fires) == 6, len(d_tn.fires))
+ch = {
+    c["id"]: c
+    for c in core.data_checks(d_tn, core.shots_table(d_tn), core.build_duels(d_tn, 3.0))
+}
+check(
+    "scoreboard skipped when parser rejects",
+    ch["scoreboard"]["level"] == "ok" and ch["scoreboard"]["n"] == 0,
+    ch["scoreboard"],
+)
 
 # ---------------------------------------------- fix_ids: the Heylaurens bug
 print("== fix_ids: rounded floats in non-float column ==")
@@ -1935,6 +2103,61 @@ check(
     "mixed: deaths include knife/nade",
     sm[sm["sid"] == S1].iloc[0]["deaths"] == 1,
     sm[sm["sid"] == S1].iloc[0]["deaths"],
+)
+
+# scoreboard slack: a server that does NOT count knife/grenade kills in
+# kills_total must still pass - ours may exceed game by exactly the
+# player's non-gun kills (notes s.14; the three probed demos count them,
+# other versions may not)
+m9["totals"] = {
+    S1: ("Alpha", 2, 1),
+    S2: ("Bravo", 0, 1),
+    S3: ("Charlie", 0, 2),
+    S4: ("Delta", 0, 0),
+}
+dm2 = core.load_demo("mixed.dem")
+ch = {
+    c["id"]: c
+    for c in core.data_checks(dm2, core.shots_table(dm2), core.build_duels(dm2, 3.0))
+}
+check(
+    "scoreboard: non-gun slack absorbs uncounted knife/nade kills",
+    ch["scoreboard"]["level"] == "ok" and ch["scoreboard"]["n"] == 0,
+    ch["scoreboard"],
+)
+# ...and a server that DOES count them matches exactly
+m9["totals"] = {
+    S1: ("Alpha", 2, 1),
+    S2: ("Bravo", 0, 1),
+    S3: ("Charlie", 2, 2),
+    S4: ("Delta", 0, 0),
+}
+dm3 = core.load_demo("mixed.dem")
+ch = {
+    c["id"]: c
+    for c in core.data_checks(dm3, core.shots_table(dm3), core.build_duels(dm3, 3.0))
+}
+check(
+    "scoreboard: exact match when the game counts knife/nade",
+    ch["scoreboard"]["level"] == "ok",
+    ch["scoreboard"],
+)
+# ...but ours beyond the slack is an over-count -> anomaly
+m9["totals"] = {
+    S1: ("Alpha", 2, 1),
+    S2: ("Bravo", 0, 1),
+    S3: ("Charlie", 0, 2),
+    S4: ("Delta", 0, 1),
+}
+dm4 = core.load_demo("mixed.dem")
+ch = {
+    c["id"]: c
+    for c in core.data_checks(dm4, core.shots_table(dm4), core.build_duels(dm4, 3.0))
+}
+check(
+    "scoreboard: deaths beyond raw rows -> anomaly",
+    ch["scoreboard"]["level"] == "anomaly" and ch["scoreboard"]["n"] == 1,
+    ch["scoreboard"],
 )
 
 # 6) halves from sides: MR12 with overtime, MR15, gaps, fallbacks

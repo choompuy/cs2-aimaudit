@@ -310,6 +310,7 @@ STR = {
         "chk_angles": "Median aim error across duels: {med:.1f}°, {n} duels above 45°. If this looks implausible, send the report.",
         "chk_hitgroups": "Unexpected hit-zone values in the data: {vals}.",
         "chk_sides": "Per-round side data is missing for {n} shots ({pct:.1f}%); the end-of-match side is shown for them instead (halftime swaps are not reflected).",
+        "chk_scoreboard": "Cross-check against the game's own scoreboard counters: {n} players with a K/D mismatch ({vals}). Above 0 means events were dropped or miscounted — send the debug report.",
         # guide
         "guide": """
 ### How to get a demo
@@ -633,6 +634,7 @@ STR = {
         "chk_angles": "Медиана ошибки прицела по дуэлям: {med:.1f}°, {n} дуэлей выше 45°. Если выглядит неправдоподобно — пришли отчёт.",
         "chk_hitgroups": "Неожидаемые значения зон попадания: {vals}.",
         "chk_sides": "Для {n} выстрелов ({pct:.1f}%) нет данных о стороне в раунде; для них показана сторона на конец матча (смена на халфтайме не учтена).",
+        "chk_scoreboard": "Сверка с игровым табло: у {n} игроков K/D не совпадает с показателями игры ({vals}). Всё больше нуля — потерянные или неверно посчитанные события, пришли debug-отчёт.",
         "guide": """
 ### Где взять демку
 - **Premier / Соревновательный:** CS2 → Играть → *Ваши матчи* → скачать демку. Демки хранятся ограниченное время, так что скачивай вскоре после матча.
