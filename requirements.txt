@@ -1,7 +1,8 @@
-# streamlit>=1.49: st.dataframe / st.plotly_chart accept width="stretch"
-streamlit>=1.49
+# streamlit>=1.56: components v2 (1.51) and st.html (1.52) are guaranteed;
+# pandas>=3.0: the platform floor the design system is built on (PROMPT_2 step 1)
+streamlit>=1.56
 demoparser2>=0.42.1
-pandas>=2.0
+pandas>=3.0
 numpy>=1.26
 plotly>=5.24
 # transparently unpacks .dem.zst demos (.bz2/.gz/.zip are stdlib)

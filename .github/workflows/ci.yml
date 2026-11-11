@@ -11,9 +11,10 @@ jobs:
       fail-fast: false
       matrix:
         # Most players are on Windows; macOS/arm64 wheels for demoparser2
-        # and zstandard are published for these versions.
+        # and zstandard are published for these versions. 3.10 is gone:
+        # streamlit>=1.56 and pandas>=3.0 both require Python >=3.11.
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources
-        run: python -m py_compile app.py core.py i18n.py
+        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py
       - name: Core tests (synthetic demo, no .dem needed)
         run: python tests/test_core.py
       - name: UI consistency checks

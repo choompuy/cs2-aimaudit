@@ -13,11 +13,13 @@ import tempfile
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
 from plotly.subplots import make_subplots
 
 import core
 import i18n
+import theme
 
 st.set_page_config(
     page_title="CS2-AimAudit",
@@ -25,6 +27,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# The design system: CSS variables + overrides (theme/overrides.css) are
+# injected here once per run; charts and inline HTML read tokens through
+# theme.tok(); native widgets take their colours from .streamlit/config.toml,
+# which tools/sync_theme.py regenerates from the same theme/tokens.toml.
+theme.inject_theme()
 
 
 @functools.lru_cache(maxsize=1)
@@ -349,7 +357,8 @@ def fmt_first(v: str) -> str:
 
 
 def _cell_style(styler, css_fn, subset):
-    """Apply a per-cell CSS function to a Styler subset.
+    """
+    Apply a per-cell CSS function to a Styler subset.
 
     Styler.map exists from pandas 2.1; pandas 2.0 (our floor) spells it
     applymap, which is deprecated (and removed in pandas 3) later on.
@@ -370,36 +379,68 @@ def _pct_col(label):
 # One semantic palette everywhere, colour-blind-safe (Okabe–Ito based),
 # tuned for the dark theme. Roles, not decoration: accent = you (your
 # lines and bars), grey = context (misses, baselines, thresholds),
-# vermillion = bad/risky, blue = good. Meaning never rides on colour
+# red = bad/risky, blue = good. Meaning never rides on colour
 # alone: series keep their label, marker shape or dash too.
+# Values come from theme/tokens.toml — the single source of truth.
 PAL = {
-    "you": "#F5A623",
-    "ctx": "#8899AA",
-    "bad": "#D55E00",
-    "good": "#56B4E9",
+    "you": theme.tok("accent"),
+    "ctx": theme.tok("context"),
+    "bad": theme.tok("negative"),
+    "good": theme.tok("info"),
 }
 # Order for traces without a semantic role (the timeline keys row); the
 # same list lives in .streamlit/config.toml (theme.chartCategoricalColors,
-# Streamlit >=1.46 and the repo floor is 1.49) so theme and code agree.
-CHART_COLORS = ["#F5A623", "#56B4E9", "#D55E00", "#8899AA", "#009E73", "#CC79A7"]
+# kept in sync by tools/sync_theme.py) so theme and code agree.
+CHART_COLORS = theme.chart_colors()
+
+# The shared Plotly template built from the theme tokens, registered once
+# so the name "aimaudit" resolves anywhere; style_figure() additionally
+# applies the object and its key attributes explicitly — see the note
+# inside it for why that matters.
+pio.templates["aimaudit"] = theme.plotly_template()
+PLOTLY_TEMPLATE = pio.templates["aimaudit"]
 
 
 def style_figure(
     fig, height=380, margin=None, x_title=None, y_title=None, hover=None, legend_y=1.12
 ):
-    """The one place every chart gets its look: height, margins,
-    font size, the categorical palette, a horizontal legend above the plot,
+    """
+    The one place every chart gets its look: height, margins,
+    font, the categorical palette, a horizontal legend above the plot,
     axis titles, and — where the caller passes one — a shared hovertemplate
     so hover always shows units. Semantic per-trace colours come from PAL
     at trace setup.
+
+    The token look is applied explicitly (template + layout attributes),
+    not only through the template: the browser merges Streamlit's own
+    plotly theme into layout.template, but explicit layout.* values always
+    win, so charts render identically on every supported Streamlit version.
     """
     fig.update_layout(
+        template=PLOTLY_TEMPLATE,
         height=height,
         margin=margin or dict(t=10, r=10),
-        font=dict(size=13),
+        paper_bgcolor=theme.TRANSPARENT,
+        plot_bgcolor=theme.TRANSPARENT,
+        font=dict(
+            size=13,
+            family=theme.tok("font.family-stack"),
+            color=theme.tok("text-primary"),
+        ),
         colorway=CHART_COLORS,
+        hoverlabel=dict(
+            bgcolor=theme.tok("surface-3"),
+            bordercolor=theme.tok("border-strong"),
+            font=dict(color=theme.tok("text-primary")),
+        ),
         legend=dict(orientation="h", y=legend_y),
     )
+    for update_axis in (fig.update_xaxes, fig.update_yaxes):
+        update_axis(
+            gridcolor=theme.tok("chart-grid"),
+            zerolinecolor=theme.tok("chart-grid"),
+            tickfont=dict(color=theme.tok("chart-axis")),
+        )
     if x_title is not None:
         fig.update_xaxes(title_text=x_title)
     if y_title is not None:
@@ -606,8 +647,10 @@ res_sel = set(st.session_state.get("flt_res") or [])
 
 
 def _ctx_bar():
-    """One line of context at the top of every page - which filters
-    are active and how much data is in view."""
+    """
+    One line of context at the top of every page - which filters
+    are active and how much data is in view.
+    """
     parts = [lbl for lbl, _fn in _chips]
     line = t("flt_n", shots=len(shots_f), duels=len(duels_f))
     if parts:
@@ -807,9 +850,11 @@ if page == "overview":
     ov_disp = pd.DataFrame({ov_labels[k]: ov_cells[k] for k in _ov_shown})
 
     def _pick_player():
-        """Row click -> select that player (runs before widgets, so setting
+        """
+        Row click -> select that player (runs before widgets, so setting
         session_state['me'] here is allowed; doing it in the tab body would
-        raise StreamlitWidgetAlreadyInstantiatedError)."""
+        raise StreamlitWidgetAlreadyInstantiatedError).
+        """
         try:
             sel = st.session_state["ov_table"]
         except KeyError:
@@ -819,14 +864,18 @@ if page == "overview":
             st.session_state["me"] = ov_sids[rows[0]]
 
     _ov_styler = ov_disp.style
-    _team_css = {"T": "background-color: #2A2118", "CT": "background-color: #182432"}
+    # team stripe tints and the selected-row highlight come from the tokens
+    _team_css = {
+        "T": f"background-color: {theme.tok('team-t')}",
+        "CT": f"background-color: {theme.tok('team-ct')}",
+    }
     _ov_styler = _cell_style(
         _ov_styler, lambda v: _team_css.get(v, ""), subset=[ov_labels["team"]]
     )
     if sel_row is not None:
         _ov_styler = _cell_style(
             _ov_styler,
-            lambda v: "background-color: #3B3218",
+            lambda v: f"background-color: {theme.tok('surface-selected')}",
             subset=([sel_row], ov_disp.columns.tolist()),
         )
     st.dataframe(
@@ -896,22 +945,22 @@ elif page == "shooting":
         tips.append((0, t("tip_few"), None))
     tips.sort(key=lambda item: -item[0])
 
-    # severity chips: colour from the semantic palette + a text
-    # label, so meaning never rides on colour alone
+    # severity chips: colour through the .aa-chip-* classes in
+    # theme/overrides.css (token-driven) + a text label, so meaning
+    # never rides on colour alone
     sev_style = {
-        2: ("sev_high", PAL["bad"]),  # vermillion — bad / risky
-        1: ("sev_med", PAL["you"]),  # accent      — warning
-        0: ("sev_info", PAL["good"]),  # blue       — info / good
+        2: ("sev_high", "negative"),  # red    — bad / risky
+        1: ("sev_med", "accent"),  # accent — warning
+        0: ("sev_info", "info"),  # blue   — info / good
     }
     with st.container(border=True):
         st.markdown(f"**{t('top3_title')}**")
         st.caption(t("tips_caption"))
         for sev, tip_text, ev in tips[:3]:
-            sev_key, sev_color = sev_style[sev]
+            sev_key, sev_token = sev_style[sev]
             chip, text_col, ev_col = st.columns([1, 6, 2])
             chip.markdown(
-                f"<span style='color:{sev_color}; font-weight:600'>"
-                f"● {t(sev_key)}</span>",
+                f"<span class='aa-chip aa-chip-{sev_token}'>● {t(sev_key)}</span>",
                 unsafe_allow_html=True,
             )
             text_col.markdown(tip_text)
@@ -1264,8 +1313,10 @@ elif page == "duels":
         disp = pd.DataFrame({du_labels[k]: du_cells[k] for k in _du_shown})
 
         def _duel_row_click():
-            """A row click opens that duel in the Timeline right away
-            (row order == my_duels)."""
+            """
+            A row click opens that duel in the Timeline right away
+            (row order == my_duels).
+            """
             try:
                 sel = st.session_state["du_table"]
             except KeyError:
@@ -1354,7 +1405,6 @@ def _timeline_fragment():
         if missing:
             st.warning(t("tl_no_buttons", keys=", ".join(t(f"k_{b}") for b in missing)))
 
-        # auto verdict in plain words
         verdict = []
         if pd.notna(r["distance"]):
             verdict.append(t("tl_v_dist", dist=num(r["distance"], 0)))

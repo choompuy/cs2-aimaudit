@@ -205,15 +205,14 @@ for fn, cols in {
 
 # ---- 7. privacy: Streamlit usage statistics must stay disabled
 # The README promises "no telemetry"; without this setting Streamlit phones
-# home with anonymous usage stats.
-import configparser  # noqa: E402
+# home with anonymous usage stats. (Parsed with tomllib: configparser cannot
+# handle the repeated [[theme.fontFaces]] tables.)
+import tomllib  # noqa: E402
 
-cfg = configparser.ConfigParser()
-cfg.read(ROOT / ".streamlit" / "config.toml")
+cfg = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
 bad(
     "[browser] gatherUsageStats = false",
-    cfg.has_option("browser", "gatherUsageStats")
-    and cfg.getboolean("browser", "gatherUsageStats") is False,
+    cfg.get("browser", {}).get("gatherUsageStats") is False,
     "Streamlit telemetry is NOT disabled in .streamlit/config.toml",
 )
 
@@ -240,6 +239,89 @@ bad(
     "credentials.toml" in sh and "$HOME/.streamlit" in sh,
     "start.sh does not pre-create ~/.streamlit/credentials.toml",
 )
+
+# ---- 9. design system: .streamlit/config.toml [theme] matches the tokens
+# tools/sync_theme.py regenerates the section from theme/tokens.toml; if the
+# file was hand-edited (or sync was forgotten after a token change) the app
+# silently renders with a stale palette for all native widgets.
+import theme  # noqa: E402
+from theme.loader import config_theme_dict, font_faces  # noqa: E402
+
+expected_theme = config_theme_dict()
+live_theme = cfg.get("theme", {})
+mismatch = {
+    key: (value, live_theme.get(key))
+    for key, value in expected_theme.items()
+    if live_theme.get(key) != value
+}
+bad(
+    "config.toml [theme] matches theme/tokens.toml",
+    not mismatch,
+    f"mismatch {mismatch} — run python tools/sync_theme.py",
+)
+expected_faces = [
+    {
+        k: face[k]
+        for k in ("family", "url", "weight", "style")
+        if face.get(k) is not None
+    }
+    for face in font_faces()
+]
+bad(
+    "[[theme.fontFaces]] match theme/tokens.toml",
+    live_theme.get("fontFaces", []) == expected_faces,
+    f"expected {expected_faces}, got {live_theme.get('fontFaces')}",
+)
+bad(
+    "[server] enableStaticServing for local fonts",
+    (not expected_faces) or cfg.get("server", {}).get("enableStaticServing") is True,
+    "local [[fontface]] files are unreachable without server.enableStaticServing",
+)
+bad(
+    "declared font files exist in static/fonts/",
+    all((ROOT / face["file"]).is_file() for face in font_faces() if face.get("file")),
+    "a [[fontface]] points at a missing file",
+)
+
+# ---- 10. design system: no hex/rgb colours outside theme/
+# Every colour must come from theme/tokens.toml (directly or via
+# .streamlit/config.toml, which check 9 pins to the tokens). Hex/rgb literals
+# in UI sources are how palettes drift apart.
+UI_SOURCES = [ROOT / "app.py", ROOT / "i18n.py"]
+ui_dir = ROOT / "ui"
+if ui_dir.is_dir():
+    UI_SOURCES += sorted(ui_dir.glob("*.py"))
+for src in UI_SOURCES:
+    text = src.read_text(encoding="utf-8")
+    hexes = sorted(set(re.findall(r"#[0-9a-fA-F]{6,8}\b", text)))
+    rgbs = sorted(set(re.findall(r"\brgba?\(", text)))
+    bad(
+        f"no colour literals in {src.name}",
+        not hexes and not rgbs,
+        f"hex {hexes} rgb {rgbs} — use theme.tok() instead",
+    )
+
+# ---- 11. design system: WCAG AA contrast for body text, every theme
+# text-primary / text-secondary must pass AA (>= 4.5:1) on every surface
+# they are used on, and text-inverse on the accent chips, in every theme.
+from theme.loader import contrast  # noqa: E402
+
+for theme_name in theme.available_themes():
+    tk = theme.tokens(theme_name)
+    pairs = [
+        ("text-primary", "bg-app"),
+        ("text-primary", "surface-3"),
+        ("text-secondary", "bg-app"),
+        ("text-secondary", "surface-2"),
+        ("text-inverse", "accent"),
+    ]
+    for fg_name, bg_name in pairs:
+        ratio = contrast(tk[fg_name], tk[bg_name])
+        bad(
+            f"AA contrast [{theme_name}] {fg_name} on {bg_name}",
+            ratio >= 4.5,
+            f"{ratio:.2f}:1",
+        )
 
 print(f"\n{'FAILURES: ' + str(FAIL) if FAIL else 'ALL OK'}")
 sys.exit(1 if FAIL else 0)

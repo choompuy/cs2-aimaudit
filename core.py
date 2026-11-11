@@ -1164,8 +1164,10 @@ def load_demo(path: str, progress=None) -> Demo:
 
 # ----------------------------------------------------------------- metrics
 def _hurts_of(demo: Demo, me: str, hurts: pd.DataFrame | None = None) -> pd.DataFrame:
-    """hurts rows caused by `me`; safe when the player_hurt event is absent.
-    `hurts` overrides demo.hurts (used by the global filter)."""
+    """
+    hurts rows caused by `me`; safe when the player_hurt event is absent.
+    `hurts` overrides demo.hurts (used by the global filter).
+    """
     h = demo.hurts if hurts is None else hurts
     if h is not None and "attacker_steamid" in getattr(h, "columns", []) and len(h):
         return h[h["attacker_steamid"] == me]
