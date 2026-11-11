@@ -924,6 +924,7 @@ if page == "overview":
         "moving": t("col_moving"),
         "risky": t("col_risky"),
         "first_shot": t("col_first_shot"),
+        "first_acc": t("col_first_acc"),
         "sides": t("col_sides"),
         "aim_err": t("col_aim_err"),
         "duration": t("col_duration"),
@@ -944,6 +945,7 @@ if page == "overview":
         "moving": ov["moving"].to_numpy(),
         "risky": ov["risky"].to_numpy(),
         "first_shot": ov["first_shot"].to_numpy(),
+        "first_acc": ov["first_acc"].to_numpy(),
         "sides": ov["sides"].to_numpy(),
         "aim_err": ov["aim_err"].to_numpy(),
         "duration": ov["duration"].to_numpy(),
@@ -966,6 +968,7 @@ if page == "overview":
         "moving": _pct_col(ov_labels["moving"]),
         "risky": _pct_col(ov_labels["risky"]),
         "first_shot": _pct_col(ov_labels["first_shot"]),
+        "first_acc": _pct_col(ov_labels["first_acc"]),
         "sides": st.column_config.TextColumn(ov_labels["sides"]),
         "aim_err": st.column_config.NumberColumn(ov_labels["aim_err"], format="%.1f°"),
         "duration": st.column_config.NumberColumn(
@@ -996,6 +999,7 @@ if page == "overview":
         "moving",
         "risky",
         "first_shot",
+        "first_acc",
         "sides",
         "aim_err",
         "duration",
@@ -1078,6 +1082,25 @@ elif page == "shooting":
     fl_n = int(fl_me.fillna(False).sum())
     sl_n = int(sl_me.fillna(False).sum())
 
+    # first-shot discipline: accuracy on the first shot of an engagement
+    # (crosshair placement) and the mouse movement that preceded it
+    # (usercmd deltas; NA on demos without them - no verdict then).
+    fs_me = sh_me[sh_me["first_shot"]] if len(sh_me) else sh_me
+    fu_me = sh_me[~sh_me["first_shot"]] if len(sh_me) else sh_me
+    first_n = len(fs_me)
+    first_acc = fs_me["hit"].mean() * 100 if first_n else np.nan
+    follow_acc = fu_me["hit"].mean() * 100 if len(fu_me) else np.nan
+    fm = fs_me["flick_move"] if first_n else pd.Series(dtype=float)
+    fm_known = int(fm.notna().sum())
+    swing_med = fm.median() if fm_known else np.nan
+    # mid-swing first shots: pre-fire movement >= 2x the player's own
+    # median - the bar self-calibrates for sensitivity and playstyle
+    swing_n = (
+        int((fm >= 2.0 * float(swing_med)).sum())
+        if fm_known and pd.notna(swing_med)
+        else 0
+    )
+
     # "Top 3 things to work on" opens the tab: a severity chip
     # (HIGH / MED / INFO), the sentence with its number, and the evidence
     # behind a "show me" popover (the duels behind the number) or a
@@ -1110,6 +1133,8 @@ elif page == "shooting":
         tips.append((1, t("tip_flashed", n=fl_n, pct=fl_n / fl_known * 100), None))
     if sl_known >= 20 and sl_n >= 5 and sl_n / sl_known >= 0.10:
         tips.append((1, t("tip_slowed", n=sl_n, pct=sl_n / sl_known * 100), None))
+    if fm_known >= 30 and swing_n >= 3 and swing_n / fm_known >= 0.35:
+        tips.append((1, t("tip_swing", n=swing_n, pct=swing_n / fm_known * 100), None))
     if not tips:
         tips.append((0, t("tip_few"), None))
     tips.sort(key=lambda item: -item[0])
@@ -1231,6 +1256,20 @@ elif page == "shooting":
         st.markdown(f"**{t('sec_crosshair')}**")
         c = st.columns(4)
         c[0].metric(t("m_onhead"), pct(onhead_pct), help=t("m_onhead_help"))
+        st.markdown(f"**{t('sec_first')}**")
+        c = st.columns(4)
+        c[0].metric(
+            t("m_first_acc"),
+            pct(first_acc),
+            help=t("m_first_acc_help"),
+            delta=(
+                f"{first_acc - follow_acc:+.0f} pp"
+                if pd.notna(first_acc) and pd.notna(follow_acc)
+                else None
+            ),
+        )
+        c[1].metric(t("m_first_n"), first_n, help=t("m_first_n_help"))
+        c[2].metric(t("m_swing_med"), num(swing_med, 0), help=t("m_swing_med_help"))
         st.markdown(f"**{t('sec_duels')}**")
         c = st.columns(4)
         c[0].metric(t("m_kd"), f"{kills} / {dths}", help=t("m_kd_help"))
@@ -1346,6 +1385,7 @@ elif page == "shooting":
             "hits": t("col_hits"),
             "hs": t("col_hs_hits"),
             "accuracy": t("col_accuracy"),
+            "first_acc": t("col_first_acc"),
         }
         w = w.rename(columns=w_labels)
         w_cfg = {
@@ -1368,6 +1408,7 @@ elif page == "shooting":
             ),
             w_labels["hs"]: _pct_col(w_labels["hs"]),
             w_labels["accuracy"]: _pct_col(w_labels["accuracy"]),
+            w_labels["first_acc"]: _pct_col(w_labels["first_acc"]),
         }
         st.dataframe(w, column_config=w_cfg, hide_index=True, width="stretch")
 

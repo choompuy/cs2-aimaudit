@@ -312,6 +312,42 @@ class FakeParser:
         bad = [p for p in wanted_props if p in self.d.get("unsupported", set())]
         if bad:
             raise RuntimeError(f"unknown props: {bad}")
+        # usercmd mouse deltas: config {"mouse": {(tick, sid): (dx, dy)}};
+        # without the config the fake returns no usercmd columns (an old
+        # parser/demo) and the app must degrade to NA, never crash
+        if "usercmd_mouse_dx" in wanted_props or "usercmd_mouse_dy" in wanted_props:
+            mo = self.d.get("mouse")
+            # name lookup from player_info (the module-level NAMES constant
+            # is only defined further down the file)
+            nm = {
+                int(s): n
+                for s, n in zip(
+                    self.d["player_info"]["steamid"], self.d["player_info"]["name"]
+                )
+            }
+            rows = []
+            for t in ticks or []:
+                for (mt, sid), (dx, dy) in (mo or {}).items():
+                    if mt == int(t):
+                        rows.append(
+                            {
+                                "tick": int(t),
+                                "steamid": f64_sid(sid),
+                                "name": nm.get(int(sid), "?"),
+                                "usercmd_mouse_dx": dx,
+                                "usercmd_mouse_dy": dy,
+                            }
+                        )
+            return pd.DataFrame(
+                rows,
+                columns=[
+                    "tick",
+                    "steamid",
+                    "name",
+                    "usercmd_mouse_dx",
+                    "usercmd_mouse_dy",
+                ],
+            )
         # scoreboard aggregates: the game's kills_total / deaths_total at
         # the requested tick(s). Config: {"totals": {sid: (name, k, d)}};
         # without it the "parser" knows nothing -> empty frame (the real
@@ -602,6 +638,112 @@ check(
     "unsupported state props: zones still present (events unaffected)",
     (unsup_shots["zone"] == "BombsiteA").any(),
     unsup_shots["zone"].head().tolist(),
+)
+
+# ------------------------------------------------ first shots / mouse flick
+print("== first shots / mouse flick ==")
+# gap semantics (notes s.15): > ENGAGE_GAP_TICKS since the same sid's
+# previous shot = fresh aim event; the array is order-independent
+_g = core._first_shot_arr([122, 100, 123], ["a", "a", "a"])
+check(
+    "gap boundary: 22 -> follow-up, 23 -> first, any row order",
+    _g.tolist() == [False, True, False],
+    _g.tolist(),
+)
+# the mouse sample covers the window BEFORE each first shot, clipped at 0
+_w = core._first_shot_windows(
+    pd.DataFrame({"tick": [5, 700], "user_steamid": ["a", "a"]})
+)
+check(
+    "windows: negative ticks clipped, sorted union",
+    _w[:5] == [0, 1, 2, 3, 4] and _w[5] == 684 and len(_w) == 21,
+    (_w[:6], len(_w)),
+)
+# base demo: S1 100/110/120 (first + 2 follow-ups), S3 115 first + 118
+# follow-up, S4 200 first
+check(
+    "first_shot flags on the base demo",
+    shots["first_shot"].sum() == 3
+    and bool(shots[shots["sid"] == S1].sort_values("tick")["first_shot"].iloc[0])
+    and not bool(shots[shots["sid"] == S1].sort_values("tick")["first_shot"].iloc[1]),
+    shots[["tick", "sid", "first_shot"]].to_dict(),
+)
+check("no mouse data -> flick_move all NA", shots["flick_move"].isna().all())
+
+# mouse demo: S1's window [84..99] has 12 of 16 ticks (partial sums OK),
+# S3's window [99..114] exactly one row, S4's window empty -> NA
+m_mouse = make_match()
+m_mouse["mouse"] = {
+    **{(t, S1): (3, 4) for t in range(88, 100)},
+    (110, S3): (10, -5),
+}
+FakeParser.demos["mouse.dem"] = m_mouse
+md = core.load_demo("mouse.dem")
+check(
+    "demo.mouse: 13 rows, mag |dx|+|dy|",
+    md.mouse is not None and len(md.mouse) == 13 and md.mouse["mag"].sum() == 99.0,
+    None if md.mouse is None else md.mouse["mag"].sum(),
+)
+ms = core.shots_table(md)
+_s1fm = ms[ms["sid"] == S1].set_index("tick")["flick_move"]
+_s3fm = ms[ms["sid"] == S3].set_index("tick")["flick_move"]
+check(
+    "flick_move: partial window sums the available ticks (12 x 7)",
+    abs(float(_s1fm[100]) - 84.0) < 1e-9,
+    float(_s1fm[100]),
+)
+check(
+    "flick_move: spray follow-ups stay NA",
+    _s1fm[110] != _s1fm[110] and _s1fm[120] != _s1fm[120],
+    (_s1fm[110], _s1fm[120]),
+)
+check(
+    "flick_move: single-row window = 15",
+    abs(float(_s3fm[115]) - 15.0) < 1e-9,
+    float(_s3fm[115]),
+)
+check(
+    "flick_move: empty window -> NA, not 0",
+    ms[ms["sid"] == S4]["flick_move"].isna().all(),
+    ms[ms["sid"] == S4]["flick_move"].tolist(),
+)
+# first-shot accuracy: S3's first shot (115) hits (hurt at 116), S1's
+# (100) and S4's (200) miss; S2 never fired -> NaN
+summ = core.player_summary(md, core.build_duels(md), ms, 40.0)
+_fa = summ.set_index("sid")["first_acc"]
+check(
+    "player_summary first_acc: hit 100.0 / miss 0.0 / no shots NaN",
+    _fa[S3] == 100.0 and _fa[S1] == 0.0 and _fa[S4] == 0.0 and _fa.isna().sum() == 1,
+    _fa.to_dict(),
+)
+_ws = core.weapon_stats(md, ms, S3, 40.0)
+check(
+    "weapon_stats first_acc: ak47 100.0 for S3",
+    len(_ws) == 1 and _ws.iloc[0]["first_acc"] == 100.0,
+    _ws.to_dict(),
+)
+_ws1 = core.weapon_stats(md, ms, S1, 40.0)
+check(
+    "weapon_stats first_acc: 0.0 for S1 (only follow-ups hit)",
+    len(_ws1) == 1 and _ws1.iloc[0]["first_acc"] == 0.0,
+    _ws1.to_dict(),
+)
+
+# parser that RAISES on the usercmd props: first_shot survives (it comes
+# from the events), flick_move degrades to NA everywhere
+m_unsup_mouse = make_match()
+m_unsup_mouse["unsupported"] = {"usercmd_mouse_dx", "usercmd_mouse_dy"}
+FakeParser.demos["unsup_mouse.dem"] = m_unsup_mouse
+um = core.load_demo("unsup_mouse.dem")
+um_shots = core.shots_table(um)
+check(
+    "unsupported mouse props: first_shot still works",
+    um_shots["first_shot"].sum() == 3,
+    um_shots["first_shot"].sum(),
+)
+check(
+    "unsupported mouse props: flick_move NA, POS chain intact",
+    um_shots["flick_move"].isna().all() and um_shots["speed"].notna().any(),
 )
 
 # ------------------------------------------------------------- data_checks

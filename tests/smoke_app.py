@@ -90,6 +90,34 @@ class FakeParser:
         return [(n, self.d["events"].get(n, pd.DataFrame()).copy()) for n in names]
 
     def parse_ticks(self, wanted_props, ticks=None, players=None):
+        # usercmd mouse deltas: config {"mouse": {(tick, sid): (dx, dy)}};
+        # without the config the fake returns no usercmd columns (an old
+        # parser / demo) and the app must degrade to "-", never crash
+        if "usercmd_mouse_dx" in wanted_props or "usercmd_mouse_dy" in wanted_props:
+            mo = self.d.get("mouse")
+            rows = []
+            for t in ticks or []:
+                for (mt, sid), (dx, dy) in (mo or {}).items():
+                    if mt == int(t):
+                        rows.append(
+                            {
+                                "tick": int(t),
+                                "steamid": f64_sid(sid),
+                                "name": NAMES[sid],
+                                "usercmd_mouse_dx": dx,
+                                "usercmd_mouse_dy": dy,
+                            }
+                        )
+            return pd.DataFrame(
+                rows,
+                columns=[
+                    "tick",
+                    "steamid",
+                    "name",
+                    "usercmd_mouse_dx",
+                    "usercmd_mouse_dy",
+                ],
+            )
         # scoreboard aggregates (game kills_total / deaths_total), see
         # tests/test_core.py::FakeParser; without a "totals" config the
         # fake returns an empty frame and the app skips the check
@@ -1027,6 +1055,149 @@ def scenario_context():
     check("ru: zone table localized", len(ztabs) == 1, [list(v.columns) for v in ztabs])
 
 
+def scenario_first_shots():
+    """
+    First-shot discipline: first_shot/first_acc in the tables and the
+    mid-swing tip from usercmd mouse deltas. 30 rounds: Alpha's t0 shot
+    is always the first of an engagement (the t0+2 hit is a follow-up),
+    12 of those 30 first shots come after a big mouse swing (>= 2x his
+    own median) -> the verdict; Charlie has no mouse rows at all -> the
+    tile degrades to "-" and no verdict.
+    """
+    print("== first shots (accuracy, mouse swing) ==")
+    rounds = list(range(1, 31))
+    d = make_match(rounds)
+    mouse = {}
+    for i, r in enumerate(rounds):
+        t0 = 1000 * r
+        # window [t0-16, t0): 12 swinging rounds (8 ticks x 25 = 200),
+        # 18 calm ones (2 ticks x 1 = 2) -> median 2, bar 4, 12 >= bar
+        big = i < 12
+        for t in range(t0 - 16, t0 - 8 if big else t0 - 14):
+            mouse[(t, S1)] = (25 if big else 1, 0)
+    d["mouse"] = mouse
+    at = open_demo(d, "first_shots.dem")
+    check("runs without exception", not at.exception, err_of(at))
+
+    # the state file remembers the previous scenario's player - pin Alpha
+    act(
+        at,
+        "switch player (Alpha)",
+        lambda: at.selectbox(key="me").select(S1).run(),
+    )
+    goto(at, "shooting")
+    tips_txt = "\n".join(m.value for m in at.markdown)
+    check("swing tip shown for Alpha", "still swinging fast" in tips_txt)
+
+    act(at, "all metrics", lambda: at.toggle(key="sh_all").set_value(True).run())
+    labels = {m.label: m for m in at.metric}
+    check("first-acc tile present", "1st-shot accuracy" in labels, list(labels))
+    m = labels.get("1st-shot accuracy")
+    if m:
+        check("first-acc value 0% (t0 always misses)", m.value == "0%", m.value)
+        check("first-acc delta vs follow-ups", m.delta == "-100 pp", m.delta)
+    m = labels.get("First shots")
+    check(
+        "first-shot count 30", m is not None and m.value == "30", m.value if m else ""
+    )
+    m = labels.get("Mouse move before 1st shot")
+    check(
+        "median swing 2 counts (calm majority)",
+        m is not None and m.value == "2",
+        m.value if m else "",
+    )
+
+    # Charlie: no mouse rows -> flick_move NA -> tile "-" and no verdict
+    act(
+        at,
+        "switch player (Charlie)",
+        lambda: at.selectbox(key="me").select(S3).run(),
+    )
+    tips_txt = "\n".join(m.value for m in at.markdown)
+    check("no swing tip without mouse data", "still swinging fast" not in tips_txt)
+    labels = {m.label: m for m in at.metric}
+    m = labels.get("Mouse move before 1st shot")
+    check(
+        "swing tile degrades to dash",
+        m is not None and m.value == "—",
+        m.value if m else "",
+    )
+
+    # overview "All columns": 1st-shot accuracy column with 0.0 for both
+    goto(at, "overview")
+    act(
+        at,
+        "overview all columns",
+        lambda: at.toggle(key="ov_full").set_value(True).run(),
+    )
+    ov = widget(at, "dataframe", "ov_table")
+    check(
+        "overview first-acc column",
+        ov is not None and "1st-shot accuracy" in list(ov.value.columns),
+    )
+    if ov is not None and "1st-shot accuracy" in list(ov.value.columns):
+        fa = ov.value["1st-shot accuracy"]
+        check(
+            "overview first-acc: 0.0 for the shooters, NaN for the rest",
+            int(fa.notna().sum()) == 2 and (fa.dropna() == 0.0).all(),
+            fa.tolist(),
+        )
+
+    # weapons table (shooting page): the per-weapon first-acc column
+    goto(at, "shooting")
+    act(
+        at,
+        "switch back to Alpha",
+        lambda: at.selectbox(key="me").select(S1).run(),
+    )
+    wtabs = [x for x in at.dataframe if "1st-shot accuracy" in list(x.value.columns)]
+    check("weapons first-acc column", len(wtabs) == 1, len(wtabs))
+    if wtabs:
+        check(
+            "weapons first-acc ak47 = 0.0",
+            len(wtabs[0].value) == 1
+            and wtabs[0].value.iloc[0]["1st-shot accuracy"] == 0.0,
+            wtabs[0].value.to_dict(),
+        )
+
+    # a demo WITHOUT usercmd data: no crash, no verdict, tile "-"
+    at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "no_mouse.dem")
+    check("no-mouse demo runs", not at.exception, err_of(at))
+    act(
+        at,
+        "switch player (Alpha, no-mouse)",
+        lambda: at.selectbox(key="me").select(S1).run(),
+    )
+    goto(at, "shooting")
+    act(
+        at,
+        "all metrics (no-mouse)",
+        lambda: at.toggle(key="sh_all").set_value(True).run(),
+    )
+    tips_txt = "\n".join(m.value for m in at.markdown)
+    check("no swing tip on old demo", "still swinging fast" not in tips_txt)
+    labels = {m.label: m for m in at.metric}
+    m = labels.get("Mouse move before 1st shot")
+    check(
+        "no-mouse swing tile dash",
+        m is not None and m.value == "—",
+        m.value if m else "",
+    )
+
+    # russian labels render (the longer strings must not break columns)
+    act(
+        at,
+        "first shots in russian",
+        lambda: at.selectbox(key="lang").select("ru").run(),
+    )
+    labels = {m.label: m for m in at.metric}
+    check(
+        "ru first-acc tile",
+        "Точность 1-го выстрела" in labels and "Движение мыши перед 1-м" in labels,
+        list(labels)[:8],
+    )
+
+
 def scenario_scoreboard():
     """
     The debug expander gets the scoreboard cross-check: the game's own
@@ -1111,6 +1282,7 @@ def main():
         scenario_bad_input()
         scenario_tables()
         scenario_context()
+        scenario_first_shots()
         scenario_scoreboard()
         if arg == "--all":
             scenario_matrix()

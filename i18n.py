@@ -70,6 +70,7 @@ STR = {
         "col_moving": "Shots on the move",
         "col_risky": "Risky",
         "col_first_shot": "Shoots first",
+        "col_first_acc": "1st-shot accuracy",
         "col_aim_err": "Aim error",
         "col_duration": "Duel time",
         "all_columns": "All columns",
@@ -98,6 +99,12 @@ STR = {
         "m_kd_help": "Duels against enemies only.",
         "m_first": "You shoot first",
         "m_first_help": "In duels where someone fired, how often your first shot came before the opponent's.",
+        "m_first_acc": "1st-shot accuracy",
+        "m_first_acc_help": "Hit rate on the first shot of an engagement - a shot with none of yours in the previous ~0.35 s. Reflects crosshair placement: how ready the crosshair is when a fight starts. The delta compares it with your spray follow-up accuracy.",
+        "m_first_n": "First shots",
+        "m_first_n_help": "Shots that started a fresh engagement (at least ~0.35 s after your previous shot).",
+        "m_swing_med": "Mouse move before 1st shot",
+        "m_swing_med_help": "Median mouse movement (|dx|+|dy| counts) over the 0.25 s before your first shots, from usercmd deltas. Scales with your sensitivity - compare only against your own other demos. '-' means the demo has no mouse data.",
         "m_dur": "Median duel time (s)",
         "m_dur_help": "Time from the first shot of the duel (either player) to the kill/death.",
         "m_err": "Median aim error at 1st shot (°)",
@@ -148,6 +155,7 @@ STR = {
         "sec_accuracy": "Accuracy",
         "sec_movement": "Movement",
         "sec_crosshair": "Crosshair",
+        "sec_first": "First shots",
         "sec_duels": "Duels",
         "tips_caption": "Simple rules of thumb based on this demo. Treat them as pointers, not verdicts.",
         "vs_lobby": "{d} vs lobby median",
@@ -242,6 +250,7 @@ STR = {
         "zone_kd": "K-D",
         "tip_flashed": "You fired {n} shots ({pct:.0f}%) while flashed. A blind trigger is a wasted bullet - disengage or reposition instead.",
         "tip_slowed": "{pct:.0f}% of your shots came while you were slowed by recent damage. Tagged players lose straight re-peeks at reduced speed - pull back instead.",
+        "tip_swing": "{n} of your first shots ({pct:.0f}%) were fired while the mouse was still swinging fast - at least twice your usual pre-shot movement. Pre-aim common angles so the first shot lands from a still crosshair.",
         # timeline
         "tl_title": "Duel timeline",
         "tl_pick": "Pick a duel",
@@ -331,7 +340,7 @@ STR = {
 - If a number looks wrong, open “Data report / debug” at the bottom of the page and send the JSON: it has the raw parser fields plus per-shot speed/distance, enough to locate the anomaly.
 
 ### Limitations
-- Mouse movement, sensitivity, FPS and ping are not in demos. Reaction time includes network delay.
+- Sensitivity, FPS and ping are not in demos. Raw mouse deltas are (since CS2) and power the pre-shot movement metric, but they scale with sensitivity; reaction time includes network delay.
 - Aim error is approximate (eye/head height offsets, crouch-aware when the demo stores duck_amount; recoil punch is included when the parser provides it).
 - A duel's shots are the window shots aimed at that opponent (crosshair within ~30°); duels with shots at several targets are flagged "mixed targets" instead of hiding the problem.
 - Warmup shots/kills/damage are excluded automatically.
@@ -400,6 +409,7 @@ STR = {
         "col_moving": "Выстрелы на ходу",
         "col_risky": "Рискованные",
         "col_first_shot": "Стреляет первым",
+        "col_first_acc": "Точность 1-го выстрела",
         "col_aim_err": "Ошибка прицела",
         "col_duration": "Время дуэли",
         "all_columns": "Все столбцы",
@@ -426,6 +436,12 @@ STR = {
         "m_kd_help": "Только дуэли с врагами.",
         "m_first": "Ты стреляешь первым",
         "m_first_help": "В дуэлях, где кто-то стрелял, как часто твой первый выстрел был раньше выстрела противника.",
+        "m_first_acc": "Точность 1-го выстрела",
+        "m_first_acc_help": "Доля попаданий первым выстрелом серии — выстрелом, которому минимум ~0,35 с не предшествовали твои другие выстрелы. Показывает готовность прицела в момент начала перестрелки. Дельта — сравнение с точностью последующих выстрелов серии.",
+        "m_first_n": "Первых выстрелов",
+        "m_first_n_help": "Выстрелы, начавшие новую серию (минимум ~0,35 с после твоего предыдущего выстрела).",
+        "m_swing_med": "Движение мыши перед 1-м",
+        "m_swing_med_help": "Медианное движение мыши (|dx|+|dy| отсчётов) за 0,25 с перед первыми выстрелами — из дельт usercmd. Зависит от чувствительности — сравнивай только со своими же демками. «—» — в демке нет данных мыши.",
         "m_dur": "Медиана времени дуэли (с)",
         "m_dur_help": "Время от первого выстрела дуэли (любого игрока) до килла/смерти.",
         "m_err": "Медиана ошибки на 1-м выстреле (°)",
@@ -476,6 +492,7 @@ STR = {
         "sec_accuracy": "Точность",
         "sec_movement": "Движение",
         "sec_crosshair": "Прицел",
+        "sec_first": "Первые выстрелы",
         "sec_duels": "Дуэли",
         "tips_caption": "Простые правила по этой демке. Это подсказки, а не приговор.",
         "vs_lobby": "{d} к медиане лобби",
@@ -569,6 +586,7 @@ STR = {
         "zone_kd": "К-С",
         "tip_flashed": "{n} выстрелов ({pct:.0f}%) сделано вслепую — во время ослепления флешкой. Слепой спуск курка — потраченная пуля: отходи или меняй позицию.",
         "tip_slowed": "{pct:.0f}% выстрелов сделано в замедлении от недавнего урона. Помеченный игрок проигрывает прямые перевстания на сниженной скорости — лучше отойти.",
+        "tip_swing": "{n} первых выстрелов ({pct:.0f}%) сделаны, когда мышь ещё быстро двигалась — минимум вдвое сильнее твоего обычного движения перед выстрелом. Преднацеливай популярные углы, чтобы первый выстрел уходил с неподвижного прицела.",
         "tl_title": "Таймлайн дуэли",
         "tl_pick": "Выбери дуэль",
         "tl_prev": "◀ Пред.",
@@ -654,7 +672,7 @@ STR = {
 - Если цифра выглядит неправильно — открой «Отчёт о данных / отладка» внизу страницы и пришли JSON: там сырые поля парсера и скорость/дистанция каждого выстрела, этого достаточно, чтобы найти аномалию.
 
 ### Ограничения
-- Движения мыши, сенса, FPS и пинг в демках не хранятся. Время реакции включает сетевую задержку.
+- Сенса, FPS и пинг в демках не хранятся. Сырые дельты мыши есть (начиная с CS2) — из них считается движение перед выстрелом, но они масштабируются сенсой; время реакции включает сетевую задержку.
 - Ошибка прицела приблизительная (высоты глаз/головы — приблизительные, присед учитывается, если демка хранит duck_amount; отдача учитывается, если парсер её отдаёт).
 - Выстрелами дуэли считаются выстрелы окна, направленные в этого противника (прицел в пределах ~30°); дуэли с выстрелами в несколько целей помечаются «⚠ несколько целей», а не прячутся.
 - Выстрелы/килы/урон из вармапа исключаются автоматически.

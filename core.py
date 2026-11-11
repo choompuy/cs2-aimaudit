@@ -150,6 +150,15 @@ MAX_DUEL_DIST = 10000.0
 FLASH_SHOT_S = 0.5
 SLOWED_MAX = 0.99
 ROUND_SEC_MAX = 300.0
+# First shot of an engagement: no shot by the same player in the previous
+# ENGAGE_GAP_TICKS (~350 ms at 64 tick) - the crosshair had time to leave
+# the target, so the next shot starts a fresh aim event. Spray follow-ups
+# inside the gap are recoil control, not aim.
+ENGAGE_GAP_TICKS = 22
+# Pre-fire mouse window: usercmd deltas summed over the FLICK_WIN_TICKS
+# ticks (~250 ms) before a first shot = how much the mouse was moving when
+# the player committed (docs/DEMOPARSER_NOTES.md s.15).
+FLICK_WIN_TICKS = 16
 # Eye / head heights (units, above the pawn origin). Crouching lowers both
 # by ~18 units; we scale linearly with duck_amount (0..1).
 EYE_STAND, HEAD_STAND, DUCK_DROP = 64.0, 62.0, 18.0
@@ -1104,6 +1113,10 @@ class Demo:
     #                      sampled at the last event tick (None when the
     #                      parser or props are unavailable) - input of the
     #                      data_checks scoreboard cross-check, notes s.14
+    mouse: pd.DataFrame | None = None
+    #                      usercmd mouse deltas (|dx|+|dy| per tick) around
+    #                      first-shot windows, None when the demo/parser
+    #                      does not provide them - input of flick_move, s.15
 
     def side_at(self, round_no: int, sid: str) -> str:
         """Player's side in a given round (falls back to the static team)."""
@@ -1132,6 +1145,56 @@ class Demo:
     @cached_property
     def teams(self) -> dict[str, str]:
         return dict(zip(self.players["sid"], self.players["team"]))
+
+
+def _first_shot_arr(ticks, sids) -> np.ndarray:
+    """
+    Boolean array aligned to the inputs: True where the row is the FIRST
+    shot of an engagement for that player - no shot by the same sid within
+    the previous ENGAGE_GAP_TICKS ticks (~350 ms, notes s.15). A spray's
+    follow-up shots are recoil control; the fresh aim event is what the
+    flick analysis looks at. Rows may arrive in any order.
+    """
+
+    n = len(ticks)
+    if not n:
+        return np.zeros(0, dtype=bool)
+    # plain numpy values: a filtered shots table carries a holey index and
+    # the fresh frame must not inherit it
+    d = pd.DataFrame(
+        {
+            "tick": np.asarray(pd.Series(ticks).astype(int)),
+            "sid": np.asarray(pd.Series(sids), dtype=object),
+        }
+    )
+    d = d.sort_values(["sid", "tick"], kind="stable")
+    prev = d.groupby("sid")["tick"].shift(1)
+    gap = d["tick"] - prev
+    first = ((gap > ENGAGE_GAP_TICKS) | gap.isna()).to_numpy()
+    res = np.zeros(n, dtype=bool)
+    res[d.index.to_numpy()] = first
+    return res
+
+
+def _first_shot_windows(fires: pd.DataFrame) -> list[int]:
+    """
+    Sorted ticks covering the FLICK_WIN_TICKS window before every first
+    shot of an engagement in `fires` (gun shots, warmup already excluded)
+    - what the usercmd mouse parse is sampled on. Ticks below 0 (a first
+    shot right at the demo start) are clipped away.
+    """
+
+    if (
+        fires is None
+        or not len(fires)
+        or "user_steamid" not in getattr(fires, "columns", [])
+    ):
+        return []
+    first = _first_shot_arr(fires["tick"], fires["user_steamid"])
+    want: set[int] = set()
+    for t in fires["tick"].to_numpy()[first]:
+        want.update(range(int(t) - FLICK_WIN_TICKS, int(t)))
+    return sorted(t for t in want if t >= 0)
 
 
 def load_demo(path: str, progress=None) -> Demo:
@@ -1447,6 +1510,44 @@ def load_demo(path: str, progress=None) -> Demo:
             )
     tickrate = tickrate_from_header(header)
     td = _add_speed(td, tickrate)
+    # usercmd mouse deltas around first-shot windows (notes s.15): a THIRD
+    # separate parse_ticks call - the rows must never merge into `td`
+    # (they would change the delta-position speed chain), and an unknown
+    # prop must not take anything down with it (the buttons lesson). None
+    # -> flick_move comes out NA everywhere, never 0.
+    mouse = None
+    _mwin = _first_shot_windows(fires)
+    if _mwin:
+        try:
+            md = p.parse_ticks(["usercmd_mouse_dx", "usercmd_mouse_dy"], ticks=_mwin)
+        except Exception:  # noqa: BLE001 - old parser / props unavailable
+            md = None
+        if (
+            md is not None
+            and len(md)
+            and "steamid" in md.columns
+            and {"usercmd_mouse_dx", "usercmd_mouse_dy"} <= set(md.columns)
+        ):
+            md = md.copy()
+            md["sid"] = fix_ids(
+                md["steamid"],
+                flookup,
+                md["name"] if "name" in md.columns else None,
+                name_to_sid,
+            )
+            dx = pd.to_numeric(md["usercmd_mouse_dx"], errors="coerce")
+            dy = pd.to_numeric(md["usercmd_mouse_dy"], errors="coerce")
+            md = pd.DataFrame(
+                {
+                    "tick": md["tick"].astype(int),
+                    "sid": md["sid"],
+                    "mag": dx.abs() + dy.abs(),
+                }
+            )
+            md = md.dropna(subset=["sid", "mag"])
+            md = md.drop_duplicates(["tick", "sid"])
+            if len(md):
+                mouse = md.sort_values(["tick", "sid"]).reset_index(drop=True)
     # scoreboard aggregates (notes s.14): the game's own kills_total /
     # deaths_total at the last event tick, for the data_checks
     # cross-check. Verified on the real demos: the game updates them
@@ -1491,6 +1592,7 @@ def load_demo(path: str, progress=None) -> Demo:
         tickrate,
         sides,
         totals=totals,
+        mouse=mouse,
     )
 
 
@@ -1690,6 +1792,25 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     _sok = vm.notna()
     sw[_sok] = (vm[_sok] < SLOWED_MAX).to_numpy()
     out["slowed"] = sw
+    # first shot of an engagement (gap > ENGAGE_GAP_TICKS since the same
+    # sid's previous shot) and the mouse movement that preceded it: the
+    # sum of |dx|+|dy| over the FLICK_WIN_TICKS ticks before the shot.
+    # first_shot is always known; flick_move is NA for spray follow-ups
+    # (recoil control is not aim) and when the demo/parser has no usercmd
+    # props (missing is never 0, the buttons lesson).
+    out["first_shot"] = _first_shot_arr(out["tick"], out["sid"])
+    out["flick_move"] = np.nan
+    if demo.mouse is not None and len(demo.mouse):
+        _by = {sid: g.set_index("tick")["mag"] for sid, g in demo.mouse.groupby("sid")}
+        _fm = []
+        for t, first, sid in zip(out["tick"], out["first_shot"], out["sid"]):
+            if not first or sid not in _by:
+                _fm.append(np.nan)
+                continue
+            got = _by[sid].reindex(range(int(t) - FLICK_WIN_TICKS, int(t)))
+            v = got.sum(min_count=1)
+            _fm.append(float(v) if pd.notna(v) else np.nan)
+        out["flick_move"] = _fm
     out = out.drop(columns=["flash_duration", "velo_modifier"], errors="ignore")
     out["side"] = [
         demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"])
@@ -2030,6 +2151,7 @@ def player_summary(
             deaths = int((duels["victim"] == p.sid).sum()) if len(duels) else 0
         kd = dd[dd["result"] == "kill"] if len(dd) else dd
         fs = dd[dd["first"].isin(["me", "opponent"])] if len(dd) else dd
+        fsh = sh[sh["first_shot"]] if len(sh) else sh
         known = (
             sh["dist"].notna() & sh["speed"].notna()
             if len(sh)
@@ -2065,6 +2187,11 @@ def player_summary(
                 "risky": risky,
                 "first_shot": (
                     round((fs["first"] == "me").mean() * 100, 1) if len(fs) else np.nan
+                ),
+                # first-shot accuracy: hit rate on first shots of
+                # engagements (crosshair placement quality, notes s.15)
+                "first_acc": (
+                    round(fsh["hit"].mean() * 100, 1) if len(fsh) else np.nan
                 ),
                 "aim_err": (
                     round(dd["my_err"].median(), 1)
@@ -2102,6 +2229,12 @@ def weapon_stats(
     )
     if len(sh):
         g["risky"] = sh.groupby("weapon")["_r"].mean() * 100
+        # first-shot accuracy per weapon: hit rate on the weapon's first
+        # shots of engagements (the AWP/USP number that actually matters);
+        # NaN for weapons that only appear inside sprays
+        fsh = sh[sh["first_shot"]]
+        if len(fsh):
+            g["first_acc"] = fsh.groupby("weapon")["hit"].mean() * 100
     hi = _hurts_of(demo, me, hurts)
     h = (
         hi.groupby("weapon").agg(
@@ -2439,6 +2572,7 @@ def debug_report(
             "duels": len(duels),
             "excluded": demo.excluded,
             "punch_available": "punch_pitch" in demo.ticks.columns,
+            "mouse_rows": 0 if demo.mouse is None else len(demo.mouse),
             "scoreboard_totals": (
                 _records(demo.totals) if demo.totals is not None else None
             ),

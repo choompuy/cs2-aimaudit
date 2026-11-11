@@ -337,7 +337,7 @@ user_team_name` and warmup filter via `is_warmup_period == False`.
 | Debug report                          | `data_checks` + `debug_report` (JSON)                   | user sends the JSON — we can see where data/logic lies                                                          | ✅ implemented                                     |
 | Stats cross-check                     | `kills_total`/`deaths_total` at the last event tick | data_checks: our stats vs game stats                          | ✅ implemented (step 5, tolerance rules in s.14)   |
 | Blindness by ticks                    | `flash_duration`                                        | not just attackerblind on kills                                                                                 | ✅ implemented (step 4, at fire ticks)              |
-| Mouse reaction                        | `usercmd_mouse_dx/dy`                                   | reaction time and mouse flicks                                                                                  | candidate (risky, not in all demos)                |
+| Mouse reaction                        | `usercmd_mouse_dx/dy`                                   | reaction time and mouse flicks                                                                                  | ✅ implemented (step 6: flicks + first-shot acc; reaction needs enemy-visibility data, not in demos - s.15) |
 | **BUG: velocity with sparse ticks=**  | own Δpos(t-1→t)×64, is_alive, 600 cap                   | speed lied N-fold (N=tick gap), teleports = 35k+ u/s                                                            | ✅ fixed (confirmed by Rust sources and user data) |
 | **BUG: fix_ids Int64→str**            | flookup-float key for any dtype                         | "hits" only for the player with sid divisible by 16                                                             | ✅ fixed (reproduced 1/10 → 10/10)                 |
 | Hit matching with window              | \_match_hits: last shot ≤ hurt_tick ± 3 ticks           | off-by-one protection without false hits in bursts                                                              | ✅ implemented                                     |
@@ -576,3 +576,60 @@ violations of the rules below.
 - level: fraction of mismatching players >= 25% → anomaly, >= 5% → warn.
 - `debug_report` carries `counts.scoreboard_totals` so a mismatching
   foreign demo can be diagnosed from the exported JSON.
+
+## 15. Step 6 — usercmd mouse deltas: what they really give (2026-11-11)
+
+Probed on all three real demos before implementation
+(`scripts/probe_step6_mouse.py`, outside the repo). The app guide's claim
+"mouse movement isn't in demos" is wrong for CS2: `usercmd_mouse_dx/dy`
+are parse_ticks props and the demos carry them for EVERY player.
+
+### 15.1 Availability (all 30 player-demo pairs)
+
+- The props exist in demoparser2 0.42.1 and come back on any tick list;
+  both FACEIT and Valve demos, all 10 players per demo.
+- At a player's own fire ticks: non-null deltas on 100% of rows (the
+  ~6-9% null rows in the full tick table belong to OTHER players).
+- The 16-tick pre-fire window of every first shot: 100% coverage
+  (median and p10) — usercmds are dense per tick while alive.
+- Per-tick magnitude |dx|+|dy|: p50 = 0, p90 = 11-14, p99 = 85-109,
+  max up to ~780 at fire ticks (3167 on one window tick) — a real,
+  spiky signal: mostly still, with short violent bursts.
+
+### 15.2 The negative result: flick size does NOT predict hit (here)
+
+Splitting each player's first shots into terciles of pre-fire window
+movement (their own distribution, so sensitivity cancels out) gives hit
+rates that scatter around zero in BOTH directions (deltas -31.8..+31.8
+pp across 30 player-demo pairs, buckets of 14-33 shots). The aggregate
+medians are equally inconsistent (hit vs miss: 41/39, 57/35, 45/43).
+With these sample sizes the "you hit worse when you flick" verdict is
+noise — NOT shipped as a claim (the s.13.4 lesson: measure before
+claiming). What ships is the behavioural share and raw data instead.
+
+### 15.3 What step 6 shipped
+
+- `ENGAGE_GAP_TICKS = 22` (~350 ms): no shot by the same sid within the
+  gap → the row is the FIRST shot of an engagement. Spray follow-ups
+  are recoil control, not aim — they never get a flick value.
+- `FLICK_WIN_TICKS = 16` (~250 ms): `flick_move` = Σ|dx|+|dy| over the
+  window before a first shot. Partial windows sum the available ticks
+  (dense in practice, s.15.1); zero rows → NA, never 0.
+- A THIRD separate `parse_ticks(["usercmd_mouse_dx", "usercmd_mouse_dy"])`
+  in `load_demo` (the buttons lesson: any failure → `demo.mouse = None`
+  → `flick_move` all NA). The rows are never merged into `td` — extra
+  ticks would corrupt the Δpos speed chain.
+- `shots_table`: `first_shot` (bool, always known) + `flick_move`
+  (float, NA for follow-ups and unknown props).
+- `player_summary.first_acc` / `weapon_stats.first_acc`: first-shot
+  accuracy (crosshair placement KPI; the AWP/USP number that matters).
+- UI: "First shots" metric section (first-shot accuracy with a delta vs
+  follow-up accuracy, first-shot count, median pre-shot mouse movement —
+  labelled sensitivity-relative), first_acc columns in the overview
+  (All columns) and per-weapon tables, and `tip_swing`: fires at >= 30
+  mouse-known first shots with >= 35% of them committed at >= 2x the
+  player's OWN median pre-shot movement (self-calibrating bar) — a
+  behavioural share, no hit-rate claim (s.15.2).
+- Reaction time (the other half of the s.10 candidate) is NOT feasible:
+  it needs the moment the enemy became visible, and demos expose no
+  visibility/occlusion data. Documented as closed.

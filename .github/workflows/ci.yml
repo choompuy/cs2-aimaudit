@@ -13,7 +13,7 @@ on:
 
 env:
   # Windows runners default to cp1252 for consoles/pipes, while the test
-  # output contains â†’, â‰ˆ and Cyrillic: UTF-8 mode keeps the prints from
+  # output contains →, ≈ and Cyrillic: UTF-8 mode keeps the prints from
   # UnicodeEncodeError. The test scripts reconfigure stdout/stderr as a
   # belt-and-suspenders fallback for local Windows runs.
   PYTHONUTF8: "1"

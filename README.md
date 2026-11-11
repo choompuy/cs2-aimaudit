@@ -58,10 +58,11 @@ All parsing and analysis happen inside the app on your machine. CS2-AimAudit mak
 - **Shots on the move** — fired while your speed was above the threshold. Stop first (counter-strafe), then shoot.
 - **Aim error** — the angle between your crosshair (recoil punch included) and the enemy head at your first shot of a duel. A few degrees or less means the crosshair was already on the head.
 - **Shoots first** — how often you fired first in duels where someone fired.
+- **First-shot accuracy** — hit rate on the first shot of an engagement (no shot of yours in the previous ~0.35 s). Reflects crosshair placement; the median mouse movement before those shots (sensitivity-relative) shows how much you swing before committing.
 - **Duel time** — from the first shot of the duel to the kill/death. Long duels with many shots point to spray/aim problems.
 - **Timeline** — look for: shooting while moving, big last-moment aim corrections, crouch/walk timing.
 
-The in-app **Guide** tab explains the risk model and the limitations: mouse movement, sensitivity, FPS and ping are not stored in demos; aim error is approximate; duels are detected by a time window, not by line of sight.
+The in-app **Guide** tab explains the risk model and the limitations: sensitivity, FPS and ping are not stored in demos (raw mouse deltas are, since CS2, but they scale with sensitivity); aim error is approximate; duels are detected by a time window, not by line of sight.
 
 ## Something looks wrong?
 
