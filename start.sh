@@ -2,15 +2,30 @@
 # CS2-AimAudit launcher: creates the venv, installs packages, starts the app.
 cd "$(dirname "$0")"
 
-echo "[1/3] Checking Python..."
-PY=python3
-command -v "$PY" >/dev/null 2>&1 || PY=python
-if ! command -v "$PY" >/dev/null 2>&1; then
-  echo "  Python was not found. Install Python 3.10+"
+py_ok () {  # exit 0 if $1 exists and is Python >= 3.11
+  "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null
+}
+
+echo "[1/3] Checking Python (3.11+ required)..."
+PY=""
+for candidate in python3 python python3.14 python3.13 python3.12 python3.11; do
+  if command -v "$candidate" >/dev/null 2>&1 && py_ok "$candidate"; then
+    PY=$candidate
+    break
+  fi
+done
+if [ -z "$PY" ]; then
+  echo "  Python 3.11+ was not found. Install it first"
   echo "  (Debian/Ubuntu: sudo apt install python3 python3-venv)."
   exit 1
 fi
 
+# A .venv left by an older AimAudit may run Python < 3.11 or be broken:
+# recreate it with the current Python instead of dying inside pip.
+if [ -d ".venv" ] && ! py_ok ".venv/bin/python"; then
+  echo "  .venv is broken or runs an older Python; recreating it ..."
+  rm -rf .venv
+fi
 if [ ! -x ".venv/bin/python" ]; then
   echo "[1/3] Creating a virtual environment .venv ..."
   "$PY" -m venv .venv || {

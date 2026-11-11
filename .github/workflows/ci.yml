@@ -4,17 +4,24 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Weekly (Mondays) upstream check: the matrix installs the newest
+    # versions allowed by the requirements.txt ceilings, so scheduled
+    # runs catch upstream breakage early.
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
 
 jobs:
   tests:
     strategy:
       fail-fast: false
       matrix:
-        # Most players are on Windows; macOS/arm64 wheels for demoparser2
-        # and zstandard are published for these versions. 3.10 is gone:
-        # streamlit>=1.56 and pandas>=3.0 both require Python >=3.11.
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.11", "3.12", "3.13"]
+        # demoparser2 publishes CPython 3.11-3.14 wheels for Linux and
+        # Windows only: no macOS wheels and no sdist since 0.42.1, so a
+        # macOS job cannot even install it. Re-add macOS when upstream
+        # ships wheels again.
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -30,4 +37,42 @@ jobs:
       - name: UI consistency checks
         run: python tests/check_ui.py
       - name: UI smoke test (real app.py on synthetic demos)
-        run: python tests/smoke_app.py aim.dem match.dem sides.dem warmup_only.dem
+        run: python tests/smoke_app.py --fast
+
+  smoke-all:
+    # One full run (every page and locale) per commit is enough.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Byte-compile sources
+        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py
+      - name: Full UI smoke test
+        run: python tests/smoke_app.py --all
+
+  floors:
+    # The requirements.txt floors must be honest: install the lowest
+    # allowed versions on the lowest supported Python and run the same
+    # three test suites.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        run: pip install uv
+      - name: Install the lowest allowed versions
+        run: uv pip install --resolution lowest-direct -r requirements.txt --system
+      - name: Byte-compile sources
+        run: python -m py_compile app.py core.py i18n.py theme/__init__.py theme/loader.py tools/sync_theme.py
+      - name: Core tests (synthetic demo, no .dem needed)
+        run: python tests/test_core.py
+      - name: UI consistency checks
+        run: python tests/check_ui.py
+      - name: UI smoke test (fast)
+        run: python tests/smoke_app.py --fast

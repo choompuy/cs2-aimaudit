@@ -3,16 +3,36 @@ rem CS2-AimAudit launcher: creates the venv, installs packages, starts the app.
 setlocal
 cd /d "%~dp0"
 
-echo [1/3] Checking Python...
+echo [1/3] Checking Python (3.11+ required)...
 where python >nul 2>nul
 if errorlevel 1 (
     echo.
-    echo   Python was not found. Install Python 3.10+ from
+    echo   Python was not found. Install Python 3.11+ from
     echo   https://www.python.org/downloads/ and check
     echo   "Add python.exe to PATH" during installation.
     echo.
     pause
     exit /b 1
+)
+python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul
+if errorlevel 1 (
+    echo.
+    echo   Python 3.11+ is required, but the python on PATH is older.
+    echo   Install the latest Python from https://www.python.org/downloads/
+    echo   and make sure it comes first on PATH.
+    echo.
+    pause
+    exit /b 1
+)
+
+rem A .venv left by an older AimAudit may run an old Python (below 3.11)
+rem or be broken: recreate it with the current Python instead of dying in pip.
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul
+    if errorlevel 1 (
+        echo   .venv is broken or runs an older Python; recreating it ...
+        rmdir /s /q .venv
+    )
 )
 
 if not exist ".venv\Scripts\python.exe" (

@@ -3,7 +3,7 @@
 **Аудит твоего аима — локальный разбор демок CS2. Стрельба, дуэли, движение и нажатия клавиш. Ничего не уходит в интернет.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![UI](https://img.shields.io/badge/UI-Streamlit-FF4B4B)
 ![Privacy](https://img.shields.io/badge/privacy-100%25%20local-green)
 
@@ -40,7 +40,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Нужен Python 3.10+ (проверено на 3.12) и демка матча CS2 (`.dem`).
+Нужен Python 3.11+ (проверено на 3.11–3.14) и демка матча CS2 (`.dem`).
 
 ### Где взять демку
 

@@ -357,16 +357,8 @@ def fmt_first(v: str) -> str:
 
 
 def _cell_style(styler, css_fn, subset):
-    """
-    Apply a per-cell CSS function to a Styler subset.
-
-    Styler.map exists from pandas 2.1; pandas 2.0 (our floor) spells it
-    applymap, which is deprecated (and removed in pandas 3) later on.
-    """
-    method = getattr(styler, "map", None)
-    if method:
-        return method(css_fn, subset=subset)
-    return styler.applymap(css_fn, subset=subset)
+    """Apply a per-cell CSS function to a Styler subset."""
+    return styler.map(css_fn, subset=subset)
 
 
 def _pct_col(label):
@@ -726,7 +718,13 @@ PAGES = ("overview", "shooting", "duels", "timeline", "guide")
 if st.session_state.get("page") not in PAGES:
     st.session_state["page"] = "overview"
 page = (
-    st.segmented_control(None, PAGES, format_func=lambda p: t(f"tab_{p}"), key="page")
+    st.segmented_control(
+        t("nav_pages"),
+        PAGES,
+        format_func=lambda p: t(f"tab_{p}"),
+        label_visibility="collapsed",
+        key="page",
+    )
     or "overview"
 )
 
