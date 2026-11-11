@@ -221,8 +221,11 @@ def make_match(rounds, weapons=("ak47",)):
 
 
 # ------------------------------------------------------------- app runner
-STATE_DIR = tempfile.mkdtemp(prefix="cs2aa_smoke_state_")
-DEMO_DIR = tempfile.mkdtemp(prefix="cs2aa_smoke_demos_")
+# realpath: on Windows CI the temp dir contains an 8.3 short name
+# (RUNNER~1) that os.path.realpath expands inside decompressed_demo(),
+# so FakeParser.demos keys and demo_path must already be resolved.
+STATE_DIR = os.path.realpath(tempfile.mkdtemp(prefix="cs2aa_smoke_state_"))
+DEMO_DIR = os.path.realpath(tempfile.mkdtemp(prefix="cs2aa_smoke_demos_"))
 core.STATE_PATH = os.path.join(STATE_DIR, "state.json")  # keep the home clean
 
 
@@ -249,13 +252,39 @@ def err_of(at):
     return repr(at.exception[0].value)[:300] if at.exception else ""
 
 
+# segmented_control/pills got their own AppTest accessors only in
+# streamlit 1.57; before that both are plain button_group widgets
+_ALIASES = {"segmented_control": "button_group", "pills": "button_group"}
+
+
 def widget(at, kind, key):
     """Element with that key, or None when the app did not render it."""
+    if kind in _ALIASES and not hasattr(type(at), kind):
+        kind = _ALIASES[kind]
     try:
         w = getattr(at, kind)(key=key)
         return w if w else None
     except Exception:  # noqa: BLE001 - missing key -> None
         return None
+
+
+def ctl(at, kind, key):
+    """A rendered segmented_control/pills widget for an interaction."""
+    w = widget(at, kind, key)
+    if w is None:
+        raise KeyError(f"{kind} widget {key!r} not rendered")
+    return w
+
+
+def ss_get(at, key, default=None):
+    """
+    session_state.get(): dict methods on AppTest.session_state are
+    only available on newer streamlit; [] access works everywhere.
+    """
+    try:
+        return at.session_state[key]
+    except KeyError:
+        return default
 
 
 def goto(at, page):
@@ -362,13 +391,13 @@ def scenario_two_rounds():
     act(
         at,
         "pistols preset",
-        lambda: at.segmented_control(key="flt_preset").select("pistols").run(),
+        lambda: ctl(at, "segmented_control", "flt_preset").select("pistols").run(),
     )
-    check("preset switched to pistols", at.session_state["flt_preset"] == "pistols")
+    check("preset switched to pistols", ss_get(at, "flt_preset") == "pistols")
     act(
         at,
         "custom preset",
-        lambda: at.segmented_control(key="flt_preset").select("custom").run(),
+        lambda: ctl(at, "segmented_control", "flt_preset").select("custom").run(),
     )
     check(
         "custom shows the range slider",
@@ -379,7 +408,7 @@ def scenario_two_rounds():
         "manual range (2,2)",
         lambda: at.slider(key="flt_rounds").set_value((2, 2)).run(),
     )
-    check("slider keeps Custom selected", at.session_state["flt_preset"] == "custom")
+    check("slider keeps Custom selected", ss_get(at, "flt_preset") == "custom")
     act(
         at,
         "weapon filter awp (More popover)",
@@ -388,7 +417,7 @@ def scenario_two_rounds():
     act(
         at,
         "class chips sniper",
-        lambda: at.pills(key="flt_classes").select("sniper").run(),
+        lambda: ctl(at, "pills", "flt_classes").select("sniper").run(),
     )
     check(
         "side control is a segmented control",
@@ -397,7 +426,7 @@ def scenario_two_rounds():
     act(
         at,
         "side filter T",
-        lambda: at.segmented_control(key="flt_side").select("T").run(),
+        lambda: ctl(at, "segmented_control", "flt_side").select("T").run(),
     )
     check(
         "result control not on the overview page",
@@ -411,7 +440,7 @@ def scenario_two_rounds():
     act(
         at,
         "result filter death (no such duels)",
-        lambda: at.segmented_control(key="flt_res").select("death").run(),
+        lambda: ctl(at, "segmented_control", "flt_res").select("death").run(),
     )
     check("death filter leaves the page clean", not at.exception, err_of(at))
 
@@ -430,12 +459,12 @@ def scenario_long25():
         act(
             at,
             f"preset {p}",
-            lambda p=p: at.segmented_control(key="flt_preset").select(p).run(),
+            lambda p=p: ctl(at, "segmented_control", "flt_preset").select(p).run(),
         )
     act(
         at,
         "side filter CT (round 13 only)",
-        lambda: at.segmented_control(key="flt_side").select("CT").run(),
+        lambda: ctl(at, "segmented_control", "flt_side").select("CT").run(),
     )
     goto(at, "timeline")
     act(at, "timeline duel 1 of 3", lambda: at.selectbox(key="tl_duel").select(1).run())
@@ -469,14 +498,16 @@ def scenario_filter_panel():
         act(
             at,
             f"distance band {band}",
-            lambda b=band: at.segmented_control(key="flt_dist").select(b).run(),
+            lambda b=band: ctl(at, "segmented_control", "flt_dist").select(b).run(),
         )
         check(f"band {band} leaves the app clean", not at.exception, err_of(at))
     check("reset button offered", widget(at, "button", "flt_reset") is not None)
     act(at, "reset filters", lambda: at.button(key="flt_reset").click().run())
-    check("reset restores the full view", _shots_shown(at) == base, str(_shots_shown(at)))
-    check("reset cleared the distance band", at.session_state.get("flt_dist") == "all")
-    check("reset cleared the weapon filter", at.session_state.get("flt_weapons") == [])
+    check(
+        "reset restores the full view", _shots_shown(at) == base, str(_shots_shown(at))
+    )
+    check("reset cleared the distance band", ss_get(at, "flt_dist") == "all")
+    check("reset cleared the weapon filter", ss_get(at, "flt_weapons") == [])
     # Result is a duels-page control; its value must survive page hops
     check(
         "no result control on the overview page",
@@ -486,12 +517,12 @@ def scenario_filter_panel():
     act(
         at,
         "result kills only",
-        lambda: at.segmented_control(key="flt_res").select("kill").run(),
+        lambda: ctl(at, "segmented_control", "flt_res").select("kill").run(),
     )
     goto(at, "overview")
     check(
         "result value survives other pages",
-        at.session_state.get("flt_res") == "kill",
+        ss_get(at, "flt_res") == "kill",
     )
     check(
         "result control still hidden on the overview",
@@ -501,7 +532,7 @@ def scenario_filter_panel():
     act(
         at,
         "side filter T before the guide",
-        lambda: at.segmented_control(key="flt_side").select("T").run(),
+        lambda: ctl(at, "segmented_control", "flt_side").select("T").run(),
     )
     goto(at, "guide")
     check(
@@ -511,7 +542,7 @@ def scenario_filter_panel():
     goto(at, "overview")
     check(
         "side filter survives the guide page",
-        at.session_state.get("flt_side") == "T",
+        ss_get(at, "flt_side") == "T",
     )
     # old link format (res as a multiselect list, preset=all with a
     # slider-moved range) must open as the equivalent new state
@@ -534,20 +565,23 @@ def scenario_filter_panel():
     check("old link opens without exception", not at2.exception, err_of(at2))
     check(
         "old preset=all + range becomes Custom",
-        at2.session_state.get("flt_preset") == "custom",
+        ss_get(at2, "flt_preset") == "custom",
     )
     check(
         "old res list ['death'] becomes 'death'",
-        at2.session_state.get("flt_res") == "death",
+        ss_get(at2, "flt_res") == "death",
     )
-    check("old link keeps the side filter", at2.session_state.get("flt_side") == "T")
-    check("migrated link shows the custom slider", widget(at2, "slider", "flt_rounds") is not None)
+    check("old link keeps the side filter", ss_get(at2, "flt_side") == "T")
+    check(
+        "migrated link shows the custom slider",
+        widget(at2, "slider", "flt_rounds") is not None,
+    )
     # new link round-trip: filter -> URL -> fresh app
     at3 = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel3.dem")
     act(
         at3,
         "distance band mid (for the link)",
-        lambda: at3.segmented_control(key="flt_dist").select("mid").run(),
+        lambda: ctl(at3, "segmented_control", "flt_dist").select("mid").run(),
     )
     link = at3.query_params.get("f")
     check("filtered view is packed into the URL", bool(link))
@@ -556,7 +590,7 @@ def scenario_filter_panel():
     at4.query_params["f"] = link
     at4.run()
     check("link restores without exception", not at4.exception, err_of(at4))
-    check("link restores the distance band", at4.session_state.get("flt_dist") == "mid")
+    check("link restores the distance band", ss_get(at4, "flt_dist") == "mid")
 
 
 def scenario_quoted_path():
@@ -706,7 +740,7 @@ def scenario_matrix():
                 act(
                     at,
                     f"preset {p}",
-                    lambda p=p: at.segmented_control(key="flt_preset")
+                    lambda p=p: ctl(at, "segmented_control", "flt_preset")
                     .select(p)
                     .run(),
                 )
@@ -722,14 +756,14 @@ def scenario_matrix():
                 act(
                     at,
                     f"class {cls}",
-                    lambda c=cls: at.pills(key="flt_classes").set_value([c]).run(),
+                    lambda c=cls: ctl(at, "pills", "flt_classes").set_value([c]).run(),
                 )
             for side in ("T", "CT"):
                 if widget(at, "segmented_control", "flt_side") is not None:
                     act(
                         at,
                         f"side {side}",
-                        lambda s=side: at.segmented_control(key="flt_side")
+                        lambda s=side: ctl(at, "segmented_control", "flt_side")
                         .select(s)
                         .run(),
                     )
@@ -738,7 +772,7 @@ def scenario_matrix():
                 act(
                     at,
                     f"result {res}",
-                    lambda r=res: at.segmented_control(key="flt_res")
+                    lambda r=res: ctl(at, "segmented_control", "flt_res")
                     .select(r)
                     .run(),
                 )
@@ -858,7 +892,7 @@ def run_real(path):
         act(
             at,
             f"preset {p}",
-            lambda p=p: at.segmented_control(key="flt_preset").select(p).run(),
+            lambda p=p: ctl(at, "segmented_control", "flt_preset").select(p).run(),
         )
 
 
