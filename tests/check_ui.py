@@ -105,6 +105,8 @@ for lang in ("en", "ru"):
     t("tip_risky", pct=10.0)
     t("tip_err", err=1.0)
     t("tip_lost_first", n=1, m=2)
+    t("tip_flashed", n=1, pct=10.0)
+    t("tip_slowed", n=1, pct=10.0)
     t("chk_na_ids", n=1, pct=1.0)
     t("chk_angles", med=1.0, n=1)
     t("chk_hitgroups", n=1, vals="x")
@@ -146,6 +148,10 @@ for fn, cols in {
         "hit",
         "side",
         "weapon_class",
+        "zone",
+        "round_sec",
+        "flashed",
+        "slowed",
     ],
     "player_summary": [
         "player",
@@ -190,6 +196,9 @@ for fn, cols in {
         "thrusmoke",
         "attackerblind",
         "penetrated",
+        "round_sec",
+        "my_zone",
+        "opp_zone",
     ],
     "weapon_stats": [
         "weapon",

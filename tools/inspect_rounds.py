@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-off diagnostics for PROMPT_2 step 2, part A (NOT part of CI).
+"""One-off diagnostics for round/halves inspection (NOT part of CI).
 
 Shows how a demo encodes rounds, so the knife-round handling in part B
 is based on data, not guesses:

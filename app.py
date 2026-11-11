@@ -324,7 +324,7 @@ if info:
     st.caption(" · ".join(info))
 
 # pre-match rounds that were dropped (knife round / warmup / restarts) -
-# step 2B6: one honest line instead of silently "lost" rounds
+# one honest line instead of silently "lost" rounds
 _excl = getattr(demo, "excluded", {}) or {}
 _excl_parts = []
 if _excl.get("warmup"):
@@ -519,9 +519,7 @@ if isinstance(_res, (list, tuple, set)):
     st.session_state["flt_res"] = (
         "kill"
         if "kill" in _res and "death" not in _res
-        else "death"
-        if "death" in _res and "kill" not in _res
-        else "both"
+        else "death" if "death" in _res and "kill" not in _res else "both"
     )
 elif _res not in ("both", "kill", "death"):
     st.session_state["flt_res"] = "both"
@@ -649,13 +647,9 @@ if st.session_state.get("flt_preset", "all") == "custom":
 elif st.session_state.get("flt_preset", "all") != "all":
     _chips.append((_preset_label(st.session_state["flt_preset"]), _clr_rounds))
 if st.session_state.get("flt_dist", "all") != "all":
-    _chips.append(
-        (_dist_label(st.session_state["flt_dist"]), _clr("flt_dist", "all"))
-    )
+    _chips.append((_dist_label(st.session_state["flt_dist"]), _clr("flt_dist", "all")))
 if show_result and st.session_state.get("flt_res", "both") != "both":
-    _chips.append(
-        (fmt_result(st.session_state["flt_res"]), _clr("flt_res", "both"))
-    )
+    _chips.append((fmt_result(st.session_state["flt_res"]), _clr("flt_res", "both")))
 
 # Streamlit deletes widget state when the widget is absent from a run:
 # re-assign the keys of the controls this page does not show, so a
@@ -713,9 +707,7 @@ if show_panel:
             st.segmented_control(
                 t("flt_res"),
                 ["both", "kill", "death"],
-                format_func=lambda v: (
-                    t("res_both") if v == "both" else fmt_result(v)
-                ),
+                format_func=lambda v: (t("res_both") if v == "both" else fmt_result(v)),
                 key="flt_res",
                 help=t("flt_res_help"),
             )
@@ -1077,6 +1069,15 @@ elif page == "shooting":
     stops = sh_me[sh_me["stop"] == "stopped"] if len(sh_me) else sh_me
     cs_pct = stops["counter_strafe"].mean() * 100 if len(stops) else np.nan
 
+    # shot discipline: firing while flashed / while damage-slowed.
+    # NA (prop unknown on old demos) never counts as False - a verdict is
+    # only issued when the data actually exists.
+    fl_me = sh_me["flashed"]
+    sl_me = sh_me["slowed"]
+    fl_known, sl_known = int(fl_me.notna().sum()), int(sl_me.notna().sum())
+    fl_n = int(fl_me.fillna(False).sum())
+    sl_n = int(sl_me.fillna(False).sum())
+
     # "Top 3 things to work on" opens the tab: a severity chip
     # (HIGH / MED / INFO), the sentence with its number, and the evidence
     # behind a "show me" popover (the duels behind the number) or a
@@ -1103,6 +1104,12 @@ elif page == "shooting":
         n_lost = int((dth_df["first"] == "opponent").sum())
         if n_lost and n_lost / len(dth_df) >= 0.5:
             tips.append((1, t("tip_lost_first", n=n_lost, m=len(dth_df)), "lost"))
+    # discipline tips - appended AFTER the established verdicts, so
+    # at equal severity the aim / first-shot coaching keeps its top-3 place
+    if fl_known >= 20 and fl_n >= 3 and fl_n / fl_known >= 0.08:
+        tips.append((1, t("tip_flashed", n=fl_n, pct=fl_n / fl_known * 100), None))
+    if sl_known >= 20 and sl_n >= 5 and sl_n / sl_known >= 0.10:
+        tips.append((1, t("tip_slowed", n=sl_n, pct=sl_n / sl_known * 100), None))
     if not tips:
         tips.append((0, t("tip_few"), None))
     tips.sort(key=lambda item: -item[0])
@@ -1395,11 +1402,13 @@ elif page == "duels":
             du_full = st.toggle(t("all_columns"), key="du_full")
         du_labels = {
             "round": t("col_round"),
+            "round_sec": t("col_round_sec"),
             "result": t("col_result"),
             "opponent": t("col_opponent"),
             "weapon": t("col_weapon"),
             "hs": t("col_hs"),
             "distance": t("col_distance"),
+            "zone": t("col_zone"),
             "first": t("col_first"),
             "aim_err": t("col_err"),
             "my_shots": t("col_my_shots"),
@@ -1413,11 +1422,13 @@ elif page == "duels":
         }
         du_cells = {
             "round": ddf["round"].to_numpy(),
+            "round_sec": ddf["round_sec"].to_numpy(),
             "result": [fmt_result(v) for v in ddf["result"]],
             "opponent": [name_of.get(s, s) for s in ddf["opponent"]],
             "weapon": ddf["weapon"].to_numpy(),
             "hs": ["✓" if v else "" for v in ddf["headshot"]],
             "distance": ddf["distance"].to_numpy(),
+            "zone": [z if z else "—" for z in ddf["my_zone"]],
             "first": [fmt_first(v) for v in ddf["first"]],
             "aim_err": ddf["my_err"].to_numpy(),
             "my_shots": ddf["my_shots"].to_numpy(),
@@ -1431,6 +1442,9 @@ elif page == "duels":
         }
         du_cfg_all = {
             "round": st.column_config.NumberColumn(du_labels["round"], format="%d"),
+            "round_sec": st.column_config.NumberColumn(
+                du_labels["round_sec"], format="%.1f s", help=t("col_round_sec_help")
+            ),
             "result": st.column_config.TextColumn(du_labels["result"], width="small"),
             "opponent": st.column_config.TextColumn(
                 du_labels["opponent"], pinned=True, width="medium"
@@ -1439,6 +1453,9 @@ elif page == "duels":
             "hs": st.column_config.Column(du_labels["hs"], width="small"),
             "distance": st.column_config.NumberColumn(
                 du_labels["distance"], format="%d u"
+            ),
+            "zone": st.column_config.TextColumn(
+                du_labels["zone"], width="medium", help=t("col_zone_help")
             ),
             "first": st.column_config.TextColumn(du_labels["first"], width="small"),
             "aim_err": st.column_config.NumberColumn(
@@ -1463,6 +1480,7 @@ elif page == "duels":
         }
         _du_basic = [
             "round",
+            "round_sec",
             "result",
             "opponent",
             "weapon",
@@ -1498,6 +1516,59 @@ elif page == "duels":
             key="du_table",
         )
         st.caption(t("du_click_hint"))
+
+        # duels by named map zone - "where do my fights actually
+        # happen". The zone comes from the death event (last_place_name at
+        # the kill tick); duels without a known zone are skipped, not
+        # lumped into a fake "(unknown)" row.
+        _zd = (
+            my_duels[my_duels["my_zone"].astype(str).str.len() > 0]
+            if len(my_duels)
+            else my_duels
+        )
+        if len(_zd):
+            zt = (
+                _zd.groupby("my_zone")
+                .agg(
+                    kills=("result", lambda s: int((s == "kill").sum())),
+                    deaths=("result", lambda s: int((s == "death").sum())),
+                )
+                .reset_index()
+            )
+            zt["kd"] = zt["kills"] - zt["deaths"]
+            zt = zt.sort_values(["deaths", "kills"], ascending=[False, False])
+            st.divider()
+            st.markdown(f"**{t('zone_title')}**")
+            st.caption(t("zone_caption"))
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        t("col_zone"): zt["my_zone"].to_numpy(),
+                        t("col_kills"): zt["kills"].to_numpy(),
+                        t("col_deaths"): zt["deaths"].to_numpy(),
+                        t("zone_kd"): zt["kd"].to_numpy(),
+                    }
+                ),
+                column_config={
+                    t("col_zone"): st.column_config.TextColumn(
+                        t("col_zone"),
+                        pinned=True,
+                        width="medium",
+                        help=t("col_zone_help"),
+                    ),
+                    t("col_kills"): st.column_config.NumberColumn(
+                        t("col_kills"), format="%d"
+                    ),
+                    t("col_deaths"): st.column_config.NumberColumn(
+                        t("col_deaths"), format="%d"
+                    ),
+                    t("zone_kd"): st.column_config.NumberColumn(
+                        t("zone_kd"), format="%+d"
+                    ),
+                },
+                hide_index=True,
+                width="stretch",
+            )
 
 
 # ------------------------------------------------------------- timeline

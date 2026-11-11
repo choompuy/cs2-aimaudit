@@ -82,6 +82,21 @@ def make_match():
                     False,
                     False,
                 ],
+                # context: zone + round clock. Warmup rows get a
+                # NEGATIVE round_second (before round start) - dropped with
+                # the warmup rows anyway, but exercises the NaN clamp.
+                "user_last_place_name": [
+                    "TSpawn",
+                    "TSpawn",
+                    "BombsiteA",
+                    "BombsiteA",
+                    "BombsiteA",
+                    "Middle",
+                    "Middle",
+                    "Catwalk",
+                ],
+                "round_start_time": [100.0] * 7 + [400.0],
+                "game_time": [50.0, 55.0, 135.3, 135.5, 135.9, 136.2, 136.4, 444.0],
             }
         ),
         "player_hurt": pd.DataFrame(
@@ -102,6 +117,15 @@ def make_match():
                 "hitgroup": [1, 1, 2, 2],
                 "total_rounds_played": [0, 0, 0, 0],
                 "is_warmup_period": [True, False, False, False],
+                "attacker_last_place_name": [
+                    "TSpawn",
+                    "BombsiteA",
+                    "Catwalk",
+                    "Middle",
+                ],
+                "user_last_place_name": ["TSpawn", "Middle", "Palace", "Palace"],
+                "round_start_time": [100.0] * 4,
+                "game_time": [60.0, 135.9, 136.5, 136.3],
             }
         ),
         "player_death": pd.DataFrame(
@@ -116,6 +140,10 @@ def make_match():
                 "distance": [700, 800],
                 "total_rounds_played": [0, 0],
                 "is_warmup_period": [True, False],
+                "attacker_last_place_name": ["TSpawn", "BombsiteA"],
+                "user_last_place_name": ["Catwalk", "Middle"],
+                "round_start_time": [100.0, 100.0],
+                "game_time": [70.0, 137.0],
             }
         ),
     }
@@ -138,6 +166,12 @@ def make_match():
     pos[(200, S4)] = (5000.0, 3.0, 0.0)
     yaw = {S1: 0.0, S3: 180.0, S4: 0.0}  # S1 looks +X, S3 looks -X
     punch = {(100, S1): "5.0 0.0 0.0"}
+    # shooter state at the fire ticks: S1 is flashed (2.0s left) at
+    # its 110 shot and damage-slowed (velo 0.4) at the 120 one; S3 answers
+    # at 115 still slowed (0.35) from the hit it just took. Everything else
+    # is the clean state (0.0 / 1.0).
+    flash = {(110, S1): 2.0}
+    velo = {(120, S1): 0.4, (115, S3): 0.35}
     rows = []
     for (t, sid), (x, y, z) in sorted(pos.items()):
         rows.append(
@@ -152,6 +186,8 @@ def make_match():
                 "yaw": yaw[sid],
                 "is_alive": True,
                 "aim_punch_angle": punch.get((t, sid), "0 0 0"),
+                "flash_duration": flash.get((t, sid), 0.0),
+                "velo_modifier": velo.get((t, sid), 1.0),
             }
         )
     ticks = pd.DataFrame(rows)
@@ -424,6 +460,127 @@ check(
 )
 hg = core.hitgroup_counts(demo, S1)
 check("hitgroup head=1", hg.get("head", 0) == 1)
+
+# ------------------------------------------------- shot/duel context
+print("== shot/duel context ==")
+s1c = s1.set_index("tick")
+s3c = shots[shots["sid"] == S3].sort_values("tick").set_index("tick")
+s4c = shots[shots["sid"] == S4].set_index("tick")
+check(
+    "zones passthrough",
+    list(s1c["zone"]) == ["BombsiteA"] * 3
+    and list(s3c["zone"]) == ["Middle"] * 2
+    and s4c["zone"].iloc[0] == "Catwalk",
+    s1c["zone"].tolist(),
+)
+check(
+    "round_sec per shot",
+    abs(s1c.loc[100, "round_sec"] - 35.3) < 1e-9
+    and abs(s1c.loc[110, "round_sec"] - 35.5) < 1e-9
+    and abs(s1c.loc[120, "round_sec"] - 35.9) < 1e-9
+    and abs(s4c["round_sec"].iloc[0] - 44.0) < 1e-9,
+    s1c["round_sec"].tolist(),
+)
+check(
+    "flashed at 110 only",
+    bool(s1c.loc[110, "flashed"]) is True
+    and bool(s1c.loc[100, "flashed"]) is False
+    and bool(s1c.loc[120, "flashed"]) is False
+    and not bool(s3c["flashed"].any())
+    and not bool(s4c["flashed"].iloc[0]),
+    s1c["flashed"].tolist(),
+)
+check(
+    "slowed at 120 (S1) and 115 (S3)",
+    bool(s1c.loc[120, "slowed"]) is True
+    and bool(s1c.loc[100, "slowed"]) is False
+    and bool(s3c.loc[115, "slowed"]) is True
+    and bool(s3c.loc[118, "slowed"]) is False
+    and not bool(s4c["slowed"].iloc[0]),
+    list(s1c["slowed"]) + list(s3c["slowed"]),
+)
+check(
+    "flashed/slowed all known",
+    shots["flashed"].notna().all() and shots["slowed"].notna().all(),
+)
+check(
+    "duel context",
+    abs(duels.iloc[0]["round_sec"] - 37.0) < 1e-9
+    and duels.iloc[0]["killer_zone"] == "BombsiteA"
+    and duels.iloc[0]["victim_zone"] == "Middle",
+    duels.iloc[0][["round_sec", "killer_zone", "victim_zone"]].to_dict(),
+)
+check(
+    "duels_for context",
+    abs(mine.iloc[0]["round_sec"] - 37.0) < 1e-9
+    and mine.iloc[0]["my_zone"] == "BombsiteA"
+    and mine.iloc[0]["opp_zone"] == "Middle",
+    mine.iloc[0][["round_sec", "my_zone", "opp_zone"]].to_dict(),
+)
+
+
+# --- old demo without the context fields: columns exist, values are
+# unknown ("" / NaN / NA), never a crash and never a fake "False".
+def _strip_ctx(m):
+    drop_ev = (
+        "user_last_place_name",
+        "attacker_last_place_name",
+        "game_time",
+        "round_start_time",
+    )
+    for name in ("weapon_fire", "player_hurt", "player_death"):
+        df = m["events"][name]
+        m["events"][name] = df.drop(
+            columns=[c for c in df.columns if c in drop_ev], errors="ignore"
+        )
+    m["ticks"] = m["ticks"].drop(
+        columns=["flash_duration", "velo_modifier"], errors="ignore"
+    )
+    return m
+
+
+FakeParser.demos["old.dem"] = _strip_ctx(make_match())
+old_demo = core.load_demo("old.dem")
+old_shots = core.shots_table(old_demo)
+old_duels = core.build_duels(old_demo)
+check(
+    "no ctx: zone '' + round_sec NaN",
+    (old_shots["zone"] == "").all() and old_shots["round_sec"].isna().all(),
+    old_shots["zone"].head().tolist(),
+)
+check(
+    "no ctx: flags NA (not False)",
+    old_shots["flashed"].isna().all() and old_shots["slowed"].isna().all(),
+    old_shots[["flashed", "slowed"]].head(2).to_dict(),
+)
+check(
+    "no ctx: duel zones '' + round_sec NaN",
+    (old_duels["killer_zone"] == "").all() and old_duels["round_sec"].isna().all(),
+    old_duels[["round_sec", "killer_zone"]].to_dict(),
+)
+
+# --- parser that RAISES on the state props (unknown on old versions):
+# the POS/buttons chain must survive, flags come out NA.
+m_unsup = make_match()
+m_unsup["unsupported"] = {"flash_duration", "velo_modifier"}
+FakeParser.demos["unsup.dem"] = m_unsup
+unsup_demo = core.load_demo("unsup.dem")
+unsup_shots = core.shots_table(unsup_demo)
+check(
+    "unsupported state props: POS chain intact",
+    {"X", "Y", "speed"} <= set(unsup_shots.columns)
+    and unsup_shots["speed"].notna().any(),
+)
+check(
+    "unsupported state props: flags NA",
+    unsup_shots["flashed"].isna().all() and unsup_shots["slowed"].isna().all(),
+    unsup_shots[["flashed", "slowed"]].head(2).to_dict(),
+)
+check(
+    "unsupported state props: zones still present (events unaffected)",
+    (unsup_shots["zone"] == "BombsiteA").any(),
+    unsup_shots["zone"].head().tolist(),
+)
 
 # ------------------------------------------------------------- data_checks
 print("== data_checks ==")
@@ -1545,7 +1702,7 @@ check(
     str(sorted(_parts() - _parts_before)[:2]),
 )
 
-# ------------------------------------------- step 2B: knife round / rounds
+# ------------------------------------------- knife round / live match start
 print("== knife round / live match start ==")
 
 NAMES = {S1: "Alpha", S2: "Bravo", S3: "Charlie", S4: "Delta"}

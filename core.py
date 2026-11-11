@@ -141,6 +141,15 @@ MAX_SPEED = 600.0
 # (absorbs off-by-one/two without flagging earlier shots of the same burst).
 HIT_WINDOW = 3
 MAX_DUEL_DIST = 10000.0
+
+# ------------------------------------------------- shot context
+# Per-shot context from server fields (docs/DEMOPARSER_NOTES.md s.13):
+# flash_duration above FLASH_SHOT_S -> the shot counts as fired while
+# flashed; velo_modifier below SLOWED_MAX -> still slowed by recent damage;
+# round_second outside [0, ROUND_SEC_MAX] -> bad clock data -> NaN.
+FLASH_SHOT_S = 0.5
+SLOWED_MAX = 0.99
+ROUND_SEC_MAX = 300.0
 # Eye / head heights (units, above the pawn origin). Crouching lowers both
 # by ~18 units; we scale linearly with duck_amount (0..1).
 EYE_STAND, HEAD_STAND, DUCK_DROP = 64.0, 62.0, 18.0
@@ -725,6 +734,34 @@ def _duck_amount(r) -> float:
     return min(max(v, 0.0), 1.0)
 
 
+def _zone(v) -> str:
+    """last_place_name -> clean zone string ('' when missing/NA)."""
+    if v is None or pd.isna(v):
+        return ""
+    s = str(v).strip()
+    return "" if s.lower() in ("", "nan", "none") else s
+
+
+def _row_round_sec(r) -> float:
+    """
+    Seconds into the live round at the row's tick.
+
+    round_second = game_time - round_start_time; round_start_time is the
+    freeze END, so this is play time without the buy time. NaN when the
+    fields are absent (old demos) or out of [0, ROUND_SEC_MAX].
+    """
+
+    gt = getattr(r, "game_time", None)
+    rst = getattr(r, "round_start_time", None)
+    try:
+        rs = float(gt) - float(rst)
+    except (TypeError, ValueError):
+        return float("nan")
+    if not (np.isfinite(rs) and 0.0 <= rs <= ROUND_SEC_MAX):
+        return float("nan")
+    return round(rs, 2)
+
+
 def angle_err(a, t) -> float:
     """
     Angle (deg) between player a's view direction and player t's head.
@@ -1121,21 +1158,40 @@ def load_demo(path: str, progress=None) -> Demo:
         header = {}
 
     say("events")
-    ev = dict(
-        p.parse_events(
-            [
-                "player_death",
-                "weapon_fire",
-                "player_hurt",
-                # round/match structure (docs/DEMOPARSER_NOTES.md s.12):
-                # begin_new_match marks the live-match start (FACEIT knife
-                # rounds sit before it), round_freeze_end bounds the rounds
-                "begin_new_match",
-                "round_freeze_end",
-            ],
-            other=["total_rounds_played", "is_warmup_period"],
-        )
-    )
+    _events = [
+        "player_death",
+        "weapon_fire",
+        "player_hurt",
+        # round/match structure (docs/DEMOPARSER_NOTES.md s.12):
+        # begin_new_match marks the live-match start (FACEIT knife
+        # rounds sit before it), round_freeze_end bounds the rounds
+        "begin_new_match",
+        "round_freeze_end",
+    ]
+    _other = ["total_rounds_played", "is_warmup_period"]
+    ev: dict | None = None
+    last_ev_err: Exception | None = None
+    # shot/duel context: the named map zone of both players at
+    # every event (player=) plus the round clock (other=): round_second =
+    # game_time - round_start_time, where round_start_time is the freeze
+    # END (verified on real demos). Old parsers/demos may not know the
+    # fields - fall back step by step; the columns then simply stay absent
+    # and every consumer treats them as missing data, never as false.
+    for kw in (
+        {
+            "player": ["last_place_name"],
+            "other": _other + ["game_time", "round_start_time"],
+        },
+        {"other": _other},
+        {},
+    ):
+        try:
+            ev = dict(p.parse_events(_events, **kw))
+            break
+        except Exception as e:  # noqa: BLE001 - unknown fields on old parsers
+            last_ev_err = e
+    if ev is None:
+        raise last_ev_err  # type: ignore[misc]
     deaths = ev.get("player_death", pd.DataFrame())
     fires = ev.get("weapon_fire", pd.DataFrame())
     hurts = ev.get("player_hurt", pd.DataFrame())
@@ -1175,7 +1231,7 @@ def load_demo(path: str, progress=None) -> Demo:
                 else:
                     hurts = hurts[~mask].copy()
 
-    # ------------------------------------------- live match start (step 2B1)
+    # ------------------------------------------- live match start
     # FACEIT-style demos open with a knife round (often followed by a warmup
     # round) that is NOT flagged is_warmup_period; the live match begins at
     # the LAST begin_new_match. Everything before that tick is dropped and
@@ -1361,6 +1417,29 @@ def load_demo(path: str, progress=None) -> Demo:
     td = _decode_buttons(td)
     td = _norm_alive(td)
     td = _extract_punch(td)
+    # shooter state at the fire ticks: flash_duration (seconds of
+    # blindness left) and velo_modifier (<1 = slowed by recent damage). A
+    # separate parse_ticks call: an unknown prop must not take the
+    # POS/buttons chain down with it (the buttons lesson, notes s.4). On
+    # failure the columns stay absent -> flags come out NA, not False.
+    try:
+        state = p.parse_ticks(["flash_duration", "velo_modifier"], ticks=ticks_list)
+    except Exception:  # noqa: BLE001 - old parser / prop unavailable
+        state = None
+    if state is not None and len(state) and "steamid" in state.columns:
+        state = state.copy()
+        state["steamid"] = fix_ids(
+            state["steamid"],
+            flookup,
+            state["name"] if "name" in state.columns else None,
+            name_to_sid,
+        )
+        state = state.drop_duplicates(["tick", "steamid"])
+        _keep = [c for c in ("flash_duration", "velo_modifier") if c in state.columns]
+        if _keep:
+            td = td.merge(
+                state[["tick", "steamid"] + _keep], on=["tick", "steamid"], how="left"
+            )
     tickrate = tickrate_from_header(header)
     td = _add_speed(td, tickrate)
     return Demo(
@@ -1484,17 +1563,51 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     One row per gun shot: tick, sid, weapon, round, speed, position,
     dist (nearest living enemy, approx) and hit (damaged an enemy, approx:
     a hurt event within HIT_WINDOW ticks after the shot; shotgun pellets count once).
+
+    Shot/duel context columns: `zone` (the game's named place at the shot,
+    '' unknown), `round_sec` (seconds into the live round, NaN unknown),
+    `flashed` / `slowed` (shooter state at the fire tick; NA when the
+    demo/parser does not provide the prop - missing is never False).
     """
 
-    cols = ["tick", "user_steamid", "weapon"] + (
-        ["total_rounds_played"] if "total_rounds_played" in demo.fires.columns else []
+    ctx = [
+        c
+        for c in ("user_last_place_name", "game_time", "round_start_time")
+        if c in demo.fires.columns
+    ]
+    cols = (
+        ["tick", "user_steamid", "weapon"]
+        + (
+            ["total_rounds_played"]
+            if "total_rounds_played" in demo.fires.columns
+            else []
+        )
+        + ctx
     )
     s = demo.fires[cols].rename(columns={"user_steamid": "sid"})
     s["round"] = _round_col(s) + 1
     s = s.drop(columns=["total_rounds_played"], errors="ignore")
-    t = demo.ticks[["tick", "steamid", "speed", "X", "Y", "Z"]].rename(
-        columns={"steamid": "sid"}
+    # named zone at the shot (last_place_name of the fire event)
+    if "user_last_place_name" in s.columns:
+        s["zone"] = s["user_last_place_name"].map(_zone)
+    else:
+        s["zone"] = ""
+    # seconds into the live round at the shot (freeze excluded)
+    if {"game_time", "round_start_time"} <= set(s.columns):
+        rs = pd.to_numeric(s["game_time"], errors="coerce") - pd.to_numeric(
+            s["round_start_time"], errors="coerce"
+        )
+        s["round_sec"] = rs.where((rs >= 0) & (rs <= ROUND_SEC_MAX)).round(2)
+    else:
+        s["round_sec"] = np.nan
+    s = s.drop(
+        columns=["user_last_place_name", "game_time", "round_start_time"],
+        errors="ignore",
     )
+    tcols = ["tick", "steamid", "speed", "X", "Y", "Z"] + [
+        c for c in ("flash_duration", "velo_modifier") if c in demo.ticks.columns
+    ]
+    t = demo.ticks[tcols].rename(columns={"steamid": "sid"})
     out = s.merge(t, on=["tick", "sid"], how="left").reset_index(drop=True)
     # speed on the tick BEFORE the shot (stop detection: 'stopped' = crossed
     # under the threshold exactly on the shot tick)
@@ -1512,6 +1625,25 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     ]
     out["dist"] = _nearest_enemy_dist(demo, out)
     out["hit"] = _match_hits(out, demo.hurts)
+    # shooter state at the fire tick: True/False when known, NA when the
+    # prop is unavailable (an old demo must not look like "0% flashed")
+    if "flash_duration" in out.columns:
+        fd = pd.to_numeric(out["flash_duration"], errors="coerce")
+    else:
+        fd = pd.Series(np.nan, index=out.index, dtype=float)
+    fl = pd.Series(pd.NA, index=out.index, dtype="boolean")
+    _fok = fd.notna()
+    fl[_fok] = (fd[_fok] > FLASH_SHOT_S).to_numpy()
+    out["flashed"] = fl
+    if "velo_modifier" in out.columns:
+        vm = pd.to_numeric(out["velo_modifier"], errors="coerce")
+    else:
+        vm = pd.Series(np.nan, index=out.index, dtype=float)
+    sw = pd.Series(pd.NA, index=out.index, dtype="boolean")
+    _sok = vm.notna()
+    sw[_sok] = (vm[_sok] < SLOWED_MAX).to_numpy()
+    out["slowed"] = sw
+    out = out.drop(columns=["flash_duration", "velo_modifier"], errors="ignore")
     out["side"] = [
         demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"])
     ]
@@ -1704,6 +1836,11 @@ def build_duels(
                 "thrusmoke": bool(getattr(r, "thrusmoke", False)),
                 "attackerblind": bool(getattr(r, "attackerblind", False)),
                 "penetrated": int(getattr(r, "penetrated", 0) or 0) > 0,
+                # context: when in the round and on which named zone
+                # the duel ended (kill-time values from the death event)
+                "round_sec": _row_round_sec(r),
+                "killer_zone": _zone(getattr(r, "attacker_last_place_name", None)),
+                "victim_zone": _zone(getattr(r, "user_last_place_name", None)),
                 "first": first,
                 "killer_shots": len(kw),
                 "victim_shots": len(vw),
@@ -1789,6 +1926,9 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
                     "thrusmoke": df["thrusmoke"],
                     "attackerblind": df["attackerblind"],
                     "penetrated": df["penetrated"],
+                    "round_sec": df["round_sec"],
+                    "my_zone": df[f"{mine}_zone"],
+                    "opp_zone": df[f"{opp}_zone"],
                 }
             )
         )

@@ -13,7 +13,7 @@ on:
 
 env:
   # Windows runners default to cp1252 for consoles/pipes, while the test
-  # output contains →, ≈ and Cyrillic: UTF-8 mode keeps the prints from
+  # output contains â†’, â‰ˆ and Cyrillic: UTF-8 mode keeps the prints from
   # UnicodeEncodeError. The test scripts reconfigure stdout/stderr as a
   # belt-and-suspenders fallback for local Windows runs.
   PYTHONUTF8: "1"
@@ -31,8 +31,8 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
@@ -50,8 +50,8 @@ jobs:
     # One full run (every page and locale) per commit is enough.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -67,8 +67,8 @@ jobs:
     # three test suites.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install uv

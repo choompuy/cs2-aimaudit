@@ -335,22 +335,22 @@ user_team_name` and warmup filter via `is_warmup_period == False`.
 | Recoil in aim error                   | `aim_punch_angle` in POS in parse_ticks                 | err is now "where the bullet could go", not just pre-recoil crosshair                                           | ✅ implemented (with fallback and 3 formats)       |
 | Distance risk model                   | own calculations (dist to nearest living enemy)         | "risky shots" accounting for distance                                                                           | ✅ implemented                                     |
 | Debug report                          | `data_checks` + `debug_report` (JSON)                   | user sends the JSON — we can see where data/logic lies                                                          | ✅ implemented                                     |
-| Stats cross-check                     | `round_end` + `*_total` aggregates (scoreboard)         | data_checks: our stats vs game stats                                                                            | candidate                                          |
-| Blindness by ticks                    | `flash_duration`                                        | not just attackerblind on kills                                                                                 | candidate                                          |
+| Stats cross-check                     | `round_end` + `*_total` aggregates (scoreboard)         | data_checks: our stats vs game stats                                                                            | candidate (see s.13: final-round lag)              |
+| Blindness by ticks                    | `flash_duration`                                        | not just attackerblind on kills                                                                                 | ✅ implemented (step 4, at fire ticks)              |
 | Mouse reaction                        | `usercmd_mouse_dx/dy`                                   | reaction time and mouse flicks                                                                                  | candidate (risky, not in all demos)                |
 | **BUG: velocity with sparse ticks=**  | own Δpos(t-1→t)×64, is_alive, 600 cap                   | speed lied N-fold (N=tick gap), teleports = 35k+ u/s                                                            | ✅ fixed (confirmed by Rust sources and user data) |
 | **BUG: fix_ids Int64→str**            | flookup-float key for any dtype                         | "hits" only for the player with sid divisible by 16                                                             | ✅ fixed (reproduced 1/10 → 10/10)                 |
 | Hit matching with window              | \_match_hits: last shot ≤ hurt_tick ± 3 ticks           | off-by-one protection without false hits in bursts                                                              | ✅ implemented                                     |
 | Is the enemy alive — exactly          | `is_alive` in parse_ticks                               | instead of reconstructing from deaths                                                                           | ✅ partial (speed + timeline cut at death)         |
-| Crouch in head height                 | `duck_amount`                                           | refine angle_err                                                                                                | candidate                                          |
-| Duel round second                     | `game_time` − `round_start_time` in other= (round_time) | context: early peek or late retake                                                                              | candidate                                          |
-| K/D by map zone                       | `player=["last_place_name"]` (kda_per_zone)             | "where do I die most"                                                                                           | candidate                                          |
-| Accuracy penalty                      | `accuracy_penalty`                                      | direct metric instead of heuristic                                                                              | candidate                                          |
-| Damage slow                           | `velo_modifier`                                         | duel context                                                                                                    | candidate                                          |
+| Crouch in head height                 | `duck_amount`                                           | refine angle_err                                                                                                | ✅ implemented (angle_err, duck-aware heights)     |
+| Duel round second                     | `game_time` − `round_start_time` in other= (round_time) | context: early peek or late retake                                                                              | ✅ implemented (step 4: shots + duels)              |
+| K/D by map zone                       | `player=["last_place_name"]` (kda_per_zone)             | "where do I die most"                                                                                           | ✅ implemented (step 4: by-zone table, duels page)  |
+| Accuracy penalty                      | `accuracy_penalty`                                      | direct metric instead of heuristic                                                                              | candidate (skipped: overlaps speed/recoil)         |
+| Damage slow                           | `velo_modifier`                                         | duel context                                                                                                    | ✅ implemented (step 4: slowed at fire ticks)       |
 
 ## 11. Tests
 
-- `tests/test_core.py` — 97 checks on a synthetic demo (mocked demoparser2):
+- `tests/test_core.py` — 310 checks on a synthetic demo (mocked demoparser2):
   warmup filter, teamkills, SteamID collision+names, REGRESSION of the
   "Heylaurens bug" (rounded floats in object dtype: 1/10 → 10/10), distances
   to living enemies, hit matching with tolerance window, own speeds
@@ -470,3 +470,74 @@ pipeline (`load_demo` → `shots_table` → `build_duels` → `player_summary` �
   MR12 grid in all three demos.
 - Raw `total_rounds_played` in live data is 0-based (first live round = 0,
   last = rounds-1); the UI keeps adding +1 (gotcha 9.4).
+
+## 13. Step 4 — shot & duel context: what the real demos provide (2026-11-11)
+
+Probed on all three real demos before implementation
+(`scripts/probe_step4_candidates.py`, outside the repo). Everything below
+was verified on every demo, not read from the docs.
+
+### 13.1 last_place_name (map zones)
+
+- `player=["last_place_name"]` on `parse_events` → `attacker_last_place_name` /
+  `user_last_place_name` on deaths and hurts, `user_last_place_name` on fires;
+  also available directly in `parse_ticks`. ~100% non-null everywhere
+  (faceit_mirage: 131/132 death rows, 2892/2892 fire rows).
+- Values are the game's named places: `BombsiteA`, `Middle`, `TSpawn`,
+  `CTSpawn`, `TRamp`, `Stairs`, `Apartments`, `TopofMid`, `Catwalk`,
+  `PalaceInterior`, `Underpass`, `Connector`, `Shop` ...
+- player_hurt does NOT carry the kill-time flags (`attackerblind`,
+  `thrusmoke`, `penetrated`, `noscope`, `distance`) — only player_death does.
+
+### 13.2 game_time − round_start_time (round clock)
+
+- Both come back via `other=[...]` on every event AND in `parse_ticks`;
+  float32, 100% non-null on all three demos.
+- **`round_start_time` is the freeze END** (round going live), not the freeze
+  start: fires appear 0.28 s after it, which is impossible during freeze time.
+  So `round_second = game_time − round_start_time` is play time without buy
+  time. Kill round-seconds on the real demos: 7.5–110 s, median ~30 s.
+- CS2 `parse_header()` has no usable `playback_ticks` (0 on all three) →
+  no end-of-demo tick; `tickrate_from_header` falls back to 64 (correct for
+  these demos).
+
+### 13.3 flash_duration / velo_modifier (shooter state)
+
+- Both are `parse_ticks` player props; float, non-null at fire ticks on all
+  three demos. Sampled across every fire tick of faceit_mirage (2788 ticks,
+  27880 rows): `flash_duration > 0` on 4.4% of rows (max ~5 s),
+  `velo_modifier < 0.99` on 11.8% (min 0.206) — a real, frequent signal.
+- `attackerblind` at kills is nearly never True (0/132, 1/147) — by the time
+  a kill lands the flash is usually below the game's blind threshold, so
+  **flash_duration at the fire tick is the usable signal**, not the kill flag.
+- `thrusmoke` kills do exist (16/132, 10/147); `noscope` / `penetrated` /
+  `distance` are native player_death fields (all three demos).
+
+### 13.4 aggregates (kills_total ...) — the cross-check trap
+
+`parse_ticks(["kills_total", ...], ticks=[last event tick])` matches our
+pipeline per player EXCEPT for exactly the players who killed in the FINAL
+round (ours = game + 1, e.g. 5 players on faceit_mirage, 2 on faceit2): the
+`*_total` aggregates are written once per round, so a sample taken inside the
+last round misses that round's kills. With no `round_end` events and no
+end-of-demo tick in the header (13.2), there is no reliable later tick to
+sample. The stats cross-check therefore stays a candidate; a naive
+implementation would warn on every demo.
+
+### 13.5 What step 4 shipped
+
+- `load_demo`: events requested with `player=["last_place_name"]` +
+  `other=[..., "game_time", "round_start_time"]` (three-step fallback for
+  old parsers); a separate `parse_ticks(["flash_duration",
+  "velo_modifier"], ticks=fire ticks)` merged into the ticks table (failure →
+  columns absent, never a crash — the buttons lesson).
+- `shots_table`: `zone` ("" unknown), `round_sec` (NaN outside [0, 300]),
+  `flashed` (> `FLASH_SHOT_S`=0.5 s left), `slowed` (`velo_modifier` <
+  `SLOWED_MAX`=0.99). Flags are nullable booleans: unknown ≠ False.
+- `build_duels` / `duels_for`: `round_sec` + `killer_zone`/`victim_zone` →
+  `my_zone`/`opp_zone` (kill-time values from the death event).
+- UI: Round s in the duels table (basic view), Zone (full view), a by-zone
+  K/D table under the duels table, and flashed/slowed discipline tips on the
+  shooting page (thresholds: ≥ 20 known shots and ≥ 8% flashed / ≥ 10% slowed).
+- `accuracy_penalty` was probed (51% of fire ticks > 0) but NOT shipped:
+  unit-less for users and overlapping with the speed/risky metrics.

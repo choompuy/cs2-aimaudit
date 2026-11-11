@@ -155,6 +155,11 @@ def make_match(rounds, weapons=("ak47",)):
                         "is_alive": True,
                         "aim_punch_angle": "0 0 0",
                         "team_num": s1_team if sid in (S1, S2) else 5 - s1_team,
+                        # shooter state: Alpha's t0+2 shot (the headshot
+                        # hit) comes while flashed (1.5s left); Charlie's t0+5
+                        # answer comes still slowed (0.4) from the damage.
+                        "flash_duration": 1.5 if (sid == S1 and t == t0 + 2) else 0.0,
+                        "velo_modifier": 0.4 if (sid == S3 and t == t0 + 5) else 1.0,
                     }
                 )
     return {
@@ -177,6 +182,14 @@ def make_match(rounds, weapons=("ak47",)):
                     "weapon": [w for _, _, w, _ in fire_t],
                     "total_rounds_played": [r - 1 for _, _, _, r in fire_t],
                     "is_warmup_period": [False] * len(fire_t),
+                    "user_last_place_name": [
+                        "BombsiteA" if s == S1 else "Middle" for _, s, _, _ in fire_t
+                    ],
+                    "round_start_time": [10.0 * (r - 1) for _, _, _, r in fire_t],
+                    "game_time": [
+                        10.0 * (r - 1) + 25.0 + (t - 1000 * r) / 64.0
+                        for t, _, _, r in fire_t
+                    ],
                 }
             ),
             "player_hurt": pd.DataFrame(
@@ -194,6 +207,13 @@ def make_match(rounds, weapons=("ak47",)):
                     "hitgroup": [1] * len(hurt_t),
                     "total_rounds_played": [r - 1 for _, _, _, _, r in hurt_t],
                     "is_warmup_period": [False] * len(hurt_t),
+                    "attacker_last_place_name": ["BombsiteA"] * len(hurt_t),
+                    "user_last_place_name": ["Middle"] * len(hurt_t),
+                    "round_start_time": [10.0 * (r - 1) for _, _, _, _, r in hurt_t],
+                    "game_time": [
+                        10.0 * (r - 1) + 25.0 + (t - 1000 * r) / 64.0
+                        for t, _, _, _, r in hurt_t
+                    ],
                 }
             ),
             "player_death": pd.DataFrame(
@@ -212,6 +232,13 @@ def make_match(rounds, weapons=("ak47",)):
                     "distance": [500] * len(death_t),
                     "total_rounds_played": [r - 1 for _, _, _, _, r in death_t],
                     "is_warmup_period": [False] * len(death_t),
+                    "attacker_last_place_name": ["BombsiteA"] * len(death_t),
+                    "user_last_place_name": ["Middle"] * len(death_t),
+                    "round_start_time": [10.0 * (r - 1) for _, _, _, _, r in death_t],
+                    "game_time": [
+                        10.0 * (r - 1) + 25.0 + (t - 1000 * r) / 64.0
+                        for t, _, _, _, r in death_t
+                    ],
                 }
             ),
         },
@@ -471,7 +498,7 @@ def scenario_long25():
 
 
 def scenario_filter_panel():
-    """Step 3: persistent panel, distance bands, reset, page scope, links."""
+    """Persistent panel: distance bands, reset, page scope, links."""
     print("== filter panel (persistent, distance, reset, links) ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel.dem")
     check("runs without exception", not at.exception, err_of(at))
@@ -613,7 +640,7 @@ def scenario_quoted_path():
 
 
 def scenario_knife_round():
-    """FACEIT shape: a knife round before begin_new_match (step 2B)."""
+    """FACEIT shape: a knife round before begin_new_match ."""
     print("== knife-round demo (live match start, banner) ==")
 
     def make_knife_match(rounds):
@@ -865,6 +892,109 @@ def scenario_tables():
     )
 
 
+def scenario_context():
+    """
+    Round seconds in the duels table, the by-zone table, and the
+    flashed/slowed discipline tips. A 25-round fake match: Alpha's t0+2
+    shot is flashed every round (50% of his shots), Charlie's t0+5 answer
+    is damage-slowed every round (100% of his).
+    """
+    print("== shot/duel context (round s, zones, flashed/slowed) ==")
+    at = open_demo(make_match(list(range(1, 26))), "context.dem")
+    check("runs without exception", not at.exception, err_of(at))
+
+    # tips live on the shooting page: Alpha fired 25 of 50 shots flashed
+    # (50% >= 8%) -> the blind-fire verdict; 0 slowed shots -> no verdict
+    goto(at, "shooting")
+    tips_txt = "\n".join(m.value for m in at.markdown)
+    check("flashed tip shown for Alpha", "while flashed" in tips_txt)
+    check(
+        "no slowed tip for Alpha (0 slowed shots)",
+        "slowed by recent damage" not in tips_txt,
+    )
+
+    goto(at, "duels")
+
+    # duels table, basic view: Round s present, Zone hidden
+    du = widget(at, "dataframe", "du_table")
+    check("duels table rendered", du is not None)
+    cols = list(du.value.columns)
+    check("basic view has Round s", "Round s" in cols, cols)
+    check("basic view hides Zone", "Zone" not in cols, cols)
+    check(
+        "round_sec value is the kill time in the round",
+        len(du.value) == 25 and (du.value["Round s"].round(2) == 25.16).all(),
+        du.value["Round s"].head(3).tolist(),
+    )
+    act(
+        at,
+        "duels: all columns",
+        lambda: at.toggle(key="du_full").set_value(True).run(),
+    )
+    du = widget(at, "dataframe", "du_table")
+    check(
+        "full view shows Zone with values",
+        "Zone" in list(du.value.columns) and (du.value["Zone"] == "BombsiteA").all(),
+        du.value["Zone"].unique().tolist(),
+    )
+
+    # the by-zone table: Alpha = 25 kills from BombsiteA, 0 deaths
+    ztabs = [d.value for d in at.dataframe if "K-D" in list(d.value.columns)]
+    check("zone table rendered", len(ztabs) == 1, [list(v.columns) for v in ztabs])
+    if ztabs:
+        z = ztabs[0]
+        check(
+            "zone table: BombsiteA 25/0 +25",
+            len(z) == 1
+            and z.iloc[0]["Zone"] == "BombsiteA"
+            and z.iloc[0]["Kills"] == 25
+            and z.iloc[0]["Deaths"] == 0
+            and z.iloc[0]["K-D"] == 25,
+            z.to_dict(),
+        )
+
+    # Charlie: his zone table flips to the victim zones (deaths in Middle),
+    # and every answer shot is damage-slowed -> the slowed verdict
+    act(
+        at,
+        "switch player (Charlie)",
+        lambda: at.selectbox(key="me").select(S3).run(),
+    )
+    ztabs = [d.value for d in at.dataframe if "K-D" in list(d.value.columns)]
+    if ztabs:
+        z = ztabs[0]
+        check(
+            "zone table (Charlie): Middle 0/25 -25",
+            len(z) == 1
+            and z.iloc[0]["Zone"] == "Middle"
+            and z.iloc[0]["Kills"] == 0
+            and z.iloc[0]["Deaths"] == 25
+            and z.iloc[0]["K-D"] == -25,
+            z.to_dict(),
+        )
+    goto(at, "shooting")
+    tips_txt = "\n".join(m.value for m in at.markdown)
+    check("slowed tip shown for Charlie", "slowed by recent damage" in tips_txt)
+    check(
+        "no flashed tip for Charlie (0 flashed shots)", "while flashed" not in tips_txt
+    )
+
+    # russian labels: the new tables/columns must hold the longer strings
+    goto(at, "duels")
+    act(
+        at,
+        "context tables in russian",
+        lambda: at.selectbox(key="lang").select("ru").run(),
+    )
+    check("ru: zone table renders", not at.exception, err_of(at))
+    ztabs = [
+        d.value
+        for d in at.dataframe
+        if list(d.value.columns) == ["Зона", "Килы", "Смерти", "К-С"]
+    ]
+    check("ru: zone table localized", len(ztabs) == 1, [list(v.columns) for v in ztabs])
+
+
 def run_real(path):
     """Run the real app on a real demo: every player x every preset."""
     print(f"== real demo: {path} ==")
@@ -913,6 +1043,7 @@ def main():
         scenario_quoted_path()
         scenario_bad_input()
         scenario_tables()
+        scenario_context()
         if arg == "--all":
             scenario_matrix()
     print(f"\n{PASS} passed, {FAIL} failed")
