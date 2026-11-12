@@ -382,6 +382,27 @@ try:
 except Exception as exc:  # noqa: BLE001
     bad("table: payload model builds", False, repr(exc))
 
+# ---- 10c. table grade: value colour quality 0 (worst) .. 1 (best)
+try:
+    from ui.table import Col, table_payload
+
+    def _scores(vals, **kw):
+        pl = table_payload({"v": vals}, [Col("v", "V", **kw)])
+        return [r["c"][0][4] for r in pl["rows"]]
+
+    bad("grade auto: best value is 1, worst 0", _scores([10, 20, 30], grade="auto") == [0.0, 0.5, 1.0], _scores([10, 20, 30], grade="auto"))
+    bad("grade auto: best=low flips the scale", _scores([10, 20, 30], grade="auto", best="low") == [1.0, 0.5, 0.0], "")
+    bad("grade auto: < 3 distinct values -> no colour", _scores([5, 5, 9], grade="auto") == [None, None, None], _scores([5, 5, 9], grade="auto"))
+    bad("grade (bad, good): order sets the direction", _scores([1.0], grade=(0.5, 1.5)) == [0.5] and _scores([0.5], grade=(1.5, 0.5)) == [1.0], "")
+    bad(
+        "grade (bad, ok, good): ok is the neutral colour",
+        _scores([0.7, 0.85, 1.0, 1.4, 9.0], grade=(0.7, 1.0, 1.4)) == [0.0, 0.3, 0.6, 1.0, 1.0],
+        _scores([0.7, 0.85, 1.0, 1.4, 9.0], grade=(0.7, 1.0, 1.4)),
+    )
+    bad("grade: none / empty cell -> no colour", _scores([None, 3.0], grade=(0, 6)) == [None, 0.5] and _scores([1.0, 2.0]) == [None, None], "")
+except Exception as exc:  # noqa: BLE001
+    bad("grade: model builds", False, repr(exc))
+
 # ---- 11. design system: WCAG AA contrast for body text, every theme
 # text-primary / text-secondary must pass AA (>= 4.5:1) on every surface
 # they are used on, and text-inverse on the accent chips, in every theme.

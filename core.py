@@ -2649,7 +2649,7 @@ def player_summary(
                 "sides": "→".join(demo.side_history(p.sid)),
                 "kills": kills,
                 "deaths": deaths,
-                "kd_ratio": round(kills / deaths, 2) if deaths else np.nan,
+                "kd_ratio": round(kills / max(1, deaths), 2),
                 "shots": len(sh),
                 "hits": len(hi),
                 "accuracy": round(len(hi) / len(sh) * 100, 1) if len(sh) else np.nan,

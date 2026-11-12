@@ -1062,7 +1062,7 @@ if page == "overview":
         if 0 <= i < len(ov_sids):
             st.session_state["me"] = ov_sids[i]
 
-    _pct_bad = {"tone": "warning", "best": "low"}
+    _pct_bad = {"tone": "context", "best": "low"}
     _ov_grid = {
         "player": Col(
             "player", ov_labels["player"], kind="text", sort="player_raw", sticky=True
@@ -1078,6 +1078,7 @@ if page == "overview":
             ov_labels["kdr"],
             fmt="{:.2f}",
             best="high",
+            grade=(0.7, 1.0, 1.4),
             help=t("col_kdr_help"),
         ),
         "kills": Col(
@@ -1101,35 +1102,83 @@ if page == "overview":
         ),
         "hits": Col("hits", ov_labels["hits"], fmt="{:.0f}", bar="rel", tone="context"),
         "accuracy": Col(
-            "accuracy", ov_labels["accuracy"], fmt="{:.1f}%", bar="pct", best="high"
+            "accuracy",
+            ov_labels["accuracy"],
+            fmt="{:.1f}%",
+            bar="pct",
+            tone="context",
+            best="high",
         ),
         "hs_hits": Col(
-            "hs_hits", ov_labels["hs_hits"], fmt="{:.1f}%", bar="pct", best="high"
+            "hs_hits",
+            ov_labels["hs_hits"],
+            fmt="{:.1f}%",
+            bar="pct",
+            tone="context",
+            best="high",
         ),
         "hs_kills": Col(
-            "hs_kills", ov_labels["hs_kills"], fmt="{:.1f}%", bar="pct", best="high"
+            "hs_kills",
+            ov_labels["hs_kills"],
+            fmt="{:.1f}%",
+            bar="pct",
+            tone="context",
+            best="high",
         ),
         "moving": Col(
-            "moving", ov_labels["moving"], fmt="{:.1f}%", bar="pct", **_pct_bad
+            "moving",
+            ov_labels["moving"],
+            fmt="{:.1f}%",
+            bar="pct",
+            tone="context",
+            best="low",
         ),
-        "risky": Col("risky", ov_labels["risky"], fmt="{:.1f}%", bar="pct", **_pct_bad),
+        "risky": Col(
+            "risky",
+            ov_labels["risky"],
+            fmt="{:.1f}%",
+            bar="pct",
+            tone="context",
+            best="low",
+        ),
         "first_shot": Col(
-            "first_shot", ov_labels["first_shot"], fmt="{:.1f}%", bar="pct", best="high"
+            "first_shot",
+            ov_labels["first_shot"],
+            fmt="{:.1f}%",
+            bar="pct",
+            tone="context",
+            best="high",
         ),
         "first_acc": Col(
-            "first_acc", ov_labels["first_acc"], fmt="{:.1f}%", bar="pct", best="high"
+            "first_acc",
+            ov_labels["first_acc"],
+            fmt="{:.1f}%",
+            bar="pct",
+            tone="context",
+            best="high",
         ),
         "open_rate": Col(
             "open_rate",
             ov_labels["open_rate"],
             fmt="{:.1f}%",
             bar="pct",
+            tone="context",
             best="high",
             help=t("col_open_help"),
         ),
         "sides": Col("sides", ov_labels["sides"], kind="text"),
-        "aim_err": Col("aim_err", ov_labels["aim_err"], fmt="{:.1f}°", best="low"),
-        "duration": Col("duration", ov_labels["duration"], fmt="{:.2f} s", best="low"),
+        "aim_err": Col(
+            "aim_err",
+            ov_labels["aim_err"],
+            fmt="{:.1f}°",
+            best="low",
+        ),
+        "duration": Col(
+            "duration",
+            ov_labels["duration"],
+            fmt="{:.2f} s",
+            best="low",
+        ),
     }
     data_table(
         {**ov_cells, "player_raw": ov["player"].astype(str).to_numpy()},
@@ -1594,7 +1643,7 @@ elif page == "shooting":
             w_labels["accuracy"]: _pct_col(w_labels["accuracy"]),
             w_labels["first_acc"]: _pct_col(w_labels["first_acc"]),
         }
-        _w_pct = {"bar": "pct", "fmt": "{:.1f}%"}
+        _w_pct = {"bar": "pct", "tone": "context", "fmt": "{:.1f}%"}
         data_table(
             {k: w[lbl].to_numpy() for k, lbl in w_labels.items()},
             [
@@ -1609,8 +1658,8 @@ elif page == "shooting":
                     best="low",
                 ),
                 Col("median_dist", w_labels["median_dist"], fmt="{:.0f} u"),
-                Col("moving", w_labels["moving"], tone="warning", best="low", **_w_pct),
-                Col("risky", w_labels["risky"], tone="warning", best="low", **_w_pct),
+                Col("moving", w_labels["moving"], best="low", **_w_pct),
+                Col("risky", w_labels["risky"], best="low", **_w_pct),
                 Col("hits", w_labels["hits"], fmt="{:.0f}", bar="rel", tone="context"),
                 Col("hs", w_labels["hs"], best="high", **_w_pct),
                 Col("accuracy", w_labels["accuracy"], best="high", **_w_pct),
@@ -1782,7 +1831,7 @@ elif page == "duels":
                 "opponent", du_labels["opponent"], kind="text", sticky=True
             ),
             "weapon": Col("weapon", du_labels["weapon"], kind="text"),
-            "hs": Col("hs", du_labels["hs"], kind="text", sort="hs_raw", left=False),
+            "hs": Col("hs", du_labels["hs"], kind="text", sort="hs_raw"),
             "distance": Col("distance", du_labels["distance"], fmt="{:.0f} u"),
             "zone": Col(
                 "zone", du_labels["zone"], kind="text", help=t("col_zone_help")
@@ -1798,14 +1847,32 @@ elif page == "duels":
                     "simultaneous": "warning",
                 },
             ),
-            "aim_err": Col("aim_err", du_labels["aim_err"], fmt="{:.1f}°", best="low"),
+            "aim_err": Col(
+                "aim_err",
+                du_labels["aim_err"],
+                fmt="{:.1f}°",
+                best="low",
+            ),
             "my_shots": Col("my_shots", du_labels["my_shots"], fmt="{:.0f}"),
             "opp_shots": Col("opp_shots", du_labels["opp_shots"], fmt="{:.0f}"),
             "duration": Col(
-                "duration", du_labels["duration"], fmt="{:.2f} s", best="low"
+                "duration",
+                du_labels["duration"],
+                fmt="{:.2f} s",
+                best="low",
             ),
-            "speed": Col("speed", du_labels["speed"], fmt="{:.0f} u/s", best="low"),
-            "errhw": Col("errhw", du_labels["errhw"], fmt="{:.2f}", best="low"),
+            "speed": Col(
+                "speed",
+                du_labels["speed"],
+                fmt="{:.0f} u/s",
+                best="low",
+            ),
+            "errhw": Col(
+                "errhw",
+                du_labels["errhw"],
+                fmt="{:.2f}",
+                best="low",
+            ),
             "side": Col("side", du_labels["side"], kind="text"),
             "flags": Col("flags", du_labels["flags"], kind="text"),
             "tick": Col("tick", du_labels["tick"], fmt="{:.0f}", best="low"),

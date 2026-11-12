@@ -9,6 +9,9 @@ Universal data table: one component for every table in the app.
   the original order (Col.best = "high" | "low" decides what "best" means);
 - a row click calls on_click(row_index) before the next script run (same
   contract as the old st.dataframe on_select callbacks);
+- Col(grade=...) colours the value itself by quality, red -> text -> green,
+  from the tier tokens ("auto" = position inside the column, or fixed
+  thresholds); one mechanism for every column;
 - colours are CSS variables from theme/ (var(--accent) ...), never literals.
 
 Python builds the cell model (raw value, display text, bar fraction, tone);
@@ -39,7 +42,14 @@ class Col:
     sort: str | None = None  # rows[sort] -> raw value used for sorting
     tones: Mapping[str, str] | None = None  # badge colour by raw/display text
     sticky: bool = False
-    left: bool | None = None  # force left alignment (default: text -> left)
+    # colour of the VALUE by quality, from tier tokens (bad -> poor -> mid -> text -> good -> elite):
+    #   None                  no colouring
+    #   "auto"                position inside this column (best value = greenest);
+    #                         "best" decides the direction, needs >= 3 distinct values
+    #   (bad, good)           linear between two fixed values; their order sets the direction
+    #   (bad, ok, good)       like above, but `ok` is the neutral text colour:
+    #                         below it the colour slides to red, above it to green
+    grade: str | tuple[float, ...] | None = None
 
 
 def _num(v: Any) -> float | None:
@@ -55,6 +65,31 @@ def _fmt(spec: str, x: float) -> str:
         return spec.format(x)
     except (ValueError, TypeError):
         return spec.format(int(round(x)))
+
+
+_AUTO_MIN_VALUES = 3
+
+
+def _score(
+    x: float | None, grade, lo: float | None, hi: float | None, best: str | None
+):
+    """Quality 0.0 (worst colour) .. 1.0 (best colour); None = do not colour."""
+    if x is None or grade is None:
+        return None
+    if grade == "auto":
+        if lo is None or hi is None or hi <= lo:
+            return None
+        s = (x - lo) / (hi - lo)
+        return round(min(1.0, max(0.0, 1.0 - s if best == "low" else s)), 3)
+    bad, good = grade[0], grade[-1]
+    if bad == good:
+        return None
+    p = (x - bad) / (good - bad)  # progress along bad -> good
+    if len(grade) == 3:
+        po = (grade[1] - bad) / (good - bad)  # where "ok" sits on that line
+        if 0.0 < po < 1.0:
+            p = 0.6 * p / po if p <= po else 0.6 + 0.4 * (p - po) / (1.0 - po)
+    return round(min(1.0, max(0.0, p)), 3)
 
 
 def table_payload(
@@ -74,6 +109,13 @@ def table_payload(
         if c.bar == "rel":
             vals = [_num(v) for v in rows[c.key]]
             col_max[c.key] = max([v for v in vals if v is not None] or [0.0])
+    col_rng: dict[str, tuple[float | None, float | None]] = {}
+    for c in cols:
+        if c.grade == "auto" and c.kind == "num":
+            vals = sorted({v for v in (_num(v) for v in rows[c.key]) if v is not None})
+            col_rng[c.key] = (
+                (vals[0], vals[-1]) if len(vals) >= _AUTO_MIN_VALUES else (None, None)
+            )
     out_cols = []
     for c in cols:
         numeric = c.kind == "num"
@@ -83,7 +125,6 @@ def table_payload(
                 "k": c.key,
                 "l": c.label,
                 "t": c.kind,
-                "a": "l" if (c.left if c.left is not None else not numeric) else "r",
                 "b": bool(c.bar),
                 "tn": c.tone if c.tone in _TONES else "accent",
                 "h": c.help or "",
@@ -105,7 +146,10 @@ def table_payload(
                 elif x is not None and c.bar == "rel" and col_max.get(c.key, 0) > 0:
                     frac = min(1.0, max(0.0, x / col_max[c.key]))
                 tone = None
+                lo, hi = col_rng.get(c.key, (None, None))
+                score = _score(x, c.grade, lo, hi, c.best)
             else:
+                score = None
                 disp = "" if src is None else str(src)
                 srt = rows[c.sort][i] if c.sort else src
                 raw = (
@@ -117,7 +161,7 @@ def table_payload(
                 tone = None
                 if c.tones:
                     tone = c.tones.get(str(srt)) or c.tones.get(disp)
-            cells.append([raw, disp, frac, tone])
+            cells.append([raw, disp, frac, tone, score])
         s = stripe[i] if stripe is not None else None
         out_rows.append({"i": i, "s": s if s in _TONES else None, "c": cells})
     return {
@@ -278,6 +322,16 @@ export default function (component) {
     return n;
   };
   const firstDir = (c) => (c.f === "asc" ? 1 : -1);
+  // quality 0..1 -> colour: tier tokens, evenly spaced, mixed between neighbours
+  const STOPS = ["--tier-bad", "--tier-poor", "--tier-mid", "--text-primary", "--tier-good", "--tier-elite"];
+  const gradeColor = (q) => {
+    const pos = Math.min(Math.max(q, 0), 1) * (STOPS.length - 1);
+    const i = Math.min(Math.floor(pos), STOPS.length - 2);
+    const f = Math.round((pos - i) * 100);
+    return f === 0
+      ? "var(" + STOPS[i] + ")"
+      : "color-mix(in oklab, var(" + STOPS[i + 1] + ") " + f + "%, var(" + STOPS[i] + "))";
+  };
 
   function ordered() {
     const rows = data.rows.slice();
@@ -317,7 +371,7 @@ export default function (component) {
     const table = el("table", "aa-t");
     const trh = el("tr");
     data.cols.forEach((c, ci) => {
-      const th = el("th", [c.a === "l" ? "l" : "", c.b ? "bar" : "", c.s ? "stick" : ""].join(" ").trim());
+      const th = el("th", [c.b ? "bar" : "", c.s ? "stick" : ""].join(" ").trim());
       th.appendChild(el("span", "lbl", c.l));
       const active = S.col === ci;
       th.appendChild(el("span", "arrow", active && S.dir === 1 ? "\\u25B2" : "\\u25BC"));
@@ -347,7 +401,7 @@ export default function (component) {
       }
       r.c.forEach((cell, ci) => {
         const c = data.cols[ci];
-        const td = el("td", [c.a === "l" ? "l" : "", c.b ? "bar" : "", c.s ? "stick" : ""].join(" ").trim());
+        const td = el("td", [c.b ? "bar" : "", c.s ? "stick" : ""].join(" ").trim());
         const box = el("div", "cell tone-" + c.tn);
         if (cell[2] != null && cell[2] > 0.004) {
           const fill = el("div", "bar-fill");
@@ -357,7 +411,9 @@ export default function (component) {
         if (c.t === "badge" && cell[1] !== "") {
           box.appendChild(el("span", "badge" + (cell[3] ? " tone-" + cell[3] : ""), cell[1]));
         } else {
-          box.appendChild(el("span", "val", cell[1]));
+          const val = el("span", "val", cell[1]);
+          if (cell[4] != null) val.style.color = gradeColor(cell[4]);
+          box.appendChild(val);
         }
         td.appendChild(box);
         tr.appendChild(td);
