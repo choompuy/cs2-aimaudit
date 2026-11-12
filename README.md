@@ -17,6 +17,7 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 - **Shooting** — hit zones, speed at each shot, a speed-vs-distance scatter with the acceptable-speed curve, per-weapon stats.
 - **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded. Below: your duels by map zone and how every round started (opening duels, both teams).
 - **Impact** — per player: opening duels won/lost, trade kills, traded deaths, 2k–5k rounds, assists and flash assists.
+- **Map** — where the selected player killed and died, on the radar: your position (circle), the opponent's (open diamond) and a line between them; blue = kill, red = death; works with every filter, and two-level maps (Nuke, Vertigo) get an Upper / Lower switch. Needs the radar images once, see [Radar images](#radar-images-for-the-map-page).
 - **Timeline** — speed (with the moving threshold), yaw turn, pitch and held keys as coloured bars with a legend, around any duel, with the first shot and the death marked, cut at the moment of death (input recorded after death is a demo-parser artifact, not real play).
 - **Risk model** — a shot is _risky_ when your speed exceeded what is acceptable at that distance to the nearest living enemy: any speed point-blank, near-stationary at long range. Both distances are configurable.
 - **Data report** — built-in anomaly checks (impossible speeds, unresolved SteamIDs, missing positions…) plus a JSON export to attach to bug reports.
@@ -50,9 +51,19 @@ Requires Python 3.11+ (tested on 3.11–3.14) and a CS2 match demo (`.dem`).
 
 Then pick the file in the app.
 
+## Radar images for the Map page
+
+The Map page draws points on the real radar. The radar images are Valve's artwork and are not part of this repository, so fetch them once, on your own machine:
+
+```bash
+python tools/fetch_radars.py
+```
+
+This downloads the images and their calibration from the public [awpy-data](https://github.com/pnxenopoulos/awpy-data) release into `~/.cs2-aimaudit/radars` (about 3 MB). The app finds them there, or in an existing awpy cache (`~/.awpy`), or in the folder set by `AIMAUDIT_RADAR_DIR`. Without radar images the Map page still works: points are drawn on a plain grid in game units.
+
 ## Privacy
 
-All parsing and analysis happen inside the app on your machine. CS2-AimAudit makes no network requests, collects no telemetry and does not upload your demos anywhere. The bundled `.streamlit/config.toml` also disables Streamlit's own anonymous usage statistics (`gatherUsageStats = false`) — if you copy or replace that file, keep the setting.
+All parsing and analysis happen inside the app on your machine. CS2-AimAudit makes no network requests (the only exception is `tools/fetch_radars.py`, which you run yourself once to get radar images), collects no telemetry and does not upload your demos anywhere. The bundled `.streamlit/config.toml` also disables Streamlit's own anonymous usage statistics (`gatherUsageStats = false`) — if you copy or replace that file, keep the setting.
 
 ## Reading the numbers
 

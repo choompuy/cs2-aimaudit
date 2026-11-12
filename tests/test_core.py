@@ -2686,6 +2686,155 @@ check(
     == core.player_summary(_nr, _d_f, _s_f, 40.0)["kills"].sum(),
 )
 
+# ---- Map page: kill_points (positions of kills / deaths), radar calibration
+import json as _json
+import struct as _struct
+import tempfile as _tempfile
+import zlib as _zlib
+
+
+def _tiny_png(path, n):
+    """A valid n x n PNG without any imaging library."""
+    raw = b"".join(b"\x00" + b"\x20\x20\x30" * n for _ in range(n))
+
+    def chunk(tag, data):
+        c = _struct.pack(">I", len(data)) + tag + data
+        return c + _struct.pack(">I", _zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    with open(path, "wb") as fh:
+        fh.write(
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", _struct.pack(">IIBBBBB", n, n, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", _zlib.compress(raw))
+            + chunk(b"IEND", b"")
+        )
+
+
+check(
+    "kill_points: demo without positions -> empty frame with the columns",
+    core.kill_points(imp_demo, S4).empty
+    and list(core.kill_points(imp_demo, S4).columns) == core.KILL_POINT_COLS,
+)
+_mp = core.load_demo("impact.dem")
+_nd_ = len(_mp.deaths)
+_mp.deaths = _mp.deaths.assign(
+    **{
+        f"{who}_{ax}": [base + k * (i + 1) for i in range(_nd_)]
+        for who, base in (("attacker", 0.0), ("user", 30.0))
+        for ax, k in (("X", 100.0), ("Y", 50.0), ("Z", 0.0))
+    }
+)
+_kp = core.kill_points(_mp, S4)
+_sm = core.player_summary(_mp, _d_f, _s_f, 40.0).set_index("sid")
+check(
+    "kill_points: kills / deaths match the scoreboard numbers",
+    int((_kp["result"] == "kill").sum()) == int(_sm.loc[S4, "kills"])
+    and int((_kp["result"] == "death").sum()) == int(_sm.loc[S4, "deaths"])
+    and len(_kp) > 0,
+    (_kp["result"].value_counts().to_dict(), _sm.loc[S4, ["kills", "deaths"]].tolist()),
+)
+_kpt = core.kill_points(_mp, S4, core.Filters(side="T"))
+_smt = core.player_summary(_mp, _d_f, _s_f, 40.0, f=core.Filters(side="T")).set_index(
+    "sid"
+)
+check(
+    "kill_points: side filter matches the filtered K/D",
+    int((_kpt["result"] == "kill").sum()) == int(_smt.loc[S4, "kills"])
+    and int((_kpt["result"] == "death").sum()) == int(_smt.loc[S4, "deaths"]),
+)
+check(
+    "kill_points: round filter",
+    set(core.kill_points(_mp, S4, core.Filters(rounds=(1, 1)))["round"]) <= {1},
+)
+_r0 = _kp.iloc[0]
+check(
+    "kill_points: my / opponent position by role, distance from positions",
+    _r0["my_x"] != _r0["opp_x"]
+    and abs(
+        _r0["distance"]
+        - float(
+            np.sqrt(
+                (_r0["my_x"] - _r0["opp_x"]) ** 2
+                + (_r0["my_y"] - _r0["opp_y"]) ** 2
+                + (_r0["my_z"] - _r0["opp_z"]) ** 2
+            )
+        )
+    )
+    < 1e-6,
+)
+check(
+    "kill_points: distance filter",
+    (core.kill_points(_mp, S4, core.Filters(dist=(0.0, 1.0)))["distance"] <= 1.0).all(),
+)
+
+_rd = _tempfile.mkdtemp(prefix="cs2aa_radar_")
+os.makedirs(os.path.join(_rd, "radars"))
+_tiny_png(os.path.join(_rd, "radars", "de_t.png"), 16)
+_tiny_png(os.path.join(_rd, "radars", "de_l.png"), 16)
+_tiny_png(os.path.join(_rd, "radars", "de_l_lower.png"), 16)
+_tiny_png(os.path.join(_rd, "radars", "de_nopng_meta.png"), 16)
+with open(os.path.join(_rd, "map_data.json"), "w", encoding="utf-8") as fh:
+    _json.dump(
+        {
+            "de_t": {"pos_x": -100.0, "pos_y": 200.0, "scale": 2.0},
+            "de_l": {
+                "pos_x": 0.0,
+                "pos_y": 0.0,
+                "scale": 4.0,
+                "verticalsections": {
+                    "default": {"AltitudeMax": "10000", "AltitudeMin": "-495"},
+                    "lower": {"AltitudeMax": "-495", "AltitudeMin": "-10000"},
+                },
+            },
+            "de_badscale": {"pos_x": 0, "pos_y": 0, "scale": 0},
+            "de_noimage": {"pos_x": 0, "pos_y": 0, "scale": 1},
+        },
+        fh,
+    )
+_old_env = os.environ.get("AIMAUDIT_RADAR_DIR")
+os.environ["AIMAUDIT_RADAR_DIR"] = _rd
+try:
+    _rt = core.load_radar("de_t")
+    check(
+        "radar: calibration + image size read",
+        _rt is not None
+        and _rt["size"] == 16
+        and _rt["pos_x"] == -100.0
+        and _rt["scale"] == 2.0
+        and _rt["lower"] is None,
+    )
+    _px, _py = core.world_to_radar(0.0, 0.0, _rt)
+    check(
+        "radar: world -> pixel (scaled to the image size, y flipped)",
+        abs(_px - 100 / 2 * 16 / 1024) < 1e-9 and abs(_py - 200 / 2 * 16 / 1024) < 1e-9,
+        (_px, _py),
+    )
+    _rl = core.load_radar("de_l")
+    check(
+        "radar: lower level needs its image and the altitude range",
+        _rl is not None
+        and _rl["lower"] == (-10000.0, -495.0)
+        and _rl["lower_png"].endswith("de_l_lower.png"),
+    )
+    check(
+        "radar: on_lower_level by altitude",
+        core.on_lower_level([-600.0, -495.0, 100.0], _rl).tolist()
+        == [True, False, False]
+        and not core.on_lower_level([-600.0], _rt).any(),
+    )
+    check(
+        "radar: unknown map / bad scale / missing image -> None",
+        core.load_radar("de_unknown") is None
+        and core.load_radar("de_badscale") is None
+        and core.load_radar("de_noimage") is None
+        and core.load_radar("") is None,
+    )
+finally:
+    if _old_env is None:
+        os.environ.pop("AIMAUDIT_RADAR_DIR", None)
+    else:
+        os.environ["AIMAUDIT_RADAR_DIR"] = _old_env
+
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":
     sys.exit(1 if FAIL else 0)

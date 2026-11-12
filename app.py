@@ -20,6 +20,7 @@ from plotly.subplots import make_subplots
 
 import core
 import i18n
+import mapview
 import theme
 from ui.table import Col, data_table
 
@@ -883,7 +884,7 @@ def num(v, nd: int = 1) -> str:
 # renders only the active page: widget changes on one page stop
 # recomputing the others, and code can switch pages (a Duels row click
 # opens that duel in the Timeline).
-PAGES = ("overview", "shooting", "duels", "timeline", "guide")
+PAGES = ("overview", "shooting", "duels", "map", "timeline", "guide")
 if st.session_state.get("page") not in PAGES:
     st.session_state["page"] = "overview"
 page = (
@@ -2395,6 +2396,96 @@ def _timeline_fragment():
             st.plotly_chart(fig, width="stretch")
             st.caption(t("tl_howto"))
 
+
+# ------------------------------------------------------------------- map
+@st.fragment
+def _map_fragment():
+    """Where the selected player killed and died, on the radar (Map page)."""
+    _ctx_bar()
+    st.subheader(t("map_title"))
+    has_pos = {"attacker_X", "attacker_Y", "user_X", "user_Y"} <= set(
+        demo.deaths.columns
+    )
+    if not has_pos:
+        st.info(t("map_no_pos"))
+        return
+    pts = core.kill_points(demo, me, filters)
+    if not len(pts):
+        st.info(t("map_none"))
+        return
+    map_name = str(demo.header.get("map_name") or "")
+    radar = core.load_radar(map_name)
+
+    st.session_state.setdefault("map_show", "both")
+    c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
+    show = (
+        c1.segmented_control(
+            t("map_show"),
+            ["both", "kills", "deaths"],
+            format_func=lambda v: t(f"map_show_{v}"),
+            key="map_show",
+        )
+        or "both"
+    )
+    lines = c2.toggle(t("map_lines"), value=True, key="map_lines")
+    level = "upper"
+    if radar and radar.get("lower"):
+        st.session_state.setdefault("map_level", "upper")
+        level = (
+            st.segmented_control(
+                t("map_level"),
+                ["upper", "lower"],
+                format_func=lambda v: t(f"map_level_{v}"),
+                key="map_level",
+            )
+            or "upper"
+        )
+
+    def _hover(r) -> str:
+        return t(
+            "map_hover_kill" if r["result"] == "kill" else "map_hover_death",
+            rd=int(r["round"]),
+            opp=name_of.get(r["opponent"], r["opponent"]),
+            weapon=str(r["weapon"]),
+            dist=num(r["distance"], 0),
+            hs=t("map_hover_hs") if r["headshot"] else "",
+        )
+
+    pts = pts.assign(hover=[_hover(r) for _, r in pts.iterrows()])
+    fig = mapview.build_figure(
+        pts,
+        radar,
+        show=show,
+        lines=lines,
+        level=level,
+        labels={
+            "my_kill": t("map_leg_my_kill"),
+            "victim": t("map_leg_victim"),
+            "my_death": t("map_leg_my_death"),
+            "killer": t("map_leg_killer"),
+        },
+        colors={
+            "kill": PAL["good"],
+            "death": PAL["bad"],
+            "outline": theme.tok("bg-app"),
+        },
+    )
+    style_figure(fig, height=640, margin=dict(t=48, r=10, l=10, b=10), legend_y=1.08)
+    st.plotly_chart(fig, width="stretch")
+    st.caption(
+        t(
+            "map_count",
+            k=int((pts["result"] == "kill").sum()),
+            d=int((pts["result"] == "death").sum()),
+        )
+    )
+    if radar is None:
+        st.info(t("map_no_radar", map=map_name or "?"))
+    st.caption(t("map_howto"))
+
+
+if page == "map":
+    _map_fragment()
 
 if page == "timeline":
     _timeline_fragment()

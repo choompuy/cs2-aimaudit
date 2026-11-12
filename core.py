@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 import tempfile
 import zipfile
@@ -1249,6 +1250,14 @@ def load_demo(path: str, progress=None) -> Demo:
     # fields - fall back step by step; the columns then simply stay absent
     # and every consumer treats them as missing data, never as false.
     for kw in (
+        # first choice also asks for the position (X/Y/Z) of both players
+        # at every event: the Map page draws kills / deaths from it. Old
+        # parsers that reject it fall through to the next step, the
+        # columns stay absent and the page says so instead of guessing.
+        {
+            "player": ["last_place_name", "X", "Y", "Z"],
+            "other": _other + ["game_time", "round_start_time"],
+        },
         {
             "player": ["last_place_name"],
             "other": _other + ["game_time", "round_start_time"],
@@ -2149,6 +2158,205 @@ def _enemy_kill_rows(demo: Demo) -> pd.DataFrame:
         else 0
     )
     return out.sort_values("tick").reset_index(drop=True)
+
+
+# ------------------------------------------------------------ radar map
+RADAR_SIZE = 1024  # awpy-data radars are square; calibration is for this size
+
+
+def radar_roots() -> list[str]:
+    """
+    Folders that may hold radar data (a map_data.json plus the images, in
+    `<root>/radars/` or `<root>` itself), best first: $AIMAUDIT_RADAR_DIR,
+    ~/.cs2-aimaudit/radars (written by tools/fetch_radars.py) and the
+    newest awpy cache ($AWPY_DATA_DIR or ~/.awpy, one folder per version).
+    The app itself never downloads anything.
+    """
+    roots: list[str] = []
+    env = os.environ.get("AIMAUDIT_RADAR_DIR")
+    if env:
+        roots.append(os.path.expanduser(env))
+    roots.append(os.path.join(os.path.expanduser("~"), ".cs2-aimaudit", "radars"))
+    awpy = os.environ.get("AWPY_DATA_DIR") or os.path.join(
+        os.path.expanduser("~"), ".awpy"
+    )
+    try:
+        vers = sorted(
+            (d for d in os.listdir(awpy) if d.isdigit()), key=int, reverse=True
+        )
+    except OSError:
+        vers = []
+    roots += [os.path.join(awpy, v) for v in vers]
+    return roots
+
+
+def _png_size(path: str) -> int | None:
+    """Side length of a square PNG from its header, None when unreadable."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(24)
+    except OSError:
+        return None
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    w, h = struct.unpack(">II", head[16:24])
+    return int(w) if w == h and w > 0 else None
+
+
+def load_radar(map_name: str) -> dict | None:
+    """
+    Radar of a map: {"png", "lower_png", "size", "pos_x", "pos_y", "scale",
+    "lower": (z_min, z_max) | None}, or None when no root has both the
+    calibration (map_data.json) and the image. `lower` is the altitude
+    range of the lower level of a two-level map (Nuke, Vertigo) and is
+    only set when its image exists as well.
+    """
+    if not map_name:
+        return None
+    for root in radar_roots():
+        try:
+            with open(os.path.join(root, "map_data.json"), encoding="utf-8") as fh:
+                meta = json.load(fh).get(map_name)
+        except (OSError, ValueError, AttributeError):
+            continue
+        if not isinstance(meta, dict):
+            continue
+        try:
+            pos_x, pos_y = float(meta["pos_x"]), float(meta["pos_y"])
+            scale = float(meta["scale"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not scale > 0:
+            continue
+
+        def _img(name):
+            for sub in ("radars", ""):
+                q = os.path.join(root, sub, f"{name}.png")
+                if os.path.isfile(q):
+                    return q
+            return None
+
+        png = _img(map_name)
+        if not png:
+            continue
+        lower_png, lower = _img(f"{map_name}_lower"), None
+        sec = (meta.get("verticalsections") or {}).get("lower")
+        if lower_png and isinstance(sec, dict):
+            try:
+                lower = (float(sec["AltitudeMin"]), float(sec["AltitudeMax"]))
+            except (KeyError, TypeError, ValueError):
+                lower = None
+        return {
+            "png": png,
+            "lower_png": lower_png if lower else None,
+            "size": _png_size(png) or RADAR_SIZE,
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "scale": scale,
+            "lower": lower,
+        }
+    return None
+
+
+def world_to_radar(x, y, radar: dict):
+    """World (X, Y) -> pixel (px, py) of the radar image, y down. Vectorised."""
+    k = radar["size"] / RADAR_SIZE
+    px = (np.asarray(x, dtype=float) - radar["pos_x"]) / radar["scale"] * k
+    py = (radar["pos_y"] - np.asarray(y, dtype=float)) / radar["scale"] * k
+    return px, py
+
+
+def on_lower_level(z, radar: dict):
+    """Boolean array: altitude is on the lower level of a two-level map."""
+    z = np.asarray(z, dtype=float)
+    if not radar or not radar.get("lower"):
+        return np.zeros(z.shape, dtype=bool)
+    lo, hi = radar["lower"]
+    return (z >= lo) & (z < hi)
+
+
+KILL_POINT_COLS = [
+    "round",
+    "tick",
+    "result",
+    "opponent",
+    "weapon",
+    "headshot",
+    "distance",
+    "my_side",
+    "my_x",
+    "my_y",
+    "my_z",
+    "opp_x",
+    "opp_y",
+    "opp_z",
+]
+
+
+def kill_points(demo: Demo, me: str, f: "Filters | None" = None) -> pd.DataFrame:
+    """
+    Every enemy kill and death of player `me` (any weapon, like the K/D)
+    with both positions, for the Map page. `result` is "kill" or "death",
+    `my_*` is where `me` stood, `opp_*` where the opponent stood;
+    `distance` is computed from the two positions (game units, the same
+    scale as the shot distances). The global filter applies as everywhere:
+    round range, side (me in that round), weapon / class, distance.
+    Rows without the player's own position are dropped, a missing opponent
+    position stays NaN. Empty frame (with the columns) when the demo's
+    kill events carry no positions.
+    """
+    empty = pd.DataFrame(columns=KILL_POINT_COLS)
+    de = _enemy_kill_rows(demo)
+    need = {f"{who}_{ax}" for who in ("attacker", "user") for ax in ("X", "Y")}
+    if not len(de) or not need <= set(de.columns):
+        return empty
+    de = de[(de["attacker_steamid"] == me) | (de["user_steamid"] == me)]
+    if not len(de):
+        return empty
+
+    def _num(row, name):
+        v = pd.to_numeric(getattr(row, name, np.nan), errors="coerce")
+        return float(v) if pd.notna(v) else np.nan
+
+    rows = []
+    for r in de.itertuples():
+        killed = r.attacker_steamid == me
+        mine, theirs = ("attacker", "user") if killed else ("user", "attacker")
+        mx, my = _num(r, f"{mine}_X"), _num(r, f"{mine}_Y")
+        if np.isnan(mx) or np.isnan(my):
+            continue
+        mz, ox = _num(r, f"{mine}_Z"), _num(r, f"{theirs}_X")
+        oy, oz = _num(r, f"{theirs}_Y"), _num(r, f"{theirs}_Z")
+        rd = _safe_int(getattr(r, "round_idx", 0)) + 1
+        dist = (
+            float(
+                np.sqrt((mx - ox) ** 2 + (my - oy) ** 2 + np.nan_to_num(mz - oz) ** 2)
+            )
+            if not (np.isnan(ox) or np.isnan(oy))
+            else np.nan
+        )
+        rows.append(
+            {
+                "round": rd,
+                "tick": int(r.tick),
+                "result": "kill" if killed else "death",
+                "opponent": r.user_steamid if killed else r.attacker_steamid,
+                "weapon": norm_weapon(r.weapon) if hasattr(r, "weapon") else NA,
+                "headshot": bool(getattr(r, "headshot", False)),
+                "distance": dist,
+                "my_side": demo.side_at(rd, me),
+                "my_x": mx,
+                "my_y": my,
+                "my_z": mz,
+                "opp_x": ox,
+                "opp_y": oy,
+                "opp_z": oz,
+            }
+        )
+    out = pd.DataFrame(rows, columns=KILL_POINT_COLS)
+    if f is not None and not f.empty() and len(out):
+        _, out, _ = apply_filters(pd.DataFrame(), out, None, f)
+    return out.reset_index(drop=True)
 
 
 def _round_side_keep(demo: Demo, f: "Filters | None"):

@@ -1413,6 +1413,82 @@ def run_real(path):
         )
 
 
+def scenario_map():
+    """The Map page: friendly message without positions, a chart with them."""
+    print("== map page ==")
+    import struct
+    import zlib
+
+    at = open_demo(make_match([1, 2]), "map_nopos.dem")
+    goto(at, "map")
+    check(
+        "map: kill events without positions -> a friendly info",
+        any("demoparser2" in str(i.value) for i in at.info),
+        [str(i.value)[:50] for i in at.info],
+    )
+
+    d = make_match([1, 2])
+    de = d["events"]["player_death"]
+    for who, base in (("attacker", 0.0), ("user", 300.0)):
+        for ax, k in (("X", 100.0), ("Y", 50.0), ("Z", 0.0)):
+            de[f"{who}_{ax}"] = [base + k * (i + 1) for i in range(len(de))]
+    at = open_demo(d, "map_pos.dem")
+    goto(at, "map")
+    check(
+        "map: with positions and no radar -> chart + radar hint",
+        len(at.get("plotly_chart")) == 1
+        and any("fetch_radars" in str(i.value) for i in at.info),
+        ([str(i.value)[:50] for i in at.info], len(at.get("plotly_chart"))),
+    )
+    act(
+        at,
+        "map: show kills only",
+        lambda: at.session_state.__setitem__("map_show", "kills") or at.run(),
+    )
+    act(
+        at,
+        "map: show deaths only",
+        lambda: at.session_state.__setitem__("map_show", "deaths") or at.run(),
+    )
+    act(at, "map: lines off", lambda: at.toggle(key="map_lines").set_value(False).run())
+
+    # with a radar (a tiny valid PNG + calibration for the fake map name)
+    rd = tempfile.mkdtemp(prefix="cs2aa_smoke_radar_")
+    os.makedirs(os.path.join(rd, "radars"))
+    n = 8
+    raw = b"".join(b"\x00" + b"\x20\x20\x30" * n for _ in range(n))
+
+    def chunk(tag, data):
+        c = struct.pack(">I", len(data)) + tag + data
+        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    with open(os.path.join(rd, "radars", "de_smoke.png"), "wb") as fh:
+        fh.write(
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", n, n, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw))
+            + chunk(b"IEND", b"")
+        )
+    with open(os.path.join(rd, "map_data.json"), "w", encoding="utf-8") as fh:
+        json.dump({"de_smoke": {"pos_x": -500.0, "pos_y": 500.0, "scale": 1.0}}, fh)
+    old = os.environ.get("AIMAUDIT_RADAR_DIR")
+    os.environ["AIMAUDIT_RADAR_DIR"] = rd
+    try:
+        at = open_demo(d, "map_radar.dem")
+        goto(at, "map")
+        check(
+            "map: with a radar -> chart and no radar hint",
+            len(at.get("plotly_chart")) == 1
+            and not any("fetch_radars" in str(i.value) for i in at.info),
+            [str(i.value)[:50] for i in at.info],
+        )
+    finally:
+        if old is None:
+            os.environ.pop("AIMAUDIT_RADAR_DIR", None)
+        else:
+            os.environ["AIMAUDIT_RADAR_DIR"] = old
+
+
 def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if arg and arg not in ("--all", "--fast"):
@@ -1434,6 +1510,7 @@ def main():
         scenario_first_shots()
         scenario_impact()
         scenario_scoreboard()
+        scenario_map()
         if arg == "--all":
             scenario_matrix()
     print(f"\n{PASS} passed, {FAIL} failed")
