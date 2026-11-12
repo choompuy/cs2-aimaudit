@@ -842,7 +842,7 @@ elif "f" in st.query_params:
     del st.query_params["f"]
 
 summary = core.player_summary(
-    demo, duels_f, shots_f, thr, safe_dist, strict_dist, hurts=hurts_f
+    demo, duels_f, shots_f, thr, safe_dist, strict_dist, hurts=hurts_f, f=filters
 )
 
 my_duels = core.duels_for(duels_f, me) if len(duels_f) else pd.DataFrame()
@@ -851,10 +851,12 @@ my_duels = core.duels_for(duels_f, me) if len(duels_f) else pd.DataFrame()
 if res_sel and len(my_duels):
     my_duels = my_duels[my_duels["result"].isin(res_sel)]
 # round-impact layer (notes s.16): opening duels, trades, multi-kills,
-# assists - whole-match like the K/D in the summary; the only filter
-# that can apply is the round range (the openings table on the Duels page)
+# assists. Round structure, so like the K/D in the summary it follows the
+# Side and Rounds filters (a player's rounds on that side), not the
+# weapon / distance ones. The openings table on the Duels page is the
+# match context of both teams and stays unfiltered.
 openings = core.openings_table(demo)
-impact = core.impact_stats(demo)
+impact = core.impact_stats(demo, f=filters)
 status.update(label=t("loaded"), state="complete")
 
 
@@ -904,6 +906,8 @@ if page == "overview":
     _ctx_bar()
     st.subheader(t("ov_title"))
     st.caption(t("ov_caption"))
+    if filters.side or filters.rounds or filters.rounds_set:
+        st.caption(t("ov_scope_note"))
     _tcol, _ = st.columns([1, 2])
     with _tcol:
         ov_full = st.toggle(t("all_columns"), key="ov_full")
@@ -926,7 +930,7 @@ if page == "overview":
     ov_labels = {
         "player": t("col_player"),
         "team": t("col_team"),
-        "kd": t("col_kd"),
+        "kdr": t("col_kdr"),
         "kills": t("col_kills"),
         "deaths": t("col_deaths"),
         "shots": t("col_shots"),
@@ -948,7 +952,7 @@ if page == "overview":
             ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"])
         ],
         "team": ov["team"].to_numpy(),
-        "kd": [f"{k/d:.2f}" for k, d in zip(ov["kills"], ov["deaths"])],
+        "kdr": ov["kd_ratio"].to_numpy(),
         "kills": ov["kills"].to_numpy(),
         "deaths": ov["deaths"].to_numpy(),
         "shots": ov["shots"].to_numpy(),
@@ -970,8 +974,8 @@ if page == "overview":
             ov_labels["player"], pinned=True, width="medium"
         ),
         "team": st.column_config.TextColumn(ov_labels["team"], width="small"),
-        "kd": st.column_config.NumberColumn(
-            ov_labels["kd"], help=t("col_kd_help"), format="%.2f"
+        "kdr": st.column_config.NumberColumn(
+            ov_labels["kdr"], format="%.2f", help=t("col_kdr_help")
         ),
         "kills": st.column_config.NumberColumn(ov_labels["kills"], format="%d"),
         "deaths": st.column_config.NumberColumn(ov_labels["deaths"], format="%d"),
@@ -994,7 +998,7 @@ if page == "overview":
     _ov_basic = [
         "player",
         "team",
-        "kd",
+        "kdr",
         "kills",
         "deaths",
         "accuracy",
@@ -1005,7 +1009,7 @@ if page == "overview":
     _ov_all = [
         "player",
         "team",
-        "kd",
+        "kdr",
         "kills",
         "deaths",
         "shots",
@@ -1055,12 +1059,12 @@ if page == "overview":
             kind="badge",
             tones={"T": "warning", "CT": "info"},
         ),
-        "kd": Col(
-            "kd",
-            ov_labels["kd"],
+        "kdr": Col(
+            "kdr",
+            ov_labels["kdr"],
             fmt="{:.2f}",
             best="high",
-            help=t("col_kd_help"),
+            help=t("col_kdr_help"),
         ),
         "kills": Col(
             "kills",
@@ -1166,7 +1170,7 @@ elif page == "shooting":
     )
     risky_pct = sh_me.loc[known, "risky"].mean() * 100 if known.any() else np.nan
     fs = dd[dd["first"].isin(["me", "opponent"])] if len(dd) else dd
-    # round-impact row of the selected player (whole match, notes s.16)
+    # round-impact row of the selected player (follows Side / Rounds, notes s.16)
     imp_me = impact[impact["sid"] == me]
     imp_me = imp_me.iloc[0] if len(imp_me) else None
     first_pct = (fs["first"] == "me").mean() * 100 if len(fs) else np.nan
@@ -2078,13 +2082,44 @@ def _timeline_fragment():
                         st.caption(t("tl_dead_cut"))
                         death_x = (d_tick - tick) / demo.tickrate
             x = (tdf["tick"] - tick) / demo.tickrate
+            xs = x.to_numpy()
+            tick_dur = 1.0 / demo.tickrate
             speed = (
                 tdf["speed"]
                 if "speed" in tdf.columns
                 else pd.Series(np.nan, index=tdf.index)
             )
-            yaw = np.degrees(np.unwrap(np.radians(tdf["yaw"].astype(float))))
+            # Yaw is shown as the turn relative to the aim at the event
+            # moment: the absolute angle is an arbitrary map direction (and
+            # the unwrapped value drifts past +-180), the turn is what
+            # matters. Pitch stays absolute - 0 is the horizon.
+            yaw_abs = np.degrees(np.unwrap(np.radians(tdf["yaw"].astype(float))))
+            yaw = yaw_abs - yaw_abs[int(np.argmin(np.abs(xs)))]
             pitch = np.degrees(np.unwrap(np.radians(tdf["pitch"].astype(float))))
+
+            # one colour per ROLE, never reused across rows with another
+            # meaning: speed = you (accent), yaw / pitch = their own hues,
+            # dashed yellow = the moving threshold, keys by key group
+            c_speed, c_thr = PAL["you"], theme.tok("warning")
+            c_yaw, c_pitch = theme.tok("chart-4"), theme.tok("chart-3")
+            key_group = {
+                "FORWARD": "move",
+                "LEFT": "move",
+                "BACK": "move",
+                "RIGHT": "move",
+                "WALK": "stance",
+                "DUCK": "stance",
+                "JUMP": "stance",
+                "RIGHTCLICK": "weapon",
+                "FIRE": "weapon",
+                "RELOAD": "weapon",
+            }
+            group_style = {
+                "move": (theme.tok("tier.good"), t("tl_grp_move")),
+                "stance": (theme.tok("warning"), t("tl_grp_stance")),
+                "weapon": (PAL["you"], t("tl_grp_weapon")),
+            }
+
             rows_n = 4 if btn_cols else 3
             titles = [t("ch_speed"), t("ch_yaw"), t("ch_pitch")] + (
                 [t("ch_keys")] if btn_cols else []
@@ -2098,24 +2133,68 @@ def _timeline_fragment():
                 ),
                 subplot_titles=titles,
             )
-            # your signals in the accent colour ("you"), one per row
+            # the aim at the event moment (yaw) and the horizon (pitch):
+            # added BEFORE the traces so the data lines draw on top of them
+            fig.add_hline(y=0, line_color=theme.tok("chart-grid"), row=2, col=1)
+            fig.add_hline(
+                y=0,
+                line_color=theme.tok("chart-grid"),
+                annotation_text=t("tl_horizon"),
+                annotation_position="bottom left",
+                row=3,
+                col=1,
+            )
             fig.add_trace(
                 go.Scatter(
-                    x=x, y=speed, mode="lines", line=dict(color=PAL["you"], width=2)
+                    x=x,
+                    y=speed,
+                    mode="lines",
+                    name=t("ch_speed"),
+                    legendgroup="signals",
+                    line=dict(color=c_speed, width=2),
+                    hovertemplate="%{y:.0f} units/s<extra>"
+                    + t("ch_speed")
+                    + "</extra>",
+                ),
+                row=1,
+                col=1,
+            )
+            # the "moving" threshold: above it a shot counts as a moving shot
+            fig.add_trace(
+                go.Scatter(
+                    x=[float(xs.min()), float(xs.max())],
+                    y=[thr, thr],
+                    mode="lines",
+                    name=t("tl_thr_line", thr=num(thr, 0)),
+                    legendgroup="signals",
+                    line=dict(color=c_thr, width=1.5, dash="dash"),
+                    hoverinfo="skip",
                 ),
                 row=1,
                 col=1,
             )
             fig.add_trace(
                 go.Scatter(
-                    x=x, y=yaw, mode="lines", line=dict(color=PAL["you"], width=2)
+                    x=x,
+                    y=yaw,
+                    mode="lines",
+                    name=t("tl_leg_yaw"),
+                    legendgroup="signals",
+                    line=dict(color=c_yaw, width=2),
+                    hovertemplate="%{y:+.1f}°<extra>" + t("tl_leg_yaw") + "</extra>",
                 ),
                 row=2,
                 col=1,
             )
             fig.add_trace(
                 go.Scatter(
-                    x=x, y=pitch, mode="lines", line=dict(color=PAL["you"], width=2)
+                    x=x,
+                    y=pitch,
+                    mode="lines",
+                    name=t("tl_leg_pitch"),
+                    legendgroup="signals",
+                    line=dict(color=c_pitch, width=2),
+                    hovertemplate="%{y:.1f}°<extra>" + t("tl_leg_pitch") + "</extra>",
                 ),
                 row=3,
                 col=1,
@@ -2151,7 +2230,11 @@ def _timeline_fragment():
                         y=[p[1] for p in hit_pts],
                         mode="markers",
                         name=t("tl_mark_hits"),
-                        marker=dict(symbol="star", size=11, color=PAL["good"]),
+                        legendgroup="events",
+                        marker=dict(symbol="star", size=12, color=PAL["good"]),
+                        hovertemplate="%{y:.0f} units/s<extra>"
+                        + t("tl_mark_hits")
+                        + "</extra>",
                     ),
                     row=1,
                     col=1,
@@ -2163,66 +2246,154 @@ def _timeline_fragment():
                         y=[p[1] for p in fire_pts],
                         mode="markers",
                         name=t("tl_mark_shots"),
+                        legendgroup="events",
                         marker=dict(symbol="triangle-up", size=9, color=PAL["ctx"]),
+                        hovertemplate="%{y:.0f} units/s<extra>"
+                        + t("tl_mark_shots")
+                        + "</extra>",
                     ),
                     row=1,
                     col=1,
                 )
+            # keys: a bar for every stretch a key was held (a marker per
+            # tick looked like noise); colour = key group, named in the legend
             if btn_cols:
+                seen_groups: set[str] = set()
                 for k, b in enumerate(btn_cols):
                     on = (tdf[b].fillna(0) != 0).to_numpy()
+                    bx: list = []
+                    by: list = []
+                    i0 = None
+                    for j, flag in enumerate(on):
+                        if flag and i0 is None:
+                            i0 = j
+                        if i0 is not None and (not flag or j == len(on) - 1):
+                            j_end = j if flag else j - 1
+                            bx += [float(xs[i0]), float(xs[j_end]) + tick_dur, None]
+                            by += [k, k, None]
+                            i0 = None
+                    if not bx:
+                        continue
+                    grp = key_group.get(b, "stance")
+                    colour, grp_title = group_style[grp]
                     fig.add_trace(
                         go.Scatter(
-                            x=x.to_numpy()[on],
-                            y=[k] * int(on.sum()),
-                            mode="markers",
-                            marker=dict(symbol="square", size=6),
+                            x=bx,
+                            y=by,
+                            mode="lines",
+                            name=t(f"k_{b}"),
+                            legendgroup=grp,
+                            legendgrouptitle_text=(
+                                grp_title if grp not in seen_groups else None
+                            ),
+                            line=dict(color=colour, width=11),
+                            connectgaps=False,
+                            hoverinfo="skip",
                         ),
                         row=4,
                         col=1,
                     )
+                    seen_groups.add(grp)
                 fig.update_yaxes(
                     tickmode="array",
                     tickvals=list(range(len(btn_cols))),
                     ticktext=[t(f"k_{b}") for b in btn_cols],
+                    range=[len(btn_cols) - 0.5, -0.5],  # W on top
                     row=4,
                     col=1,
                 )
+            # reference lines: the event, the first shot, the death
+            first_x = None
+            if pd.notna(r["my_first_tick"]):
+                fx = (int(r["my_first_tick"]) - tick) / demo.tickrate
+                if float(xs.min()) <= fx <= float(xs.max()):
+                    first_x = fx
+            # x = 0 is the duel event - we know if it was your kill or
+            # your death, so name it exactly instead of "kill/death"
+            ev_text = fmt_result(r["result"])
             for row_i in range(1, rows_n + 1):
-                if row_i == 1:
+                # annotation kwargs only on the top row: passing
+                # annotation_position with no text still creates an
+                # (empty) annotation on every other subplot
+                top_ann = (
+                    {"annotation_text": ev_text, "annotation_position": "top right"}
+                    if row_i == 1
+                    else {}
+                )
+                fig.add_vline(
+                    x=0,
+                    line_dash="dash",
+                    line_color=PAL["ctx"],
+                    row=row_i,
+                    col=1,
+                    **top_ann,
+                )
+                if first_x is not None:
                     fig.add_vline(
-                        x=0,
-                        line_dash="dash",
-                        line_color=PAL["ctx"],
-                        annotation_text=t("ch_event"),
+                        x=first_x,
+                        line_dash="dot",
+                        line_color=c_thr,
+                        row=row_i,
+                        col=1,
+                        **(
+                            {
+                                "annotation_text": t("tl_first_shot"),
+                                "annotation_position": "top left",
+                            }
+                            if row_i == 1
+                            else {}
+                        ),
+                    )
+            # the death moment named on the chart (vermillion = bad); when
+            # it lands on the event tick the lines would overlap - for a
+            # death duel the event line already says "death", for a kill
+            # duel (a simultaneous trade) label the shared line with both
+            if death_x is not None:
+                if abs(death_x) > tick_dur:
+                    fig.add_vline(
+                        x=death_x,
+                        line_color=PAL["bad"],
+                        annotation_text=t("tl_death"),
+                        annotation_position="bottom right",
                         row=1,
                         col=1,
                     )
-                else:
-                    fig.add_vline(
-                        x=0,
-                        line_dash="dash",
-                        line_color=PAL["ctx"],
-                        row=row_i,
+                elif r["result"] != "death":
+                    fig.add_annotation(
+                        text=t("tl_death"),
+                        x=0.0,
+                        xanchor="left",
+                        yanchor="bottom",
+                        y=0,
+                        yref="y domain",
+                        showarrow=False,
+                        row=1,
                         col=1,
                     )
-            # the death moment named on the chart (vermillion = bad)
-            if death_x is not None:
-                fig.add_vline(
-                    x=death_x,
-                    line_color=PAL["bad"],
-                    annotation_text=t("tl_death"),
-                    row=1,
-                    col=1,
-                )
+            # units on every axis - a bare number was the whole complaint
+            fig.update_yaxes(title_text=t("tl_ax_speed"), row=1, col=1)
+            fig.update_yaxes(title_text=t("tl_ax_yaw"), row=2, col=1)
+            fig.update_yaxes(title_text=t("tl_ax_pitch"), row=3, col=1)
             fig.update_xaxes(title_text=t("ch_x"), row=rows_n, col=1)
-            # shared look (palette, font, legend, margins); the height
-            # stays 760 — four stacked rows need it
-            style_figure(fig, height=760, margin=dict(t=60, r=10), legend_y=1.06)
-            # one shared vertical cursor per row
-            fig.update_layout(hovermode="x unified")
-            fig.update_layout(showlegend=bool(fire_pts or hit_pts))
+            # shared look (palette, font, margins); the height stays 760 -
+            # four stacked rows need it. The legend sits on the right and is
+            # always on: it names the lines, markers and key groups.
+            style_figure(fig, height=760, margin=dict(t=60, r=10))
+            fig.update_layout(
+                hovermode="x unified",
+                showlegend=True,
+                legend=dict(
+                    orientation="v",
+                    x=1.01,
+                    xanchor="left",
+                    y=1,
+                    yanchor="top",
+                    groupclick="toggleitem",
+                    font=dict(size=12),
+                ),
+            )
             st.plotly_chart(fig, width="stretch")
+            st.caption(t("tl_howto"))
 
 
 if page == "timeline":

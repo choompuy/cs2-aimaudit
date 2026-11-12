@@ -2609,6 +2609,83 @@ check(
 summ_nd = core.player_summary(nd, core.build_duels(nd), core.shots_table(nd), 40.0)
 check("no deaths: summary open_rate NA", summ_nd["open_rate"].isna().all())
 
+# ---- K/D, openings and impact follow the Side / Rounds filter (not the
+# weapon / distance ones); the sides of one filter partition the match
+_d_f, _s_f = core.build_duels(imp_demo), core.shots_table(imp_demo)
+
+
+def _summ(**kw):
+    flt = core.Filters(**kw) if kw else None
+    return (
+        core.player_summary(imp_demo, _d_f, _s_f, 40.0, f=flt)
+        .set_index("sid")
+        .sort_index()
+    )
+
+
+_all, _t, _ct = _summ(), _summ(side="T"), _summ(side="CT")
+check(
+    "filter: sides partition kills and deaths",
+    (_t["kills"] + _ct["kills"]).eq(_all["kills"]).all()
+    and (_t["deaths"] + _ct["deaths"]).eq(_all["deaths"]).all(),
+)
+check(
+    "filter: side really changes K/D for someone",
+    (_t["kills"] != _ct["kills"]).any() or (_t["deaths"] != _ct["deaths"]).any(),
+)
+_r12, _r34 = _summ(rounds=(1, 2)), _summ(rounds=(3, 4))
+check(
+    "filter: round ranges partition kills and deaths",
+    (_r12["kills"] + _r34["kills"]).eq(_all["kills"]).all()
+    and (_r12["deaths"] + _r34["deaths"]).eq(_all["deaths"]).all(),
+)
+check(
+    "filter: weapon / distance do not touch K/D",
+    _summ(weapons={"awp"}, dist=(0.0, 100.0))["kills"].eq(_all["kills"]).all(),
+)
+check(
+    "filter: kd_ratio = kills / deaths (NaN without deaths)",
+    all(
+        (
+            np.isnan(r.kd_ratio)
+            if r.deaths == 0
+            else r.kd_ratio == round(r.kills / r.deaths, 2)
+        )
+        for r in _all.itertuples()
+    ),
+)
+_i_all = core.impact_stats(imp_demo).set_index("sid")
+_i_t = core.impact_stats(imp_demo, f=core.Filters(side="T")).set_index("sid")
+_i_ct = core.impact_stats(imp_demo, f=core.Filters(side="CT")).set_index("sid")
+check(
+    "filter: impact sides partition openings, trades, multi-kills",
+    all(
+        (_i_t[c] + _i_ct[c]).eq(_i_all[c]).all()
+        for c in (
+            "open_attempts",
+            "open_wins",
+            "trade_kills",
+            "traded_deaths",
+            "deaths",
+            "k2",
+            "k3",
+        )
+    ),
+)
+check(
+    "filter: round range narrows the opening duels",
+    core.impact_stats(imp_demo, f=core.Filters(rounds=(1, 1)))["open_attempts"].sum()
+    == 2,
+)
+# a deaths frame without a round counter: the filter must not guess rounds
+_nr = core.load_demo("impact.dem")
+_nr.deaths = _nr.deaths.drop(columns=["total_rounds_played"], errors="ignore")
+check(
+    "filter: no round counter -> unfiltered numbers, no crash",
+    core.player_summary(_nr, _d_f, _s_f, 40.0, f=core.Filters(side="T"))["kills"].sum()
+    == core.player_summary(_nr, _d_f, _s_f, 40.0)["kills"].sum(),
+)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":
     sys.exit(1 if FAIL else 0)

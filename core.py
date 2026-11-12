@@ -2151,6 +2151,35 @@ def _enemy_kill_rows(demo: Demo) -> pd.DataFrame:
     return out.sort_values("tick").reset_index(drop=True)
 
 
+def _round_side_keep(demo: Demo, f: "Filters | None"):
+    """
+    keep(round_no, sid) -> bool for the round-structure metrics (K/D,
+    openings, trades, multi-kills, assists), or None when no filter applies.
+
+    Only the filters that mean something for a PLAYER in a ROUND are used:
+    the round range / pistol preset and the side the player had in that
+    round (Demo.side_at, so a halftime swap is handled per round). Weapon,
+    class and distance are shot-level filters and stay out of it. None is
+    also returned when the deaths carry no round counter - guessing rounds
+    would silently drop or keep the wrong kills.
+    """
+    if f is None or not (f.rounds or f.rounds_set or f.side):
+        return None
+    if "total_rounds_played" not in demo.deaths.columns:
+        return None
+
+    def keep(rd: int, sid) -> bool:
+        if f.rounds is not None and not (f.rounds[0] <= rd <= f.rounds[1]):
+            return False
+        if f.rounds_set and rd not in f.rounds_set:
+            return False
+        if f.side is not None and demo.side_at(rd, sid) != f.side:
+            return False
+        return True
+
+    return keep
+
+
 def openings_table(demo: Demo) -> pd.DataFrame:
     """
     The first enemy kill of every round - both teams, match context.
@@ -2192,7 +2221,9 @@ def openings_table(demo: Demo) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def impact_stats(demo: Demo, trade_s: float = TRADE_S) -> pd.DataFrame:
+def impact_stats(
+    demo: Demo, trade_s: float = TRADE_S, f: "Filters | None" = None
+) -> pd.DataFrame:
     """
     Per-player round-impact numbers, all from the enemy-kill deaths:
 
@@ -2207,10 +2238,16 @@ def impact_stats(demo: Demo, trade_s: float = TRADE_S) -> pd.DataFrame:
       `flash_assists` (the subset flagged assistedflash); NaN when the
       demo/parser has no assister column
 
-    Whole-match by design, like the K/D in player_summary: openings and
-    trades are round structure, not a per-shot metric the global filters
-    could meaningfully slice.
+    Round structure, not a per-shot metric: only the round range and the
+    side filter apply (`f`), through _round_side_keep - a player's numbers
+    then count only the rounds he played on that side. Weapon / distance
+    filters do not apply. Without a filter it is the whole match.
     """
+    keep = _round_side_keep(demo, f)
+
+    def _ok(round_idx, sid) -> bool:
+        return keep is None or keep(int(round_idx) + 1, sid)
+
     names = demo.names
     res = {
         sid: {
@@ -2239,19 +2276,19 @@ def impact_stats(demo: Demo, trade_s: float = TRADE_S) -> pd.DataFrame:
         for r in op.itertuples():
             k, v = r.attacker_steamid, r.user_steamid
             for sid in (k, v):
-                if sid in res:
+                if sid in res and _ok(r.round_idx, sid):
                     res[sid]["open_attempts"] += 1
-            if k in res:
+            if k in res and _ok(r.round_idx, k):
                 res[k]["open_wins"] += 1
         # ---- deaths + multi-kills (k2..k5: ROUNDS with exactly that
         # many enemy kills - one 3-kill round adds 1 to k3, not 3)
-        for sid, n in de.groupby("user_steamid").size().items():
-            if sid in res:
-                res[sid]["deaths"] = int(n)
+        for r in de.itertuples():
+            if r.user_steamid in res and _ok(r.round_idx, r.user_steamid):
+                res[r.user_steamid]["deaths"] += 1
         for (sid, _rd), n in (
             de.groupby(["attacker_steamid", "round_idx"]).size().items()
         ):
-            if sid in res and 2 <= int(n) <= 5:
+            if sid in res and 2 <= int(n) <= 5 and _ok(_rd, sid):
                 res[sid][f"k{int(n)}"] += 1
         # ---- trades: for each death, did a teammate kill its attacker
         # within the window (same round)? death_of maps (round, VICTIM) ->
@@ -2276,9 +2313,9 @@ def impact_stats(demo: Demo, trade_s: float = TRADE_S) -> pd.DataFrame:
                 continue
             if avenger == v or teams.get(avenger) != teams.get(v):
                 continue
-            if avenger in res:
+            if avenger in res and _ok(r.round_idx, avenger):
                 res[avenger]["trade_kills"] += 1
-            if v in res:
+            if v in res and _ok(r.round_idx, v):
                 res[v]["traded_deaths"] += 1
         # ---- assists
         if "assister_steamid" in de.columns:
@@ -2286,6 +2323,16 @@ def impact_stats(demo: Demo, trade_s: float = TRADE_S) -> pd.DataFrame:
                 res[sid]["assists"] = 0
                 res[sid]["flash_assists"] = 0
             ast = de[de["assister_steamid"].isin(names)]
+            if keep is not None and len(ast):
+                ast = ast[
+                    np.array(
+                        [
+                            _ok(ri, a)
+                            for ri, a in zip(ast["round_idx"], ast["assister_steamid"])
+                        ],
+                        dtype=bool,
+                    )
+                ]
             for sid, n in ast.groupby("assister_steamid").size().items():
                 res[sid]["assists"] = int(n)
             if "assistedflash" in de.columns:
@@ -2308,19 +2355,45 @@ def player_summary(
     safe: float = SAFE_DIST,
     strict: float = STRICT_DIST,
     hurts: pd.DataFrame | None = None,
+    f: "Filters | None" = None,
 ) -> pd.DataFrame:
+    """
+    One row per player. Shot / duel metrics come from the (already
+    filtered) frames. K/D, opening rate and the impact numbers are round
+    structure: with `f` they follow its round range and side (per round,
+    so a halftime swap is handled), not the weapon / distance filters.
+    """
     res = []
     dth = demo.deaths
     have_d = len(dth) and {"attacker_steamid", "user_steamid"} <= set(dth.columns)
     teams = demo.teams
     # opening-duel win rate (impact_stats, notes s.16): whole-match, like
     # the K/D below - it is round structure, not a filterable shot metric
-    open_rate = impact_stats(demo).set_index("sid")["open_rate"].to_dict()
+    open_rate = impact_stats(demo, f=f).set_index("sid")["open_rate"].to_dict()
+    keep = _round_side_keep(demo, f)
+    kills_by: dict = {}
+    deaths_by: dict = {}
+    if keep is not None:
+        de = _enemy_kill_rows(demo)
+        if len(de):
+            rd = (de["round_idx"] + 1).astype(int)
+            k_ok = np.array(
+                [keep(int(r), s) for r, s in zip(rd, de["attacker_steamid"])],
+                dtype=bool,
+            )
+            v_ok = np.array(
+                [keep(int(r), s) for r, s in zip(rd, de["user_steamid"])], dtype=bool
+            )
+            kills_by = de[k_ok].groupby("attacker_steamid").size().to_dict()
+            deaths_by = de[v_ok].groupby("user_steamid").size().to_dict()
     for p in demo.players.itertuples():
         sh = shots[shots["sid"] == p.sid]
         hi = _hurts_of(demo, p.sid, hurts)
         dd = duels_for(duels, p.sid) if len(duels) else pd.DataFrame()
-        if have_d:
+        if keep is not None and have_d:
+            kills = int(kills_by.get(p.sid, 0))
+            deaths = int(deaths_by.get(p.sid, 0))
+        elif have_d:
             # K/D like the in-game scoreboard: every ENEMY kill/death with
             # any weapon (knife and grenades included), whole match. Duels
             # above are gun-only, so the two must not be mixed silently.
@@ -2368,6 +2441,7 @@ def player_summary(
                 "sides": "→".join(demo.side_history(p.sid)),
                 "kills": kills,
                 "deaths": deaths,
+                "kd_ratio": round(kills / deaths, 2) if deaths else np.nan,
                 "shots": len(sh),
                 "hits": len(hi),
                 "accuracy": round(len(hi) / len(sh) * 100, 1) if len(sh) else np.nan,
