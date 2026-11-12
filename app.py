@@ -21,6 +21,7 @@ from plotly.subplots import make_subplots
 import core
 import i18n
 import theme
+from ui.table import Col, data_table
 
 st.set_page_config(
     page_title="CS2-AimAudit",
@@ -668,96 +669,103 @@ if not show_panel:
         st.session_state[_k] = st.session_state.get(_k, _d)
 
 if show_panel:
-    st.caption(t("flt_title"))
-    _seg = st.columns(
-        ([1.0] if has_sides else []) + [2.0, 1.6] + ([1.1] if show_result else [])
-    )
-    _c = 0
-    if has_sides:
-        with _seg[_c]:
+    with st.container(border=True, key="flt_card"):
+        st.caption(t("flt_title"))
+        # row 1: the round range gets the widest slot so its options never clip
+        _r1 = st.columns(
+            [3.9] + ([1.0] if has_sides else []) + ([1.4] if show_result else [])
+        )
+        _c = 0
+        with _r1[_c]:
             st.segmented_control(
-                t("flt_side"),
-                ["all", "T", "CT"],
-                format_func=lambda v: t("all") if v == "all" else v,
-                key="flt_side",
-                help=t("flt_side_help"),
+                t("flt_rounds"),
+                preset_opts,
+                format_func=_preset_label,
+                key="flt_preset",
+                on_change=_apply_preset,
+                help=t("flt_rounds_help"),
             )
         _c += 1
-    with _seg[_c]:
-        st.segmented_control(
-            t("flt_rounds"),
-            preset_opts,
-            format_func=_preset_label,
-            key="flt_preset",
-            on_change=_apply_preset,
-            help=t("flt_rounds_help"),
-        )
-    _c += 1
-    with _seg[_c]:
-        st.segmented_control(
-            t("flt_dist"),
-            list(DIST_KEYS),
-            format_func=_dist_label,
-            key="flt_dist",
-            help=t("flt_dist_help"),
-        )
-    _c += 1
-    if show_result:
-        with _seg[_c]:
+        if has_sides:
+            with _r1[_c]:
+                st.segmented_control(
+                    t("flt_side"),
+                    ["all", "T", "CT"],
+                    format_func=lambda v: t("all") if v == "all" else v,
+                    key="flt_side",
+                    help=t("flt_side_help"),
+                )
+            _c += 1
+        if show_result:
+            with _r1[_c]:
+                st.segmented_control(
+                    t("flt_res"),
+                    ["both", "kill", "death"],
+                    format_func=lambda v: (
+                        t("res_both") if v == "both" else fmt_result(v)
+                    ),
+                    key="flt_res",
+                    help=t("flt_res_help"),
+                )
+        # row 2: distance, then ONE weapons control: class chips + a More
+        # popover with the single guns, combined with OR (core.Filters unions
+        # weapons and classes)
+        _r2 = st.columns([3.1, 2.2, 0.8], vertical_alignment="bottom")
+        with _r2[0]:
             st.segmented_control(
-                t("flt_res"),
-                ["both", "kill", "death"],
-                format_func=lambda v: (t("res_both") if v == "both" else fmt_result(v)),
-                key="flt_res",
-                help=t("flt_res_help"),
+                t("flt_dist"),
+                list(DIST_KEYS),
+                format_func=_dist_label,
+                key="flt_dist",
+                help=t("flt_dist_help"),
             )
-    # one weapons control: class chips + a More popover with the single
-    # guns, combined with OR (core.Filters unions weapons and classes)
-    _wp, _wm = st.columns([4.6, 1.0])
-    with _wp:
-        st.pills(
-            t("flt_classes"),
-            present_classes,
-            selection_mode="multi",
-            format_func=lambda c: t(f"wc_{c}"),
-            key="flt_classes",
-            help=t("flt_classes_help"),
-        )
-    with _wm:
-        with st.popover(t("flt_more"), use_container_width=True):
-            st.multiselect(
-                t("flt_weapons"),
-                demo_weapons,
-                key="flt_weapons",
-                help=t("flt_weapons_help"),
+        with _r2[1]:
+            st.pills(
+                t("flt_classes"),
+                present_classes,
+                selection_mode="multi",
+                format_func=lambda c: t(f"wc_{c}"),
+                key="flt_classes",
+                help=t("flt_classes_help"),
             )
-    # the range slider exists only in Custom mode (and only when a range
-    # is possible at all); moving it keeps Custom selected
-    if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
-        st.slider(
-            t("flt_rounds"),
-            1,
-            n_rounds,
-            key="flt_rounds",
-            help=t("flt_rounds_help"),
-            on_change=_slider_custom,
-        )
-    # active filters: one dismissible chip each + a Reset
-    if _chips:
-        _fcols = st.columns([1.6] * len(_chips) + [0.9])
-        for _i, (_label, _fn) in enumerate(_chips):
-            _fcols[_i].button(
-                f"{_label} ✕",
-                on_click=_fn,
-                key=f"flt_chip_{_i}",
-                use_container_width=True,
+        with _r2[2]:
+            with st.popover(t("flt_more"), width="stretch"):
+                st.multiselect(
+                    t("flt_weapons"),
+                    demo_weapons,
+                    key="flt_weapons",
+                    help=t("flt_weapons_help"),
+                )
+        # the range slider exists only in Custom mode (and only when a range
+        # is possible at all); moving it keeps Custom selected
+        if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
+            st.slider(
+                t("flt_rounds"),
+                1,
+                n_rounds,
+                key="flt_rounds",
+                help=t("flt_rounds_help"),
+                on_change=_slider_custom,
             )
-        _fcols[-1].button(
-            t("flt_reset"),
-            on_click=_reset_filters,
-            key="flt_reset",
-            use_container_width=True,
-        )
+        # active filters: compact dismissible chips + a text-style Reset
+        if _chips:
+            with st.container(
+                horizontal=True, gap="small", vertical_alignment="center"
+            ):
+                for _i, (_label, _fn) in enumerate(_chips):
+                    st.button(
+                        f"{_label} ✕",
+                        on_click=_fn,
+                        key=f"flt_chip_{_i}",
+                        width="content",
+                    )
+                st.button(
+                    t("flt_reset"),
+                    on_click=_reset_filters,
+                    key="flt_reset",
+                    type="tertiary",
+                    width="content",
+                )
 
 preset = st.session_state.get("flt_preset", "all")
 round_kwargs: dict = {}
@@ -940,7 +948,7 @@ if page == "overview":
             ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"])
         ],
         "team": ov["team"].to_numpy(),
-        "kd": [f"{k} / {d}" for k, d in zip(ov["kills"], ov["deaths"])],
+        "kd": [f"{k/d:.2f}" for k, d in zip(ov["kills"], ov["deaths"])],
         "kills": ov["kills"].to_numpy(),
         "deaths": ov["deaths"].to_numpy(),
         "shots": ov["shots"].to_numpy(),
@@ -962,8 +970,8 @@ if page == "overview":
             ov_labels["player"], pinned=True, width="medium"
         ),
         "team": st.column_config.TextColumn(ov_labels["team"], width="small"),
-        "kd": st.column_config.TextColumn(
-            ov_labels["kd"], width="small", help=t("col_kd_help")
+        "kd": st.column_config.NumberColumn(
+            ov_labels["kd"], help=t("col_kd_help"), format="%.2f"
         ),
         "kills": st.column_config.NumberColumn(ov_labels["kills"], format="%d"),
         "deaths": st.column_config.NumberColumn(ov_labels["deaths"], format="%d"),
@@ -987,7 +995,8 @@ if page == "overview":
         "player",
         "team",
         "kd",
-        "shots",
+        "kills",
+        "deaths",
         "accuracy",
         "hs_hits",
         "risky",
@@ -1030,6 +1039,89 @@ if page == "overview":
         if rows and 0 <= rows[0] < len(ov_sids):
             st.session_state["me"] = ov_sids[rows[0]]
 
+    def _pick_player_row(i):
+        """Grid row click -> select that player (callback, runs before widgets)."""
+        if 0 <= i < len(ov_sids):
+            st.session_state["me"] = ov_sids[i]
+
+    _pct_bad = {"tone": "warning", "best": "low"}
+    _ov_grid = {
+        "player": Col(
+            "player", ov_labels["player"], kind="text", sort="player_raw", sticky=True
+        ),
+        "team": Col(
+            "team",
+            ov_labels["team"],
+            kind="badge",
+            tones={"T": "warning", "CT": "info"},
+        ),
+        "kd": Col(
+            "kd",
+            ov_labels["kd"],
+            fmt="{:.2f}",
+            best="high",
+            help=t("col_kd_help"),
+        ),
+        "kills": Col(
+            "kills",
+            ov_labels["kills"],
+            fmt="{:.0f}",
+            bar="rel",
+            tone="context",
+            best="high",
+        ),
+        "deaths": Col(
+            "deaths",
+            ov_labels["deaths"],
+            fmt="{:.0f}",
+            bar="rel",
+            tone="context",
+            best="low",
+        ),
+        "shots": Col(
+            "shots", ov_labels["shots"], fmt="{:.0f}", bar="rel", tone="context"
+        ),
+        "hits": Col("hits", ov_labels["hits"], fmt="{:.0f}", bar="rel", tone="context"),
+        "accuracy": Col(
+            "accuracy", ov_labels["accuracy"], fmt="{:.1f}%", bar="pct", best="high"
+        ),
+        "hs_hits": Col(
+            "hs_hits", ov_labels["hs_hits"], fmt="{:.1f}%", bar="pct", best="high"
+        ),
+        "hs_kills": Col(
+            "hs_kills", ov_labels["hs_kills"], fmt="{:.1f}%", bar="pct", best="high"
+        ),
+        "moving": Col(
+            "moving", ov_labels["moving"], fmt="{:.1f}%", bar="pct", **_pct_bad
+        ),
+        "risky": Col("risky", ov_labels["risky"], fmt="{:.1f}%", bar="pct", **_pct_bad),
+        "first_shot": Col(
+            "first_shot", ov_labels["first_shot"], fmt="{:.1f}%", bar="pct", best="high"
+        ),
+        "first_acc": Col(
+            "first_acc", ov_labels["first_acc"], fmt="{:.1f}%", bar="pct", best="high"
+        ),
+        "open_rate": Col(
+            "open_rate",
+            ov_labels["open_rate"],
+            fmt="{:.1f}%",
+            bar="pct",
+            best="high",
+            help=t("col_open_help"),
+        ),
+        "sides": Col("sides", ov_labels["sides"], kind="text"),
+        "aim_err": Col("aim_err", ov_labels["aim_err"], fmt="{:.1f}°", best="low"),
+        "duration": Col("duration", ov_labels["duration"], fmt="{:.2f} s", best="low"),
+    }
+    data_table(
+        {**ov_cells, "player_raw": ov["player"].astype(str).to_numpy()},
+        [_ov_grid[k] for k in _ov_shown],
+        key="ov_grid",
+        selected=sel_row,
+        stripe=[{"T": "warning", "CT": "info"}.get(x) for x in ov["team"]],
+        on_click=_pick_player_row,
+    )
+    _ov_raw = st.expander(t("raw_table"))
     _ov_styler = ov_disp.style
     # team stripe tints and the selected-row highlight come from the tokens
     _team_css = {
@@ -1045,15 +1137,16 @@ if page == "overview":
             lambda v: f"background-color: {theme.tok('surface-selected')}",
             subset=([sel_row], ov_disp.columns.tolist()),
         )
-    st.dataframe(
-        _ov_styler,
-        column_config={ov_labels[k]: ov_cfg_all[k] for k in _ov_shown},
-        hide_index=True,
-        width="stretch",
-        on_select=_pick_player,
-        selection_mode="single-row",
-        key="ov_table",
-    )
+    with _ov_raw:
+        st.dataframe(
+            _ov_styler,
+            column_config={ov_labels[k]: ov_cfg_all[k] for k in _ov_shown},
+            hide_index=True,
+            width="stretch",
+            on_select=_pick_player,
+            selection_mode="single-row",
+            key="ov_table",
+        )
 
 # -------------------------------------------------------------- shooting
 elif page == "shooting":
@@ -1483,7 +1576,32 @@ elif page == "shooting":
             w_labels["accuracy"]: _pct_col(w_labels["accuracy"]),
             w_labels["first_acc"]: _pct_col(w_labels["first_acc"]),
         }
-        st.dataframe(w, column_config=w_cfg, hide_index=True, width="stretch")
+        _w_pct = {"bar": "pct", "fmt": "{:.1f}%"}
+        data_table(
+            {k: w[lbl].to_numpy() for k, lbl in w_labels.items()},
+            [
+                Col("weapon", w_labels["weapon"], kind="text", sticky=True),
+                Col(
+                    "shots", w_labels["shots"], fmt="{:.0f}", bar="rel", tone="context"
+                ),
+                Col(
+                    "median_speed",
+                    w_labels["median_speed"],
+                    fmt="{:.0f} u/s",
+                    best="low",
+                ),
+                Col("median_dist", w_labels["median_dist"], fmt="{:.0f} u"),
+                Col("moving", w_labels["moving"], tone="warning", best="low", **_w_pct),
+                Col("risky", w_labels["risky"], tone="warning", best="low", **_w_pct),
+                Col("hits", w_labels["hits"], fmt="{:.0f}", bar="rel", tone="context"),
+                Col("hs", w_labels["hs"], best="high", **_w_pct),
+                Col("accuracy", w_labels["accuracy"], best="high", **_w_pct),
+                Col("first_acc", w_labels["first_acc"], best="high", **_w_pct),
+            ],
+            key="w_grid",
+        )
+        with st.expander(t("raw_table")):
+            st.dataframe(w, column_config=w_cfg, hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------- duels
 # ~8 columns by default, "All columns" reveals the detail metrics and
@@ -1620,16 +1738,84 @@ elif page == "duels":
                 st.session_state["tl_duel"] = int(rows[0])
                 st.session_state["page"] = "timeline"
 
-        st.dataframe(
-            disp,
-            column_config={du_labels[k]: du_cfg_all[k] for k in _du_shown},
-            hide_index=True,
-            width="stretch",
-            on_select=_duel_row_click,
-            selection_mode="single-row",
-            key="du_table",
+        def _duel_click_row(i):
+            """Grid row click -> open that duel in the Timeline."""
+            if 0 <= i < len(my_duels):
+                st.session_state["tl_duel"] = int(i)
+                st.session_state["page"] = "timeline"
+
+        _du_grid = {
+            "round": Col("round", du_labels["round"], fmt="{:.0f}", best="low"),
+            "round_sec": Col(
+                "round_sec",
+                du_labels["round_sec"],
+                fmt="{:.1f} s",
+                best="low",
+                help=t("col_round_sec_help"),
+            ),
+            "result": Col(
+                "result",
+                du_labels["result"],
+                kind="badge",
+                sort="result_raw",
+                tones={"kill": "positive", "death": "negative"},
+            ),
+            "opponent": Col(
+                "opponent", du_labels["opponent"], kind="text", sticky=True
+            ),
+            "weapon": Col("weapon", du_labels["weapon"], kind="text"),
+            "hs": Col("hs", du_labels["hs"], kind="text", sort="hs_raw", left=False),
+            "distance": Col("distance", du_labels["distance"], fmt="{:.0f} u"),
+            "zone": Col(
+                "zone", du_labels["zone"], kind="text", help=t("col_zone_help")
+            ),
+            "first": Col(
+                "first",
+                du_labels["first"],
+                kind="badge",
+                sort="first_raw",
+                tones={
+                    "me": "positive",
+                    "opponent": "negative",
+                    "simultaneous": "warning",
+                },
+            ),
+            "aim_err": Col("aim_err", du_labels["aim_err"], fmt="{:.1f}°", best="low"),
+            "my_shots": Col("my_shots", du_labels["my_shots"], fmt="{:.0f}"),
+            "opp_shots": Col("opp_shots", du_labels["opp_shots"], fmt="{:.0f}"),
+            "duration": Col(
+                "duration", du_labels["duration"], fmt="{:.2f} s", best="low"
+            ),
+            "speed": Col("speed", du_labels["speed"], fmt="{:.0f} u/s", best="low"),
+            "errhw": Col("errhw", du_labels["errhw"], fmt="{:.2f}", best="low"),
+            "side": Col("side", du_labels["side"], kind="text"),
+            "flags": Col("flags", du_labels["flags"], kind="text"),
+            "tick": Col("tick", du_labels["tick"], fmt="{:.0f}", best="low"),
+        }
+        data_table(
+            {
+                **du_cells,
+                "result_raw": ddf["result"].astype(str).to_numpy(),
+                "first_raw": ddf["first"].astype(str).to_numpy(),
+                "hs_raw": ddf["headshot"].astype(int).to_numpy(),
+            },
+            [_du_grid[k] for k in _du_shown],
+            key="du_grid",
+            stripe=["positive" if v == "kill" else "negative" for v in ddf["result"]],
+            on_click=_duel_click_row,
+            max_height=720,
         )
         st.caption(t("du_click_hint"))
+        with st.expander(t("raw_table")):
+            st.dataframe(
+                disp,
+                column_config={du_labels[k]: du_cfg_all[k] for k in _du_shown},
+                hide_index=True,
+                width="stretch",
+                on_select=_duel_row_click,
+                selection_mode="single-row",
+                key="du_table",
+            )
 
         # duels by named map zone - "where do my fights actually
         # happen". The zone comes from the death event (last_place_name at

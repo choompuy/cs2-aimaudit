@@ -54,7 +54,7 @@ STR = {
         # overview
         "ov_title": "All players",
         "ov_caption": "Kills/deaths are every enemy kill with any weapon, whole match (in-game scoreboard style); duels and accuracy are gun-only. Pick a player above for the detailed tabs.",
-        "ov_click_hint": "★ — the player selected above. Tick a row's checkbox to analyze that player.",
+        "ov_click_hint": "★ — the player selected above. Click a row to analyze that player; click a column header to sort (best first, then reversed).",
         "col_player": "Player",
         "col_team": "Team",
         "col_kd": "K/D",
@@ -76,6 +76,7 @@ STR = {
         "col_open": "Opening winrate",
         "col_open_help": "Share of opening duels won - the round's first enemy kill, counted when you were either the killer or the victim. Whole match; round and weapon filters do not change it.",
         "all_columns": "All columns",
+        "raw_table": "Plain table view (copy / CSV export)",
         # advanced / risk model
         "adv": "Advanced",
         "settings_box": "Analysis settings",
@@ -420,7 +421,7 @@ STR = {
         "tab_guide": "Гайд",
         "ov_title": "Все игроки",
         "ov_caption": "Килы/смерти — все убийства врагов любым оружием за весь матч (как внутриигровой счёт); дуэли и точность — только огнестрел. Выбери игрока сверху для подробных вкладок.",
-        "ov_click_hint": "★ — игрок, выбранный выше. Отметьте галочку у строки, чтобы проанализировать этого игрока.",
+        "ov_click_hint": "★ — игрок, выбранный выше. Нажми на строку, чтобы проанализировать этого игрока; нажми на заголовок столбца для сортировки (сначала лучшие, потом наоборот).",
         "col_player": "Игрок",
         "col_team": "Команда",
         "col_kd": "K/D",
@@ -442,6 +443,7 @@ STR = {
         "col_open": "Входы, %",
         "col_open_help": "Доля выигранных входов — первых фрагов раунда, где ты был киллером или жертвой. Весь матч; фильтры раундов и оружия на неё не влияют.",
         "all_columns": "Все столбцы",
+        "raw_table": "Обычная таблица (копирование / экспорт CSV)",
         "adv": "Дополнительно",
         "settings_box": "Настройки анализа",
         "reset_defaults": "Сбросить к стандартным",

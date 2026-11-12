@@ -347,6 +347,41 @@ for src in UI_SOURCES:
         f"hex {hexes} rgb {rgbs} — use theme.tok() instead",
     )
 
+# ---- 10b. universal table (ui/table.py): the cell model Python hands to the
+# JS renderer - bars, "best first" sort direction, empty cells, badge tones.
+try:
+    from ui.table import Col, table_payload
+
+    _rows = {
+        "name": ["a", "b", "c"],
+        "acc": [50.0, 100.0, float("nan")],
+        "n": [10, 40, 20],
+        "err": [1.5, 0.5, 2.5],
+        "res": ["kill", "death", "kill"],
+    }
+    _cols = [
+        Col("name", "Name", kind="text"),
+        Col("acc", "Acc", fmt="{:.1f}%", bar="pct", best="high"),
+        Col("n", "N", fmt="{:.0f}", bar="rel"),
+        Col("err", "Err", fmt="{:.1f}°", best="low"),
+        Col("res", "Res", kind="badge", tones={"kill": "positive", "death": "negative"}),
+    ]
+    _pl = table_payload(_rows, _cols, selected=1, stripe=["info", "bogus", None])
+    _cell = lambda r, c: _pl["rows"][r]["c"][c]  # noqa: E731
+    bad("table: pct bar fraction", _cell(0, 1)[2] == 0.5 and _cell(1, 1)[2] == 1.0, _cell(0, 1))
+    bad("table: rel bar is a share of the column max", _cell(0, 2)[2] == 0.25 and _cell(1, 2)[2] == 1.0, _cell(0, 2))
+    bad("table: empty number -> raw None, dash, no bar", _cell(2, 1)[0] is None and _cell(2, 1)[1] == "—" and _cell(2, 1)[2] is None, _cell(2, 1))
+    bad(
+        "table: first click sorts best value first",
+        [c["f"] for c in _pl["cols"]] == ["asc", "desc", "desc", "asc", "asc"],
+        [c["f"] for c in _pl["cols"]],
+    )
+    bad("table: badge tone by raw value", _cell(0, 4)[3] == "positive" and _cell(1, 4)[3] == "negative", _cell(0, 4))
+    bad("table: unknown stripe tone dropped", _pl["rows"][0]["s"] == "info" and _pl["rows"][1]["s"] is None, _pl["rows"][:2])
+    bad("table: selected row and display format", _pl["sel"] == 1 and _cell(0, 3)[1] == "1.5°", (_pl["sel"], _cell(0, 3)))
+except Exception as exc:  # noqa: BLE001
+    bad("table: payload model builds", False, repr(exc))
+
 # ---- 11. design system: WCAG AA contrast for body text, every theme
 # text-primary / text-secondary must pass AA (>= 4.5:1) on every surface
 # they are used on, and text-inverse on the accent chips, in every theme.
