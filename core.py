@@ -2782,6 +2782,67 @@ def timeline_data(
     return df.sort_values("tick").reset_index(drop=True), missing
 
 
+def replay_data(
+    path: str,
+    sids: list[str],
+    tick: int,
+    before_s: float = 3.0,
+    after_s: float = 0.75,
+    tickrate: int | None = None,
+):
+    """
+    Tick-level data of the duellists around one duel, for the 2D replay.
+
+    One parse for all `sids` (the two players of the duel), split per
+    player: ({sid: frame sorted by tick}, missing_buttons). Each frame has
+    X / Y / Z, pitch / yaw, `speed` (same rules as the timeline: NaN on
+    gaps, teleports and a dead pawn), `is_alive` and the held keys.
+    Nothing but the duellists is read - grenades, teammates and other
+    enemies are not part of a duel replay.
+    """
+    parser = DemoParser(path)
+    if tickrate is None:
+        try:
+            tickrate = tickrate_from_header(parser.parse_header())
+        except Exception:  # noqa: BLE001 - header is optional here
+            tickrate = TICKRATE
+    ticks = list(
+        range(tick - int(before_s * tickrate), tick + int(after_s * tickrate) + 1)
+    )
+    df = None
+    last_err: Exception | None = None
+    for props in (
+        POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS,
+        POS + ["buttons"] + ALIVE_PROPS,
+        POS + ALIVE_PROPS,
+        POS,
+    ):
+        try:
+            df = parser.parse_ticks(props, ticks=ticks, players=[int(x) for x in sids])
+            break
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+    if df is None:
+        raise last_err  # type: ignore[misc]
+    # exact SteamIDs (the raw column is float-rounded), like every tick frame
+    flookup, name_to_sid = build_id_lookup(parser.parse_player_info())
+    df["steamid"] = fix_ids(
+        df["steamid"],
+        flookup,
+        df["name"] if "name" in df.columns else None,
+        name_to_sid,
+    )
+    df = _norm_alive(_decode_buttons(df))
+    frames: dict[str, pd.DataFrame] = {}
+    for sid in sids:
+        d = df[df["steamid"] == sid].drop_duplicates("tick")
+        frames[sid] = (
+            _timeline_speed(d, tickrate).sort_values("tick").reset_index(drop=True)
+        )
+    missing = [x for x in BUTTONS if x not in df.columns]
+    return frames, missing
+
+
 # ---------------------------------------------------------- data quality
 def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[dict]:
     """

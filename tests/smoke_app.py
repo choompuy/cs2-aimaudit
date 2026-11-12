@@ -464,6 +464,27 @@ def scenario_one_round():
     act(
         at, "timeline duel renders", lambda: at.selectbox(key="tl_duel").select(0).run()
     )
+    act(
+        at,
+        "timeline: 2D replay view",
+        lambda: at.session_state.__setitem__("tl_view", "replay") or at.run(),
+    )
+    charts = at.get("plotly_chart")
+    spec = ""
+    try:
+        spec = charts[0].proto.spec
+    except Exception:  # noqa: BLE001 - AppTest proto layout differs between versions
+        pass
+    check(
+        "replay: an animated chart (frames + slider) for the two duellists",
+        len(charts) == 1 and '"frames"' in spec and '"sliders"' in spec,
+        (len(charts), bool(spec)),
+    )
+    act(
+        at,
+        "timeline: back to charts",
+        lambda: at.session_state.__setitem__("tl_view", "charts") or at.run(),
+    )
 
 
 def scenario_two_rounds():

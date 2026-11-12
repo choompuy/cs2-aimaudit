@@ -188,6 +188,19 @@ def get_timeline(
     return core.timeline_data(path, me, tick, before_s=before_s, tickrate=tickrate)
 
 
+@st.cache_data(show_spinner=False)
+def get_replay(
+    path: str,
+    mtime: float,
+    me: str,
+    opp: str,
+    tick: int,
+    before_s: float,
+    tickrate: int,
+):
+    return core.replay_data(path, [me, opp], tick, before_s=before_s, tickrate=tickrate)
+
+
 # The heavy frames behind st.cache_data, keyed on the demo file and
 # the analysis thresholds, so a rerun (or a slider tweak that misses the
 # cache only once) does not recompute every page from scratch.
@@ -1937,6 +1950,71 @@ elif page == "duels":
 
 # ------------------------------------------------------------- timeline
 # a fragment - picking another duel re-renders only the timeline
+def _replay_block(r, tick):
+    """2D replay of the selected duel: only the two duellists (Timeline page)."""
+    opp = r["opponent"]
+    with st.spinner(t("tl_loading")):
+        rp, _missing = get_replay(path, mtime, me, opp, tick, window_s, demo.tickrate)
+    f_me, f_opp = rp.get(me), rp.get(opp)
+    if (
+        f_me is None
+        or f_opp is None
+        or f_me.empty
+        or f_opp.empty
+        or not {"X", "Y", "yaw"} <= set(f_me.columns) & set(f_opp.columns)
+    ):
+        st.info(t("rp_no_data"))
+        return
+    lo = min(int(f_me["tick"].min()), int(f_opp["tick"].min()))
+    hi = max(int(f_me["tick"].max()), int(f_opp["tick"].max()))
+    in_win = shots["tick"].between(lo, hi)
+    shot_ticks = {
+        "me": [int(x) for x in shots.loc[in_win & (shots["sid"] == me), "tick"]],
+        "opp": [int(x) for x in shots.loc[in_win & (shots["sid"] == opp), "tick"]],
+    }
+    hits = []
+    if len(demo.hurts) and {"attacker_steamid", "user_steamid", "tick"} <= set(
+        demo.hurts.columns
+    ):
+        for h in demo.hurts[demo.hurts["tick"].between(lo, hi)].itertuples():
+            if h.attacker_steamid == me and h.user_steamid == opp:
+                hits.append((int(h.tick), "me"))
+            elif h.attacker_steamid == opp and h.user_steamid == me:
+                hits.append((int(h.tick), "opp"))
+    keys = [b for b in core.BUTTONS if b in f_me.columns and b in f_opp.columns]
+    fig = mapview.build_replay_figure(
+        {"me": f_me, "opp": f_opp},
+        core.load_radar(str(demo.header.get("map_name") or "")),
+        tick,
+        demo.tickrate,
+        shots=shot_ticks,
+        hits=hits,
+        keys=keys,
+        labels={
+            "me": name_of.get(me, me),
+            "opp": name_of.get(opp, opp),
+            "time": t("rp_time"),
+            "pause": t("rp_pause"),
+            "keys": {k: t(f"k_{k}") for k in keys},
+        },
+        colors={
+            "me": PAL["you"],
+            "opp": theme.tok("opponent"),
+            "dead": PAL["bad"],
+            "outline": theme.tok("text-primary"),
+            "ui_bg": theme.tok("surface-2"),
+            "ui_fg": theme.tok("text-primary"),
+            "ui_border": theme.tok("border-subtle"),
+        },
+    )
+    if fig is None:
+        st.info(t("rp_no_data"))
+        return
+    style_figure(fig, height=600, margin=dict(t=56, r=10, l=10, b=80))
+    st.plotly_chart(fig, width="stretch")
+    st.caption(t("rp_howto"))
+
+
 @st.fragment
 def _timeline_fragment():
     _ctx_bar()
@@ -2048,6 +2126,19 @@ def _timeline_fragment():
             )
             if verdict:
                 st.caption(" · ".join(verdict))
+        st.session_state.setdefault("tl_view", "charts")
+        view = (
+            st.segmented_control(
+                t("tl_view"),
+                ["charts", "replay"],
+                format_func=lambda v: t(f"tl_view_{v}"),
+                key="tl_view",
+            )
+            or "charts"
+        )
+        if view == "replay":
+            _replay_block(r, tick)
+            return
         if tdf is None or tdf.empty:
             st.info(t("tl_empty"))
         else:
@@ -2375,7 +2466,9 @@ def _timeline_fragment():
             fig.update_yaxes(title_text=t("tl_ax_speed"), row=1, col=1)
             fig.update_yaxes(title_text=t("tl_ax_yaw"), row=2, col=1)
             fig.update_yaxes(title_text=t("tl_ax_pitch"), row=3, col=1)
-            fig.update_xaxes(title_text=t("ch_x"), row=rows_n, col=1)
+            # half-second ticks: whole seconds were too coarse to line a
+            # shot or a key press up with the curves above
+            fig.update_xaxes(title_text=t("ch_x"), dtick=0.5, row=rows_n, col=1)
             # shared look (palette, font, margins); the height stays 760 -
             # four stacked rows need it. The legend sits on the right and is
             # always on: it names the lines, markers and key groups.

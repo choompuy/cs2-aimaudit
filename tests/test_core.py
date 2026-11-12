@@ -2835,6 +2835,138 @@ finally:
     else:
         os.environ["AIMAUDIT_RADAR_DIR"] = _old_env
 
+# ---- 2D duel replay: replay_data (two duellists, one parse) + the figure
+print("== replay_data / build_replay_figure ==")
+import mapview  # noqa: E402
+
+_rp_rows = []
+for _sid, _nm, _x0, _vx, _alive_to in (
+    (S1, "Alpha", 0.0, 4.0, 512),
+    (S2, "Bravo", 900.0, -2.0, 99999),
+):
+    for _tk in range(490, 560):
+        _rp_rows.append(
+            {
+                "tick": _tk,
+                "steamid": f64_sid(_sid),
+                "name": _nm,
+                "X": _x0 + (_tk - 490) * _vx,
+                "Y": 0.0 if _sid == S1 else 50.0,
+                "Z": 0.0,
+                "pitch": 1.0,
+                "yaw": 2.0 if _sid == S1 else 182.0,
+                "is_alive": _tk < _alive_to,
+            }
+        )
+_rp = make_match()
+_rp["ticks"] = pd.DataFrame(_rp_rows)
+_rbits = (1 << 3) | (1 << 0)  # FORWARD + FIRE for Alpha only
+_rp["buttons_bit"] = {(_t, f64_sid(S1)): _rbits for _t in range(490, 560)}
+FakeParser.demos["rp.dem"] = _rp
+_fr, _miss = core.replay_data("rp.dem", [S1, S2], 512, before_s=0.5, after_s=0.25)
+check("replay_data: one frame per duellist", set(_fr) == {S1, S2}, list(_fr))
+check(
+    "replay_data: frames are the right player each (positions differ)",
+    abs(_fr[S1]["X"].iloc[-1] - _fr[S2]["X"].iloc[-1]) > 100,
+)
+check(
+    "replay_data: same tick window for both",
+    _fr[S1]["tick"].tolist() == _fr[S2]["tick"].tolist() and len(_fr[S1]) > 20,
+)
+check(
+    "replay_data: speed per player (256 vs 128 u/s), dead -> NaN",
+    abs(_fr[S1][_fr[S1]["tick"] < 512]["speed"].dropna() - 256.0).max() < 1e-6
+    and abs(_fr[S2]["speed"].dropna() - 128.0).max() < 1e-6
+    and _fr[S1][_fr[S1]["tick"] >= 512]["speed"].isna().all(),
+)
+check(
+    # (the fake keys its button bits by float64 SteamID, where S1 and S2
+    # collide, so only the decoding itself is asserted here)
+    "replay_data: keys decoded, nothing missing",
+    bool(_fr[S1]["FORWARD"].all()) and bool(_fr[S1]["FIRE"].all()) and _miss == [],
+    _miss,
+)
+_rp2 = make_match()
+_rp2["ticks"] = pd.DataFrame(_rp_rows)
+_rp2["unsupported"] = set(core.BTN_NAMED) | {"buttons"}
+FakeParser.demos["rp2.dem"] = _rp2
+_fr2, _miss2 = core.replay_data("rp2.dem", [S1, S2], 512, before_s=0.5, after_s=0.25)
+check(
+    "replay_data: buttons unsupported -> positions only, all keys missing",
+    len(_fr2[S1]) > 0 and _miss2 == core.BUTTONS,
+)
+
+_rf = {"me": _fr[S1], "opp": _fr[S2]}
+_rlab = {"me": "Alpha", "opp": "Bravo", "keys": {k: k for k in core.BUTTONS}}
+_ff = mapview.build_replay_figure(
+    _rf,
+    None,
+    512,
+    64,
+    shots={"me": [500]},
+    hits=[(505, "me")],
+    keys=core.BUTTONS,
+    labels=_rlab,
+)
+check(
+    "replay figure: frames update the dynamic traces, slider has a step per frame",
+    _ff is not None
+    and len(_ff.data) == 14
+    and len(_ff.frames) > 3
+    and all(
+        list(fr.traces) == list(range(2, 14)) and len(fr.data) == 12
+        for fr in _ff.frames
+    )
+    and len(_ff.layout.sliders[0].steps) == len(_ff.frames)
+    and str(512) in [fr.name for fr in _ff.frames],
+)
+check(
+    "replay figure: dead player gets a cross after the death tick",
+    any(len(fr.data[9].x) == 1 for fr in _ff.frames if int(fr.name) > 512)
+    and all(len(fr.data[9].x) == 0 for fr in _ff.frames if int(fr.name) < 512),
+)
+check(
+    "replay figure: a shot shows as an aim line only just after it",
+    any(len(fr.data[4].x) > 0 for fr in _ff.frames if 500 <= int(fr.name) < 510)
+    and all(len(fr.data[4].x) == 0 for fr in _ff.frames if int(fr.name) > 520),
+)
+_nk = mapview.build_replay_figure(_rf, None, 512, 64, keys=[], labels=_rlab)
+check(
+    "replay figure: no key columns -> no key panel (12 traces)",
+    _nk is not None
+    and len(_nk.data) == 12
+    and all(len(fr.data) == 10 for fr in _nk.frames),
+)
+check(
+    "replay figure: missing duellist -> None",
+    mapview.build_replay_figure(
+        {"me": _fr[S1], "opp": _fr[S2].iloc[0:0]}, None, 512, 64
+    )
+    is None,
+)
+_rd2 = _tempfile.mkdtemp(prefix="cs2aa_radar2_")
+os.makedirs(os.path.join(_rd2, "radars"))
+_tiny_png(os.path.join(_rd2, "radars", "de_r.png"), 16)
+with open(os.path.join(_rd2, "map_data.json"), "w", encoding="utf-8") as fh:
+    _json.dump({"de_r": {"pos_x": -100.0, "pos_y": 100.0, "scale": 2.0}}, fh)
+_old_env2 = os.environ.get("AIMAUDIT_RADAR_DIR")
+os.environ["AIMAUDIT_RADAR_DIR"] = _rd2
+try:
+    _rr = mapview.build_replay_figure(
+        _rf, core.load_radar("de_r"), 512, 64, keys=core.BUTTONS, labels=_rlab
+    )
+    check(
+        "replay figure: radar image drawn below, view box set",
+        _rr is not None
+        and len(_rr.layout.images) == 1
+        and _rr.layout.xaxis.range[0] < _rr.layout.xaxis.range[1],
+    )
+finally:
+    if _old_env2 is None:
+        os.environ.pop("AIMAUDIT_RADAR_DIR", None)
+    else:
+        os.environ["AIMAUDIT_RADAR_DIR"] = _old_env2
+
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":
     sys.exit(1 if FAIL else 0)
