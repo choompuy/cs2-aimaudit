@@ -469,7 +469,9 @@ def scenario_one_round():
     act(at, "thr slider 200", lambda: at.slider(key="thr").set_value(200).run())
     goto(at, "timeline")
     act(
-        at, "timeline duel renders", lambda: at.selectbox(key="tl_duel").select(0).run()
+        at,
+        "timeline duel renders",
+        lambda: at.session_state.__setitem__("tl_duel", 0) or at.run(),
     )
     act(
         at,
@@ -555,6 +557,42 @@ def scenario_player_stepper():
         ss_get(at, "demo_src", "").endswith("stepper.dem"),
     )
     check("cancel closes the panel", ss_get(at, "demo_change") is False)
+
+
+def scenario_duel_strip():
+    """Fast duel/round navigation: the strip owns the timeline selection."""
+    print("== duel strip (fast duel/round navigation) ==")
+    at = open_demo(make_match([1, 2, 13]), "strip.dem")
+    check("runs without exception", not at.exception, err_of(at))
+    goto(at, "timeline")
+    # the old long "pick a duel" selectbox and the round selectbox are
+    # gone: the strip chips, its hotkeys and the Duels row click move the
+    # selection now, and they all write the plain tl_duel session key
+    check("no tl_duel selectbox anymore", widget(at, "selectbox", "tl_duel") is None)
+    check("no tl_round selectbox anymore", widget(at, "selectbox", "tl_round") is None)
+    check(
+        "hotkey hint rendered under the strip",
+        any("Shift+←" in str(c.value) for c in at.caption),
+        [str(c.value)[:60] for c in at.caption][:6],
+    )
+    act(
+        at,
+        "open duel 1 (a chip click writes the same key)",
+        lambda: at.session_state.__setitem__("tl_duel", 1) or at.run(),
+    )
+    check("moved to duel 1", ss_get(at, "tl_duel") == 1, ss_get(at, "tl_duel"))
+    act(
+        at,
+        "stale pick beyond the duel list clamps",
+        lambda: at.session_state.__setitem__("tl_duel", 99) or at.run(),
+    )
+    check("clamped back to duel 0", ss_get(at, "tl_duel") == 0, ss_get(at, "tl_duel"))
+    act(at, "language ru", lambda: at.selectbox(key="lang").select("ru").run())
+    check(
+        "ru: hotkey hint rendered",
+        any("Shift+←" in str(c.value) for c in at.caption),
+        [str(c.value)[:60] for c in at.caption][:6],
+    )
 
 
 def scenario_two_rounds():
@@ -647,7 +685,11 @@ def scenario_long25():
         lambda: ctl(at, "segmented_control", "flt_side").select("CT").run(),
     )
     goto(at, "timeline")
-    act(at, "timeline duel 1 of 3", lambda: at.selectbox(key="tl_duel").select(1).run())
+    act(
+        at,
+        "timeline duel 1 of 3",
+        lambda: at.session_state.__setitem__("tl_duel", 1) or at.run(),
+    )
 
 
 def scenario_filter_panel():
@@ -1019,12 +1061,12 @@ def scenario_matrix():
                     )
             goto(at, "timeline")
             for i in range(3):
-                if widget(at, "selectbox", "tl_duel") is not None:
-                    act(
-                        at,
-                        f"timeline duel #{i}",
-                        lambda i=i: at.selectbox(key="tl_duel").select(i).run(),
-                    )
+                act(
+                    at,
+                    f"timeline duel #{i}",
+                    lambda i=i: at.session_state.__setitem__("tl_duel", i)
+                    or at.run(),
+                )
 
 
 def scenario_tables():
@@ -1543,6 +1585,7 @@ def main():
         core.DemoParser = FakeParser  # patch BEFORE any app run
         scenario_one_round()
         scenario_player_stepper()
+        scenario_duel_strip()
         scenario_two_rounds()
         scenario_long25()
         scenario_filter_panel()

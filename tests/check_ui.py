@@ -403,6 +403,60 @@ try:
 except Exception as exc:  # noqa: BLE001
     bad("grade: model builds", False, repr(exc))
 
+# ---- 10d. duel strip (ui/strip.py): the payload model Python hands to
+# the JS renderer - grouping by round, round starts for jumps, chip tones,
+# selection clamping. Everything the strip does must be decided here.
+try:
+    from ui.strip import strip_payload
+
+    _s_items = [
+        {"round": 3, "result": "kill", "tip": "a"},
+        {"round": 3.0, "result": "death", "tip": "b"},
+        {"round": 7, "result": "kill", "tip": "c"},
+        {"round": None, "result": "kill", "tip": "d"},
+        {"round": 7, "result": "kill", "tip": "e"},
+    ]
+    _s_pl = strip_payload(_s_items, 2, round_label=lambda r, n: f"R{r}x{n}")
+    bad(
+        "strip: consecutive rounds share one badge (3.0 == 3)",
+        [g["r"] for g in _s_pl["groups"]] == [3, 7, None, 7]
+        and [it["i"] for it in _s_pl["groups"][0]["items"]] == [0, 1],
+        [g["r"] for g in _s_pl["groups"]],
+    )
+    bad(
+        "strip: rstarts = first duel of every group",
+        _s_pl["rstarts"] == [0, 2, 3, 4],
+        _s_pl["rstarts"],
+    )
+    bad(
+        "strip: chips keep their index and a kill/death tone",
+        _s_pl["groups"][0]["items"][1]["w"] == "death"
+        and _s_pl["groups"][0]["items"][0]["w"] == "kill"
+        and _s_pl["groups"][0]["items"][0]["tip"] == "a",
+        _s_pl["groups"][0]["items"][1],
+    )
+    bad(
+        "strip: group tooltip from round_label(r, n)",
+        _s_pl["groups"][0]["tip"] == "R3x2" and _s_pl["groups"][2]["tip"] == "RNonex1",
+        [_s_pl["groups"][0]["tip"], _s_pl["groups"][2]["tip"]],
+    )
+    bad(
+        "strip: selection clamped into range (empty -> 0)",
+        _s_pl["sel"] == 2
+        and strip_payload(_s_items, 99, round_label=lambda r, n: "")["sel"] == 0
+        and strip_payload([], 5, round_label=lambda r, n: "")["n"] == 0,
+        (_s_pl["sel"], strip_payload(_s_items, 99, round_label=lambda r, n: "")["sel"]),
+    )
+    bad(
+        "strip: labels normalized to strings, empty default",
+        strip_payload(_s_items, 0, round_label=lambda r, n: "", labels={"prev": None})["lab"]
+        == {"prev": ""}
+        and strip_payload(_s_items, 0, round_label=lambda r, n: "")["lab"] == {},
+        "lab normalization",
+    )
+except Exception as exc:  # noqa: BLE001
+    bad("strip: payload model builds", False, repr(exc))
+
 # ---- 11. design system: WCAG AA contrast for body text, every theme
 # text-primary / text-secondary must pass AA (>= 4.5:1) on every surface
 # they are used on, and text-inverse on the accent chips, in every theme.

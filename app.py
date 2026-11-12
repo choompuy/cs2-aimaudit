@@ -22,6 +22,7 @@ import core
 import i18n
 import mapview
 import theme
+from ui.strip import duel_strip
 from ui.table import Col, data_table
 
 st.set_page_config(
@@ -2094,52 +2095,39 @@ def _timeline_fragment():
         ):
             st.session_state["tl_duel"] = 0
 
-        # prev/next buttons and a round selector instead of one long
-        # select box; the exact duel picker stays below for precision
-        def _tl_shift(d):
-            j = st.session_state.get("tl_duel", 0) + d
-            st.session_state["tl_duel"] = max(0, min(len(my_duels) - 1, j))
-
-        def _tl_round_pick():
-            rv = st.session_state.get("tl_round")
-            hits = np.nonzero(my_duels["round"].to_numpy() == rv)[0]
-            if len(hits):
-                st.session_state["tl_duel"] = int(hits[0])
+        # Fast duel / round navigation (ui/strip.py): every duel is a chip
+        # under its round badge, so any duel is <=2 actions away (a chip
+        # click, or Shift+Left/Right to the round, then Left/Right).
+        # Left/Right walk ALL duels with wrap-around: the whole match from
+        # a single key; Home/End jump to the first/last duel. Up/Down keep
+        # switching the player, so the steppers never collide.
+        def _tl_pick(i: int):
+            st.session_state["tl_duel"] = int(i)
 
         labels = [duel_label(my_duels.iloc[i]) for i in range(len(my_duels))]
-        rounds_avail = sorted(int(x) for x in pd.unique(my_duels["round"].dropna()))
-        _cur_round = my_duels.iloc[st.session_state["tl_duel"]]["round"]
-        if pd.notna(_cur_round) and int(_cur_round) in rounds_avail:
-            st.session_state["tl_round"] = int(_cur_round)
-        nav1, nav2, nav3 = st.columns([1, 2, 1], vertical_alignment="bottom")
-        nav1.button(
-            t("tl_prev"),
-            key="tl_prev",
-            on_click=_tl_shift,
-            args=(-1,),
-            disabled=(st.session_state["tl_duel"] == 0),
-            use_container_width=True,
+        duel_strip(
+            [
+                {"round": r, "result": w, "tip": lab}
+                for r, w, lab in zip(my_duels["round"], my_duels["result"], labels)
+            ],
+            st.session_state["tl_duel"],
+            key="tl_strip",
+            on_select=_tl_pick,
+            round_label=lambda r, n: t(
+                "tl_strip_round", r=(r if r is not None else "?"), n=n
+            ),
+            labels={
+                "prev": t("tl_strip_prev"),
+                "next": t("tl_strip_next"),
+                "rprev": t("tl_strip_rprev"),
+                "rnext": t("tl_strip_rnext"),
+                "first": t("tl_strip_first"),
+                "last": t("tl_strip_last"),
+                "duel": t("tl_strip_duels"),
+            },
         )
-        if rounds_avail:
-            nav2.selectbox(
-                t("col_round"), rounds_avail, key="tl_round", on_change=_tl_round_pick
-            )
-        else:
-            nav2.caption(duel_label(my_duels.iloc[st.session_state["tl_duel"]]))
-        nav3.button(
-            t("tl_next"),
-            key="tl_next",
-            on_click=_tl_shift,
-            args=(1,),
-            disabled=(st.session_state["tl_duel"] == len(my_duels) - 1),
-            use_container_width=True,
-        )
-        i = st.selectbox(
-            t("tl_pick"),
-            range(len(my_duels)),
-            format_func=lambda k: labels[k],
-            key="tl_duel",
-        )
+        st.caption(t("tl_strip_hint"))
+        i = st.session_state["tl_duel"]
         r = my_duels.iloc[i]
         tick = int(r["tick"])
         with st.spinner(t("tl_loading")):
