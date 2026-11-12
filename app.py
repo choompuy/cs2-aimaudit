@@ -97,6 +97,18 @@ if "url_state_loaded" not in st.session_state:
         for k, sk in _URL_KEYS:
             if saved.get(k) is not None:
                 st.session_state[sk] = saved[k]
+        # a link that restores filters opens with the card expanded, so
+        # the filters are visible instead of hiding behind the summary
+        if (
+            saved.get("weapons")
+            or saved.get("classes")
+            or saved.get("rounds")
+            or saved.get("preset") not in (None, "all")
+            or saved.get("side") not in (None, "all")
+            or saved.get("res") not in (None, "both")
+            or saved.get("dist") not in (None, "all")
+        ):
+            st.session_state["flt_open"] = True
 
 HG_ORDER = [
     "head",
@@ -156,8 +168,12 @@ with st.sidebar:
         st.button(t("reset_defaults"), on_click=_reset_settings, key="btn_reset_set")
     strict_dist = max(strict_dist, safe_dist + 100)
 
-st.title("🎯 CS2-AimAudit")
-st.caption(t("tagline"))
+st.markdown(
+    f'<div class="aa-app-title" role="heading" aria-level="1">'
+    f'<span class="aa-app-name">🎯 CS2-AimAudit</span>'
+    f'<span class="aa-app-tag">{html.escape(t("tagline"))}</span></div>',
+    unsafe_allow_html=True,
+)
 
 # ------------------------------------------------------ cached core calls
 _status = {"box": None}
@@ -223,28 +239,38 @@ state = core.load_state()
 recent = [
     p for p in state.get("recent_demos", []) if isinstance(p, str) and os.path.exists(p)
 ]
-
-up = st.file_uploader(
-    t("upload_label"), type=["dem", "bz2", "gz", "zst", "zip"], key="demo_file"
-)
-with st.expander(t("path_expander")):
-    if recent:
-
-        def _pick_recent():
-            v = st.session_state.get("recent_pick")
-            if v:
-                st.session_state["demo_path"] = v
-
-        st.selectbox(
-            t("recent_label"),
-            [""] + recent,
-            format_func=lambda v: t("recent_pick_hint") if not v else v,
-            key="recent_pick",
-            on_change=_pick_recent,
-        )
-    st.text_input(
-        t("path_label"), placeholder=t("path_ph"), key="demo_path", help=t("path_help")
+# The loaded demo is remembered in a plain session key (not a widget
+# state): once a demo is loaded the upload UI is hidden behind a compact
+# header row, and Streamlit drops the states of widgets that did not
+# render — demo_src is what survives and re-opens the same demo.
+_prev_src = st.session_state.get("demo_src")
+_change_open = bool(st.session_state.get("demo_change"))
+up = None
+if _prev_src is None or _change_open:
+    up = st.file_uploader(
+        t("upload_label"), type=["dem", "bz2", "gz", "zst", "zip"], key="demo_file"
     )
+    with st.expander(t("path_expander")):
+        if recent:
+
+            def _pick_recent():
+                v = st.session_state.get("recent_pick")
+                if v:
+                    st.session_state["demo_path"] = v
+
+            st.selectbox(
+                t("recent_label"),
+                [""] + recent,
+                format_func=lambda v: t("recent_pick_hint") if not v else v,
+                key="recent_pick",
+                on_change=_pick_recent,
+            )
+        st.text_input(
+            t("path_label"),
+            placeholder=t("path_ph"),
+            key="demo_path",
+            help=t("path_help"),
+        )
 
 # Windows "Copy as path" adds quotes, terminals leave ~ / %VAR% / single
 # quotes behind - core.normalize_input_path cleans all that up before the
@@ -262,6 +288,10 @@ elif up:
     if not os.path.exists(src) or os.path.getsize(src) != up.size:
         with open(src, "wb") as f:
             f.write(up.getbuffer())
+elif _prev_src and os.path.exists(_prev_src):
+    # the upload UI is hidden behind the compact header row; the demo
+    # opened earlier stays loaded until the user picks another one
+    src = _prev_src
 else:
     # the empty state is a 3-step card with the demo instructions
     # inline (the same text the Guide shows), so a first-time player
@@ -288,13 +318,18 @@ except ValueError as e:
 mtime = os.path.getmtime(path)
 
 # ----------------------------------------------------------------- load
-status = st.status(t("loading"))
+# The progress plate is created only while this exact file is not loaded
+# yet; every later rerun skips it, so the compact header row sits at the
+# top instead of the "Demo loaded" box.
+fresh_load = src != _prev_src
+status = st.status(t("loading")) if fresh_load else None
 _status["box"] = status
 try:
     demo = get_demo(path, mtime)
 except ValueError as e:
     _status["box"] = None
-    status.update(label=t("load_failed"), state="error")
+    if status is not None:
+        status.update(label=t("load_failed"), state="error")
     if "no_events" in str(e):
         st.error(t("err_no_events"))
     else:
@@ -303,14 +338,16 @@ except ValueError as e:
     st.stop()
 except Exception as e:  # noqa: BLE001
     _status["box"] = None
-    status.update(label=t("load_failed"), state="error")
+    if status is not None:
+        status.update(label=t("load_failed"), state="error")
     st.error(t("load_failed"))
     st.caption(str(e))
     st.stop()
 _status["box"] = None
 
 if demo.players.empty:
-    status.update(label=t("load_failed"), state="error")
+    if status is not None:
+        status.update(label=t("load_failed"), state="error")
     st.error(t("err_no_events"))
     st.stop()
 
@@ -319,13 +356,33 @@ rec = state.get("recent_demos") or []
 if not rec or rec[0] != src:
     core.remember_demo(src, state)
     core.save_state(state)
+# the demo is now loaded: remember it and fold the "Change demo" panel
+st.session_state["demo_src"] = src
+if fresh_load:
+    st.session_state["demo_change"] = False
+    # fold the upload block / progress plate into the compact header
+    # immediately: without this the loading UI stays on screen until the
+    # next interaction
+    st.rerun()
 
 # -------------------------------------------------------------- metrics
-status.update(label=t("step_metrics"))
+if status is not None:
+    status.update(label=t("step_metrics"))
 shots = get_shots(path, mtime, thr, safe_dist, strict_dist)
 duels_all = get_duels(path, mtime, window_s)
 
-info = []
+
+def _open_change():
+    st.session_state["demo_change"] = True
+
+
+def _close_change():
+    st.session_state["demo_change"] = False
+
+
+# the compact demo row replaces the upload block, the "Demo loaded"
+# plate and the map caption: one line with what matters about the file
+info = [f"**{os.path.basename(src)}**"]
 if demo.header.get("map_name"):
     info.append(f"**{t('map')}:** {demo.header['map_name']}")
 info.append(f"**{t('players_n')}:** {len(demo.players)}")
@@ -335,8 +392,24 @@ if trp is not None:
     r_max = pd.to_numeric(trp, errors="coerce").max()
     if pd.notna(r_max):
         info.append(f"**{t('rounds_n')}:** {int(r_max) + 1}")
-if info:
+with st.container(horizontal=True, gap="small", vertical_alignment="center"):
     st.caption(" · ".join(info))
+    if _change_open:
+        st.button(
+            t("change_cancel"),
+            key="demo_cancel",
+            on_click=_close_change,
+            type="tertiary",
+            width="content",
+        )
+    else:
+        st.button(
+            t("change_demo"),
+            key="demo_change_btn",
+            on_click=_open_change,
+            type="secondary",
+            width="content",
+        )
 
 # pre-match rounds that were dropped (knife round / warmup / restarts) -
 # one honest line instead of silently "lost" rounds
@@ -365,12 +438,50 @@ me_opts = plist["sid"].tolist()
 if st.session_state.get("me") not in me_opts:
     last = state.get("last_player")
     st.session_state["me"] = last if last in me_opts else me_opts[0]
-me = st.selectbox(
-    t("player"),
-    me_opts,
-    format_func=lambda s: f"{name_of.get(s, s)} ({team_of.get(s, '?')})",
-    key="me",
-)
+
+
+def _me_step(delta: int):
+    """Buttons/hotkeys cycle the player selectbox (wraps around)."""
+    cur = st.session_state.get("me")
+    if cur in me_opts:
+        i = (me_opts.index(cur) + delta) % len(me_opts)
+    else:
+        i = 0 if delta > 0 else len(me_opts) - 1
+    st.session_state["me"] = me_opts[i]
+
+
+# One compact row: [Player label] [prev] [selectbox] [next]. Up/Down are
+# the player keys on purpose: step 2 takes Left/Right for duels and
+# Shift+Left/Right for rounds, so the three steppers never collide.
+with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+    st.caption(t("player"))
+    st.button(
+        "▲",
+        key="me_prev",
+        on_click=_me_step,
+        args=(-1,),
+        help=t("player_prev"),
+        shortcut="Up",
+        width="content",
+        type="tertiary",
+    )
+    me = st.selectbox(
+        t("player"),
+        me_opts,
+        format_func=lambda s: f"{name_of.get(s, s)} ({team_of.get(s, '?')})",
+        key="me",
+        label_visibility="collapsed",
+    )
+    st.button(
+        "▼",
+        key="me_next",
+        on_click=_me_step,
+        args=(1,),
+        help=t("player_next"),
+        shortcut="Down",
+        width="content",
+        type="tertiary",
+    )
 if state.get("last_player") != me:
     state["last_player"] = me
     core.save_state(state)
@@ -388,18 +499,6 @@ def fmt_first(v: str) -> str:
         "simultaneous": t("first_simultaneous"),
         "none": t("first_none"),
     }.get(v, str(v))
-
-
-def _cell_style(styler, css_fn, subset):
-    """Apply a per-cell CSS function to a Styler subset."""
-    return styler.map(css_fn, subset=subset)
-
-
-def _pct_col(label, help=None):
-    """A 0-100 percentage column with a progress bar (units live in the cell)."""
-    return st.column_config.ProgressColumn(
-        label, min_value=0, max_value=100, format="%.1f%%", help=help
-    )
 
 
 # One semantic palette everywhere, colour-blind-safe (Okabe–Ito based),
@@ -665,13 +764,14 @@ if st.session_state.get("flt_dist", "all") != "all":
     _chips.append((_dist_label(st.session_state["flt_dist"]), _clr("flt_dist", "all")))
 if show_result and st.session_state.get("flt_res", "both") != "both":
     _chips.append((fmt_result(st.session_state["flt_res"]), _clr("flt_res", "both")))
-
 # Streamlit deletes widget state when the widget is absent from a run:
-# re-assign the keys of the controls this page does not show, so a
-# page switch never loses a selection
+# re-assign the keys of the controls this page does not show - and of
+# the filter card while it is collapsed - so neither a page switch nor
+# folding the card loses a selection
+_flt_open = bool(st.session_state.get("flt_open"))
 if not show_result:
     st.session_state["flt_res"] = st.session_state.get("flt_res", "both")
-if not show_panel:
+if not show_panel or not _flt_open:
     for _k, _d in (
         ("flt_weapons", []),
         ("flt_classes", []),
@@ -681,106 +781,14 @@ if not show_panel:
         ("flt_res", "both"),
     ):
         st.session_state[_k] = st.session_state.get(_k, _d)
-
-if show_panel:
-    with st.container(border=True, key="flt_card"):
-        st.caption(t("flt_title"))
-        # row 1: the round range gets the widest slot so its options never clip
-        _r1 = st.columns(
-            [3.9] + ([1.0] if has_sides else []) + ([1.4] if show_result else [])
+    if n_rounds >= 2:
+        st.session_state["flt_rounds"] = st.session_state.get("flt_rounds") or (
+            1,
+            n_rounds,
         )
-        _c = 0
-        with _r1[_c]:
-            st.segmented_control(
-                t("flt_rounds"),
-                preset_opts,
-                format_func=_preset_label,
-                key="flt_preset",
-                on_change=_apply_preset,
-                help=t("flt_rounds_help"),
-            )
-        _c += 1
-        if has_sides:
-            with _r1[_c]:
-                st.segmented_control(
-                    t("flt_side"),
-                    ["all", "T", "CT"],
-                    format_func=lambda v: t("all") if v == "all" else v,
-                    key="flt_side",
-                    help=t("flt_side_help"),
-                )
-            _c += 1
-        if show_result:
-            with _r1[_c]:
-                st.segmented_control(
-                    t("flt_res"),
-                    ["both", "kill", "death"],
-                    format_func=lambda v: (
-                        t("res_both") if v == "both" else fmt_result(v)
-                    ),
-                    key="flt_res",
-                    help=t("flt_res_help"),
-                )
-        # row 2: distance, then ONE weapons control: class chips + a More
-        # popover with the single guns, combined with OR (core.Filters unions
-        # weapons and classes)
-        _r2 = st.columns([3.1, 2.2, 0.8], vertical_alignment="bottom")
-        with _r2[0]:
-            st.segmented_control(
-                t("flt_dist"),
-                list(DIST_KEYS),
-                format_func=_dist_label,
-                key="flt_dist",
-                help=t("flt_dist_help"),
-            )
-        with _r2[1]:
-            st.pills(
-                t("flt_classes"),
-                present_classes,
-                selection_mode="multi",
-                format_func=lambda c: t(f"wc_{c}"),
-                key="flt_classes",
-                help=t("flt_classes_help"),
-            )
-        with _r2[2]:
-            with st.popover(t("flt_more"), width="stretch"):
-                st.multiselect(
-                    t("flt_weapons"),
-                    demo_weapons,
-                    key="flt_weapons",
-                    help=t("flt_weapons_help"),
-                )
-        # the range slider exists only in Custom mode (and only when a range
-        # is possible at all); moving it keeps Custom selected
-        if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
-            st.slider(
-                t("flt_rounds"),
-                1,
-                n_rounds,
-                key="flt_rounds",
-                help=t("flt_rounds_help"),
-                on_change=_slider_custom,
-            )
-        # active filters: compact dismissible chips + a text-style Reset
-        if _chips:
-            with st.container(
-                horizontal=True, gap="small", vertical_alignment="center"
-            ):
-                for _i, (_label, _fn) in enumerate(_chips):
-                    st.button(
-                        f"{_label} ✕",
-                        on_click=_fn,
-                        key=f"flt_chip_{_i}",
-                        width="content",
-                    )
-                st.button(
-                    t("flt_reset"),
-                    on_click=_reset_filters,
-                    key="flt_reset",
-                    type="tertiary",
-                    width="content",
-                )
 
+# The filters are resolved BEFORE the panel renders: the collapsed
+# summary line needs the filtered counts as well.
 preset = st.session_state.get("flt_preset", "all")
 round_kwargs: dict = {}
 if preset == "pistols":
@@ -814,16 +822,165 @@ if show_result and st.session_state.get("flt_res", "both") != "both":
     res_sel = {st.session_state["flt_res"]}
 
 
-def _ctx_bar():
-    """
-    One line of context at the top of every page - how much data is in
-    view. The active filters themselves are always visible as chips in
-    the panel above the navigation.
-    """
-    line = t("flt_n", shots=len(shots_f), duels=len(duels_f))
-    if not filters.empty():
-        line += " " + t("flt_n_all", shots=len(shots), duels=len(duels_all))
-    st.caption(line)
+def _flt_show(is_open: bool):
+    st.session_state["flt_open"] = is_open
+
+
+# how much data is in view: the one caption shared by the collapsed
+# summary row and the open card (the per-page "Showing..." bar is gone)
+_counts = t("flt_sum_counts", shots=len(shots_f), duels=len(duels_f))
+if not filters.empty():
+    _counts += " " + t("flt_sum_of", shots=len(shots), duels=len(duels_all))
+
+# The sticky bar: the filter summary row and the page tabs stay
+# visible while the page scrolls (position: sticky in
+# theme/overrides.css, scoped to this container's key; on Streamlit
+# builds without .st-key-* classes the rule simply does not match and
+# the bar scrolls away - no fallback hacks).
+_hdr = st.container(key="hdr_sticky", gap="xsmall")
+
+if show_panel:
+    if _flt_open:
+        with st.container(border=True, key="flt_card"):
+            with st.container(
+                horizontal=True, gap="small", vertical_alignment="center"
+            ):
+                st.caption(t("flt_title"))
+                st.button(
+                    t("flt_done"),
+                    on_click=_flt_show,
+                    args=(False,),
+                    key="flt_done",
+                    type="tertiary",
+                    width="content",
+                )
+            # row 1: the round range gets the widest slot so its options never clip
+            _r1 = st.columns(
+                [3.9] + ([1.0] if has_sides else []) + ([1.4] if show_result else [])
+            )
+            _c = 0
+            with _r1[_c]:
+                st.segmented_control(
+                    t("flt_rounds"),
+                    preset_opts,
+                    format_func=_preset_label,
+                    key="flt_preset",
+                    on_change=_apply_preset,
+                    help=t("flt_rounds_help"),
+                )
+            _c += 1
+            if has_sides:
+                with _r1[_c]:
+                    st.segmented_control(
+                        t("flt_side"),
+                        ["all", "T", "CT"],
+                        format_func=lambda v: t("all") if v == "all" else v,
+                        key="flt_side",
+                        help=t("flt_side_help"),
+                    )
+                _c += 1
+            if show_result:
+                with _r1[_c]:
+                    st.segmented_control(
+                        t("flt_res"),
+                        ["both", "kill", "death"],
+                        format_func=lambda v: (
+                            t("res_both") if v == "both" else fmt_result(v)
+                        ),
+                        key="flt_res",
+                        help=t("flt_res_help"),
+                    )
+            # row 2: distance, then ONE weapons control: class chips + a More
+            # popover with the single guns, combined with OR (core.Filters
+            # unions weapons and classes)
+            _r2 = st.columns([3.1, 2.2, 0.8], vertical_alignment="bottom")
+            with _r2[0]:
+                st.segmented_control(
+                    t("flt_dist"),
+                    list(DIST_KEYS),
+                    format_func=_dist_label,
+                    key="flt_dist",
+                    help=t("flt_dist_help"),
+                )
+            with _r2[1]:
+                st.pills(
+                    t("flt_classes"),
+                    present_classes,
+                    selection_mode="multi",
+                    format_func=lambda c: t(f"wc_{c}"),
+                    key="flt_classes",
+                    help=t("flt_classes_help"),
+                )
+            with _r2[2]:
+                with st.popover(t("flt_more"), width="stretch"):
+                    st.multiselect(
+                        t("flt_weapons"),
+                        demo_weapons,
+                        key="flt_weapons",
+                        help=t("flt_weapons_help"),
+                    )
+            # the range slider exists only in Custom mode (and only when a
+            # range is possible at all); moving it keeps Custom selected
+            if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
+                st.slider(
+                    t("flt_rounds"),
+                    1,
+                    n_rounds,
+                    key="flt_rounds",
+                    help=t("flt_rounds_help"),
+                    on_change=_slider_custom,
+                )
+            # active filters: compact dismissible chips + a text-style Reset
+            if _chips:
+                with st.container(
+                    horizontal=True, gap="small", vertical_alignment="center"
+                ):
+                    for _i, (_label, _fn) in enumerate(_chips):
+                        st.button(
+                            f"{_label} ✕",
+                            on_click=_fn,
+                            key=f"flt_chip_{_i}",
+                            width="content",
+                        )
+                    st.button(
+                        t("flt_reset"),
+                        on_click=_reset_filters,
+                        key="flt_reset",
+                        type="tertiary",
+                        width="content",
+                    )
+            # live feedback while editing: the same counts the collapsed
+            # summary line shows
+            st.caption(_counts)
+    else:
+        # one line: the active filters, how much is in view, and the
+        # tools that used to be separate rows (Reset)
+        _sum = (
+            t("flt_sum", parts=" · ".join(_label for _label, _ in _chips))
+            if _chips
+            else t("flt_sum_none")
+        )
+        with _hdr:
+            with st.container(
+                horizontal=True, gap="small", vertical_alignment="center"
+            ):
+                st.caption(f"{_sum} · {_counts}")
+                st.button(
+                    t("flt_edit"),
+                    on_click=_flt_show,
+                    args=(True,),
+                    key="flt_edit",
+                    type="secondary",
+                    width="content",
+                )
+                if _chips:
+                    st.button(
+                        t("flt_reset"),
+                        on_click=_reset_filters,
+                        key="flt_reset_sum",
+                        type="tertiary",
+                        width="content",
+                    )
 
 
 # keep the URL in sync so the view can be bookmarked / shared
@@ -851,7 +1008,6 @@ non_default = (
 )
 if non_default:
     st.query_params["f"] = _url_pack(url_view)
-    st.caption(t("flt_share"))
 elif "f" in st.query_params:
     del st.query_params["f"]
 
@@ -871,7 +1027,8 @@ if res_sel and len(my_duels):
 # match context of both teams and stays unfiltered.
 openings = core.openings_table(demo)
 impact = core.impact_stats(demo, f=filters)
-status.update(label=t("loaded"), state="complete")
+if status is not None:
+    status.update(label=t("loaded"), state="complete")
 
 
 def duel_label(r) -> str:
@@ -900,16 +1057,17 @@ def num(v, nd: int = 1) -> str:
 PAGES = ("overview", "shooting", "duels", "map", "timeline", "guide")
 if st.session_state.get("page") not in PAGES:
     st.session_state["page"] = "overview"
-page = (
-    st.segmented_control(
-        t("nav_pages"),
-        PAGES,
-        format_func=lambda p: t(f"tab_{p}"),
-        label_visibility="collapsed",
-        key="page",
+with _hdr:
+    page = (
+        st.segmented_control(
+            t("nav_pages"),
+            PAGES,
+            format_func=lambda p: t(f"tab_{p}"),
+            label_visibility="collapsed",
+            key="page",
+        )
+        or "overview"
     )
-    or "overview"
-)
 
 # -------------------------------------------------------------- overview
 # One table for both teams (Team column + subtle team tint); ~8 columns
@@ -917,7 +1075,6 @@ page = (
 # player's row is highlighted (★ + tint) and clicking any row selects
 # that player - same as the select box above.
 if page == "overview":
-    _ctx_bar()
     st.subheader(t("ov_title"))
     st.caption(t("ov_caption"))
     if filters.side or filters.rounds or filters.rounds_set:
@@ -983,32 +1140,6 @@ if page == "overview":
         "aim_err": ov["aim_err"].to_numpy(),
         "duration": ov["duration"].to_numpy(),
     }
-    ov_cfg_all = {
-        "player": st.column_config.TextColumn(
-            ov_labels["player"], pinned=True, width="medium"
-        ),
-        "team": st.column_config.TextColumn(ov_labels["team"], width="small"),
-        "kdr": st.column_config.NumberColumn(
-            ov_labels["kdr"], format="%.2f", help=t("col_kdr_help")
-        ),
-        "kills": st.column_config.NumberColumn(ov_labels["kills"], format="%d"),
-        "deaths": st.column_config.NumberColumn(ov_labels["deaths"], format="%d"),
-        "shots": st.column_config.NumberColumn(ov_labels["shots"], format="%d"),
-        "hits": st.column_config.NumberColumn(ov_labels["hits"], format="%d"),
-        "accuracy": _pct_col(ov_labels["accuracy"]),
-        "hs_hits": _pct_col(ov_labels["hs_hits"]),
-        "hs_kills": _pct_col(ov_labels["hs_kills"]),
-        "moving": _pct_col(ov_labels["moving"]),
-        "risky": _pct_col(ov_labels["risky"]),
-        "first_shot": _pct_col(ov_labels["first_shot"]),
-        "first_acc": _pct_col(ov_labels["first_acc"]),
-        "open_rate": _pct_col(ov_labels["open_rate"], help=t("col_open_help")),
-        "sides": st.column_config.TextColumn(ov_labels["sides"]),
-        "aim_err": st.column_config.NumberColumn(ov_labels["aim_err"], format="%.1f°"),
-        "duration": st.column_config.NumberColumn(
-            ov_labels["duration"], format="%.2f s"
-        ),
-    }
     _ov_basic = [
         "player",
         "team",
@@ -1041,21 +1172,6 @@ if page == "overview":
         "duration",
     ]
     _ov_shown = _ov_all if ov_full else _ov_basic
-    ov_disp = pd.DataFrame({ov_labels[k]: ov_cells[k] for k in _ov_shown})
-
-    def _pick_player():
-        """
-        Row click -> select that player (runs before widgets, so setting
-        session_state['me'] here is allowed; doing it in the tab body would
-        raise StreamlitWidgetAlreadyInstantiatedError).
-        """
-        try:
-            sel = st.session_state["ov_table"]
-        except KeyError:
-            return
-        rows = list(sel.selection.rows or [])
-        if rows and 0 <= rows[0] < len(ov_sids):
-            st.session_state["me"] = ov_sids[rows[0]]
 
     def _pick_player_row(i):
         """Grid row click -> select that player (callback, runs before widgets)."""
@@ -1188,36 +1304,9 @@ if page == "overview":
         stripe=[{"T": "warning", "CT": "info"}.get(x) for x in ov["team"]],
         on_click=_pick_player_row,
     )
-    _ov_raw = st.expander(t("raw_table"))
-    _ov_styler = ov_disp.style
-    # team stripe tints and the selected-row highlight come from the tokens
-    _team_css = {
-        "T": f"background-color: {theme.tok('team-t')}",
-        "CT": f"background-color: {theme.tok('team-ct')}",
-    }
-    _ov_styler = _cell_style(
-        _ov_styler, lambda v: _team_css.get(v, ""), subset=[ov_labels["team"]]
-    )
-    if sel_row is not None:
-        _ov_styler = _cell_style(
-            _ov_styler,
-            lambda v: f"background-color: {theme.tok('surface-selected')}",
-            subset=([sel_row], ov_disp.columns.tolist()),
-        )
-    with _ov_raw:
-        st.dataframe(
-            _ov_styler,
-            column_config={ov_labels[k]: ov_cfg_all[k] for k in _ov_shown},
-            hide_index=True,
-            width="stretch",
-            on_select=_pick_player,
-            selection_mode="single-row",
-            key="ov_table",
-        )
 
 # -------------------------------------------------------------- shooting
 elif page == "shooting":
-    _ctx_bar()
     sh_me = shots_f[shots_f["sid"] == me]
     hg_me = core.hitgroup_counts(demo, me, hurts_f)
     dd = my_duels
@@ -1621,28 +1710,6 @@ elif page == "shooting":
             "first_acc": t("col_first_acc"),
         }
         w = w.rename(columns=w_labels)
-        w_cfg = {
-            w_labels["weapon"]: st.column_config.TextColumn(
-                w_labels["weapon"], pinned=True, width="medium"
-            ),
-            w_labels["shots"]: st.column_config.NumberColumn(
-                w_labels["shots"], format="%d"
-            ),
-            w_labels["median_speed"]: st.column_config.NumberColumn(
-                w_labels["median_speed"], format="%d u/s"
-            ),
-            w_labels["median_dist"]: st.column_config.NumberColumn(
-                w_labels["median_dist"], format="%d u"
-            ),
-            w_labels["moving"]: _pct_col(w_labels["moving"]),
-            w_labels["risky"]: _pct_col(w_labels["risky"]),
-            w_labels["hits"]: st.column_config.NumberColumn(
-                w_labels["hits"], format="%d"
-            ),
-            w_labels["hs"]: _pct_col(w_labels["hs"]),
-            w_labels["accuracy"]: _pct_col(w_labels["accuracy"]),
-            w_labels["first_acc"]: _pct_col(w_labels["first_acc"]),
-        }
         _w_pct = {"bar": "pct", "tone": "context", "fmt": "{:.1f}%"}
         data_table(
             {k: w[lbl].to_numpy() for k, lbl in w_labels.items()},
@@ -1667,15 +1734,12 @@ elif page == "shooting":
             ],
             key="w_grid",
         )
-        with st.expander(t("raw_table")):
-            st.dataframe(w, column_config=w_cfg, hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------- duels
 # ~8 columns by default, "All columns" reveals the detail metrics and
 # the technical tick column; numbers carry their units; the opponent name
 # stays pinned when the full table scrolls horizontally.
 elif page == "duels":
-    _ctx_bar()
     st.subheader(t("du_title"))
     st.caption(t("du_caption"))
     if not len(my_duels):
@@ -1739,44 +1803,6 @@ elif page == "duels":
             "flags": flags,
             "tick": ddf["tick"].to_numpy(),
         }
-        du_cfg_all = {
-            "round": st.column_config.NumberColumn(du_labels["round"], format="%d"),
-            "round_sec": st.column_config.NumberColumn(
-                du_labels["round_sec"], format="%.1f s", help=t("col_round_sec_help")
-            ),
-            "result": st.column_config.TextColumn(du_labels["result"], width="small"),
-            "opponent": st.column_config.TextColumn(
-                du_labels["opponent"], pinned=True, width="medium"
-            ),
-            "weapon": st.column_config.TextColumn(du_labels["weapon"], width="small"),
-            "hs": st.column_config.Column(du_labels["hs"], width="small"),
-            "distance": st.column_config.NumberColumn(
-                du_labels["distance"], format="%d u"
-            ),
-            "zone": st.column_config.TextColumn(
-                du_labels["zone"], width="medium", help=t("col_zone_help")
-            ),
-            "first": st.column_config.TextColumn(du_labels["first"], width="small"),
-            "aim_err": st.column_config.NumberColumn(
-                du_labels["aim_err"], format="%.1f°"
-            ),
-            "my_shots": st.column_config.NumberColumn(
-                du_labels["my_shots"], format="%d"
-            ),
-            "opp_shots": st.column_config.NumberColumn(
-                du_labels["opp_shots"], format="%d"
-            ),
-            "duration": st.column_config.NumberColumn(
-                du_labels["duration"], format="%.2f s"
-            ),
-            "speed": st.column_config.NumberColumn(du_labels["speed"], format="%d u/s"),
-            "errhw": st.column_config.NumberColumn(du_labels["errhw"], format="%.2f"),
-            "side": st.column_config.TextColumn(du_labels["side"], width="small"),
-            "flags": st.column_config.TextColumn(du_labels["flags"], width="medium"),
-            "tick": st.column_config.NumberColumn(
-                du_labels["tick"], format="%d", width="small"
-            ),
-        }
         _du_basic = [
             "round",
             "round_sec",
@@ -1789,21 +1815,6 @@ elif page == "duels":
             "aim_err",
         ]
         _du_shown = list(du_labels) if du_full else _du_basic
-        disp = pd.DataFrame({du_labels[k]: du_cells[k] for k in _du_shown})
-
-        def _duel_row_click():
-            """
-            A row click opens that duel in the Timeline right away
-            (row order == my_duels).
-            """
-            try:
-                sel = st.session_state["du_table"]
-            except KeyError:
-                return
-            rows = list(sel.selection.rows or [])
-            if rows and 0 <= rows[0] < len(my_duels):
-                st.session_state["tl_duel"] = int(rows[0])
-                st.session_state["page"] = "timeline"
 
         def _duel_click_row(i):
             """Grid row click -> open that duel in the Timeline."""
@@ -1891,16 +1902,6 @@ elif page == "duels":
             max_height=720,
         )
         st.caption(t("du_click_hint"))
-        with st.expander(t("raw_table")):
-            st.dataframe(
-                disp,
-                column_config={du_labels[k]: du_cfg_all[k] for k in _du_shown},
-                hide_index=True,
-                width="stretch",
-                on_select=_duel_row_click,
-                selection_mode="single-row",
-                key="du_table",
-            )
 
         # duels by named map zone - "where do my fights actually
         # happen". The zone comes from the death event (last_place_name at
@@ -2084,7 +2085,6 @@ def _replay_block(r, tick):
 
 @st.fragment
 def _timeline_fragment():
-    _ctx_bar()
     st.subheader(t("tl_title"))
     if not len(my_duels):
         st.info(t("du_none"))
@@ -2561,7 +2561,6 @@ def _timeline_fragment():
 @st.fragment
 def _map_fragment():
     """Where the selected player killed and died, on the radar (Map page)."""
-    _ctx_bar()
     st.subheader(t("map_title"))
     has_pos = {"attacker_X", "attacker_Y", "user_X", "user_Y"} <= set(
         demo.deaths.columns

@@ -343,8 +343,8 @@ def widget(at, kind, key):
     except Exception:  # noqa: BLE001 - missing key -> None
         # st.dataframe learned `key` in AppTest only on streamlit 1.57:
         # on older versions every dataframe reports key=None, so a keyed
-        # lookup always fails. The duels table is the first dataframe on
-        # its page, so fall back to it when no dataframe carries a key.
+        # lookup always fails. Fall back to the first dataframe on the
+        # page when no dataframe carries a key.
         if kind == "dataframe":
             try:
                 dfs = list(at.dataframe)
@@ -428,12 +428,18 @@ def _pack_view(d: dict) -> str:
 
 
 def _shots_shown(at):
-    """Shot count from the context line ('Showing: N shots ...')."""
+    """Shot count from the filters summary line ('... N shots / M duels')."""
     for c in at.caption:
-        m = re.search(r"Showing: (\d+) shots", c.value)
+        m = re.search(r"(\d+) shots", c.value)
         if m:
             return int(m.group(1))
     return None
+
+
+def open_filters(at):
+    """Expand the filter card (collapsed summary row is the default)."""
+    if widget(at, "button", "flt_edit") is not None:
+        act(at, "open the filter card", lambda: at.button(key="flt_edit").click().run())
 
 
 # ---------------------------------------------------------------- scenarios
@@ -443,6 +449,7 @@ def scenario_one_round():
     at = open_demo(make_match([1]), "one_round.dem")
     check("runs without exception", not at.exception, err_of(at))
     check("no st.error on load", not at.error)
+    open_filters(at)
     check(
         "no round-range slider on a single round",
         widget(at, "slider", "flt_rounds") is None,
@@ -487,10 +494,74 @@ def scenario_one_round():
     )
 
 
+def scenario_player_stepper():
+    """Compact header: the demo row and the ▲/▼ player stepper."""
+    print("== player stepper (compact header) ==")
+    at = open_demo(make_match([1, 2]), "stepper.dem")
+    check("runs without exception", not at.exception, err_of(at))
+    check(
+        "prev/next player buttons rendered",
+        widget(at, "button", "me_prev") is not None
+        and widget(at, "button", "me_next") is not None,
+    )
+    check(
+        "change-demo button rendered",
+        widget(at, "button", "demo_change_btn") is not None,
+    )
+    # the compact row replaces the upload block after the first load
+    act(at, "next player (Bravo)", lambda: at.button(key="me_next").click().run())
+    check("next moved the selection", ss_get(at, "me") == S2, ss_get(at, "me"))
+    caps = [c.value for c in at.caption]
+    check(
+        "compact demo row names the file",
+        any("stepper.dem" in str(c) for c in caps),
+        [str(c)[:40] for c in caps][:4],
+    )
+    act(
+        at,
+        "prev player (back to Alpha)",
+        lambda: at.button(key="me_prev").click().run(),
+    )
+    check("prev returned to the first player", ss_get(at, "me") == S1, ss_get(at, "me"))
+    act(
+        at,
+        "prev wraps around to the last player",
+        lambda: at.button(key="me_prev").click().run(),
+    )
+    check("prev wrapped to Delta", ss_get(at, "me") == S4, ss_get(at, "me"))
+    act(
+        at,
+        "next wraps to the first player",
+        lambda: at.button(key="me_next").click().run(),
+    )
+    check("next wrapped to Alpha", ss_get(at, "me") == S1, ss_get(at, "me"))
+    # 'Change demo' re-opens the upload block without losing the demo
+    act(
+        at,
+        "open the change-demo panel",
+        lambda: at.button(key="demo_change_btn").click().run(),
+    )
+    check(
+        "change panel shows the uploader",
+        widget(at, "file_uploader", "demo_file") is not None,
+    )
+    act(
+        at,
+        "cancel the change-demo panel",
+        lambda: at.button(key="demo_cancel").click().run(),
+    )
+    check(
+        "cancel keeps the demo loaded",
+        ss_get(at, "demo_src", "").endswith("stepper.dem"),
+    )
+    check("cancel closes the panel", ss_get(at, "demo_change") is False)
+
+
 def scenario_two_rounds():
     print("== two-round demo (presets, custom slider, filters) ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "two_rounds.dem")
     check("runs without exception", not at.exception, err_of(at))
+    open_filters(at)
     check(
         "no slider while preset=All (slider lives in Custom)",
         widget(at, "slider", "flt_rounds") is None,
@@ -559,6 +630,7 @@ def scenario_long25():
         make_match([1, 13, 25], weapons=("ak47", "awp", "deagle")), "long25.dem"
     )
     check("runs without exception", not at.exception, err_of(at))
+    open_filters(at)
     check(
         "all six presets offered",
         n_presets(at) == (6, "all"),
@@ -583,14 +655,29 @@ def scenario_filter_panel():
     print("== filter panel (persistent, distance, reset, links) ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel.dem")
     check("runs without exception", not at.exception, err_of(at))
+    # collapsed by default: the controls sit behind the one-line summary
+    check(
+        "collapsed: no preset control rendered",
+        widget(at, "segmented_control", "flt_preset") is None,
+    )
+    base = _shots_shown(at)
+    check("summary line shows the shot count", bool(base), str(base))
+    check(
+        "collapsed: Edit button offered",
+        widget(at, "button", "flt_edit") is not None,
+    )
+    check(
+        "collapsed: no Reset without active filters",
+        widget(at, "button", "flt_reset_sum") is None,
+    )
+    open_filters(at)
     for k in ("flt_side", "flt_preset", "flt_dist"):
         check(
             f"{k} segmented control visible",
             widget(at, "segmented_control", k) is not None,
         )
     check("class pills visible", widget(at, "pills", "flt_classes") is not None)
-    base = _shots_shown(at)
-    check("context line shows the shot count", bool(base), str(base))
+    check("done button offered", widget(at, "button", "flt_done") is not None)
     act(
         at,
         "weapon filter awp",
@@ -614,6 +701,31 @@ def scenario_filter_panel():
     check(
         "reset restores the full view", _shots_shown(at) == base, str(_shots_shown(at))
     )
+    # collapsing the card keeps every selection (widget states survive
+    # only because the app re-assigns the keys while it is hidden)
+    act(
+        at,
+        "weapon filter awp again",
+        lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
+    )
+    act(at, "collapse the filter card", lambda: at.button(key="flt_done").click().run())
+    check(
+        "collapsed summary names the filter",
+        any("awp" in str(c.value) for c in at.caption),
+    )
+    check(
+        "collapsed: Reset offered while filters are active",
+        widget(at, "button", "flt_reset_sum") is not None,
+    )
+    act(
+        at,
+        "reset from the summary row",
+        lambda: at.button(key="flt_reset_sum").click().run(),
+    )
+    check(
+        "summary-row reset cleared the weapon filter", ss_get(at, "flt_weapons") == []
+    )
+    open_filters(at)
     check("reset cleared the distance band", ss_get(at, "flt_dist") == "all")
     check("reset cleared the weapon filter", ss_get(at, "flt_weapons") == [])
     # Result is a duels-page control; its value must survive page hops
@@ -686,6 +798,7 @@ def scenario_filter_panel():
     )
     # new link round-trip: filter -> URL -> fresh app
     at3 = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel3.dem")
+    open_filters(at3)
     act(
         at3,
         "distance band mid (for the link)",
@@ -843,6 +956,7 @@ def scenario_matrix():
                     f"strict_dist={sdist}",
                     lambda v=sdist: at.slider(key="strict_dist").set_value(v).run(),
                 )
+            open_filters(at)
             presets = _PRESETS_BY_COUNT.get(n_presets(at)[0], ())
             for p in presets:
                 act(
@@ -915,12 +1029,10 @@ def scenario_matrix():
 
 def scenario_tables():
     """
-    Basic/Full table switches, and the overview table
-    must survive a row-selection state (the browser sends it on click;
-    AppTest cannot fire on_select callbacks, but the state must not crash
-    the app either).
+    Basic/Full table switches on the custom grids (the "All columns"
+    toggles still pick which columns the component receives).
     """
-    print("== tables: Basic/Full switches, row selection state ==")
+    print("== tables: Basic/Full switches ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "tables.dem")
     check("runs without exception", not at.exception, err_of(at))
     check("overview toggle exists", widget(at, "toggle", "ov_full") is not None)
@@ -945,18 +1057,6 @@ def scenario_tables():
         "overview back to basic",
         lambda: at.toggle(key="ov_full").set_value(False).run(),
     )
-    # the same widget state the browser sends after a row click on the
-    # overview table: the app must render (the on_select callback itself
-    # only runs in a real browser session)
-    at.session_state["ov_table"] = {"selection": {"rows": [2], "columns": []}}
-    at.run()
-    check("row-selection state does not crash", not at.exception, err_of(at))
-    # A duels row click jumps to the Timeline; AppTest cannot fire
-    # on_select, but the widget state alone must not crash the app
-    goto(at, "duels")
-    at.session_state["du_table"] = {"selection": {"rows": [0], "columns": []}}
-    at.run()
-    check("duels row-click state does not crash", not at.exception, err_of(at))
     # russian labels are ~20-30% longer - the tables must hold
     act(at, "tables in russian", lambda: at.selectbox(key="lang").select("ru").run())
     goto(at, "overview")
@@ -995,29 +1095,6 @@ def scenario_context():
     )
 
     goto(at, "duels")
-
-    # duels table, basic view: Round s present, Zone hidden
-    du = widget(at, "dataframe", "du_table")
-    check("duels table rendered", du is not None)
-    cols = list(du.value.columns)
-    check("basic view has Round s", "Round s" in cols, cols)
-    check("basic view hides Zone", "Zone" not in cols, cols)
-    check(
-        "round_sec value is the kill time in the round",
-        len(du.value) == 25 and (du.value["Round s"].round(2) == 25.16).all(),
-        du.value["Round s"].head(3).tolist(),
-    )
-    act(
-        at,
-        "duels: all columns",
-        lambda: at.toggle(key="du_full").set_value(True).run(),
-    )
-    du = widget(at, "dataframe", "du_table")
-    check(
-        "full view shows Zone with values",
-        "Zone" in list(du.value.columns) and (du.value["Zone"] == "BombsiteA").all(),
-        du.value["Zone"].unique().tolist(),
-    )
 
     # the by-zone table: Alpha = 25 kills from BombsiteA, 0 deaths
     ztabs = [d.value for d in at.dataframe if "K-D" in list(d.value.columns)]
@@ -1144,43 +1221,6 @@ def scenario_first_shots():
         m.value if m else "",
     )
 
-    # overview "All columns": 1st-shot accuracy column with 0.0 for both
-    goto(at, "overview")
-    act(
-        at,
-        "overview all columns",
-        lambda: at.toggle(key="ov_full").set_value(True).run(),
-    )
-    ov = widget(at, "dataframe", "ov_table")
-    check(
-        "overview first-acc column",
-        ov is not None and "1st-shot accuracy" in list(ov.value.columns),
-    )
-    if ov is not None and "1st-shot accuracy" in list(ov.value.columns):
-        fa = ov.value["1st-shot accuracy"]
-        check(
-            "overview first-acc: 0.0 for the shooters, NaN for the rest",
-            int(fa.notna().sum()) == 2 and (fa.dropna() == 0.0).all(),
-            fa.tolist(),
-        )
-
-    # weapons table (shooting page): the per-weapon first-acc column
-    goto(at, "shooting")
-    act(
-        at,
-        "switch back to Alpha",
-        lambda: at.selectbox(key="me").select(S1).run(),
-    )
-    wtabs = [x for x in at.dataframe if "1st-shot accuracy" in list(x.value.columns)]
-    check("weapons first-acc column", len(wtabs) == 1, len(wtabs))
-    if wtabs:
-        check(
-            "weapons first-acc ak47 = 0.0",
-            len(wtabs[0].value) == 1
-            and wtabs[0].value.iloc[0]["1st-shot accuracy"] == 0.0,
-            wtabs[0].value.to_dict(),
-        )
-
     # a demo WITHOUT usercmd data: no crash, no verdict, tile "-"
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "no_mouse.dem")
     check("no-mouse demo runs", not at.exception, err_of(at))
@@ -1290,26 +1330,6 @@ def scenario_impact():
         m.value if m else "",
     )
 
-    # overview "All columns": the opening winrate column
-    goto(at, "overview")
-    act(
-        at,
-        "overview all columns",
-        lambda: at.toggle(key="ov_full").set_value(True).run(),
-    )
-    ov = widget(at, "dataframe", "ov_table")
-    check(
-        "overview opening column",
-        ov is not None and "Opening winrate" in list(ov.value.columns),
-    )
-    if ov is not None and "Opening winrate" in list(ov.value.columns):
-        oc = ov.value["Opening winrate"]
-        check(
-            "overview opening: 100 / 0 for the pair, NaN for the rest",
-            int(oc.notna().sum()) == 2 and sorted(oc.dropna().tolist()) == [0.0, 100.0],
-            oc.tolist(),
-        )
-
     # Duels page: the openings table (30 rows, Alpha starred as killer)
     goto(at, "duels")
     otabs = [d.value for d in at.dataframe if "Killer" in list(d.value.columns)]
@@ -1325,6 +1345,7 @@ def scenario_impact():
         )
 
     # round filter: first half preset -> 12 opening rows
+    open_filters(at)
     act(
         at,
         "round preset first half",
@@ -1425,6 +1446,7 @@ def run_real(path):
             f"player {sid}",
             lambda s=sid: at.selectbox(key="me").select(s).run(),
         )
+    open_filters(at)
     presets = _PRESETS_BY_COUNT.get(n_presets(at)[0], ())
     for p in presets:
         act(
@@ -1520,6 +1542,7 @@ def main():
     else:
         core.DemoParser = FakeParser  # patch BEFORE any app run
         scenario_one_round()
+        scenario_player_stepper()
         scenario_two_rounds()
         scenario_long25()
         scenario_filter_panel()

@@ -45,6 +45,69 @@
    by CSS — the shared component (step 2) applies its own variant.
    Inter's tnum feature is verified present in the shipped woff2. */
 
+/* ---- 3. compact app header --------------------------------------------------
+   One line instead of a 89px title + 38px caption: the app name carries the
+   heading role, the tagline follows on the same baseline and ellipsises
+   on narrow screens. Typography only — colours via tokens. */
+
+.aa-app-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+  margin: 0;
+  line-height: 1.3;
+}
+.aa-app-name {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.aa-app-tag {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ---- 4. sticky header bar ---------------------------------------------------
+   The filter summary line + the page tabs stay pinned at the top of the
+   scrolling main area. A sticky element is constrained to its parent box:
+   Streamlit wraps every top-level element in a content-height
+   stLayoutWrapper, so the WRAPPER is made sticky (scoped with :has() to
+   the one holding the keyed container); the wrapper's parent — the root
+   vertical block — spans the whole page, so the bar travels with it.
+   Old browsers without :has() (or Streamlit builds without st-key-* /
+   stLayoutWrapper) simply let the bar scroll away: no hacks. */
+
+[data-testid="stLayoutWrapper"]:has(> .st-key-hdr_sticky) {
+  position: sticky;
+  top: 60px; /* below the fixed Streamlit toolbar (stHeader, z 999990) */
+  z-index: 30;
+}
+.st-key-hdr_sticky {
+  background: var(--bg-app);
+  padding-block: 0.35rem;
+}
+
+/* ---- 5. compact top ----------------------------------------------------------
+   96px of block-container padding above the title (plus the 60px fixed
+   toolbar on top of it) pushed the content far below the fold. Half of
+   it still keeps a clean gap under the toolbar; the theme-injection
+   markdown block (the <style> tag) takes layout space although it has
+   nothing to show - hidden, its rules still apply. */
+
+[data-testid="stMainBlockContainer"] {
+  padding-top: 4rem;
+}
+[data-testid="stElementContainer"]:has(> .stMarkdownContainer > style) {
+  display: none;
+}
+
 body {
   font-variant-numeric: tabular-nums;
 }
