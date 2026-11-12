@@ -18,7 +18,7 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 - **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded. Below: your duels by map zone and how every round started (opening duels, both teams).
 - **Impact** — per player: opening duels won/lost, trade kills, traded deaths, 2k–5k rounds, assists and flash assists.
 - **Map** — where the selected player killed and died, on the radar: your position (circle), the opponent's (open diamond) and a line between them; blue = kill, red = death; works with every filter, and two-level maps (Nuke, Vertigo) get an Upper / Lower switch. Needs the radar images once, see [Radar images](#radar-images-for-the-map-page).
-- **Timeline** — speed (with the moving threshold), yaw turn, pitch and held keys as coloured bars with a legend, around any duel, with the first shot and the death marked, cut at the moment of death. Switch the view to **2D replay** to watch the duel itself on the radar: both duellists, their view direction, shots, hits, the keys each of them holds, with play / 0.5x / 0.25x and a slider (only the two duellists, no grenades or teammates) (input recorded after death is a demo-parser artifact, not real play).
+- **Timeline** — speed (with the moving threshold), yaw turn, pitch and held keys as coloured bars with a legend, around any duel, with the first shot and the death marked, cut at the moment of death (input recorded after death is a demo-parser artifact, not real play). Switch the view to **2D replay** to watch the duel itself on the radar: both duellists, their view direction, shots, hits, the keys each of them holds, with play / 0.5x / 0.25x and a slider (only the two duellists, no grenades or teammates).
 - **Risk model** — a shot is _risky_ when your speed exceeded what is acceptable at that distance to the nearest living enemy: any speed point-blank, near-stationary at long range. Both distances are configurable.
 - **Data report** — built-in anomaly checks (impossible speeds, unresolved SteamIDs, missing positions…) plus a JSON export to attach to bug reports.
 - Warmup, team damage and non-gun events are excluded automatically.
@@ -51,6 +51,24 @@ Requires Python 3.11+ (tested on 3.11–3.14) and a CS2 match demo (`.dem`).
 
 Then pick the file in the app.
 
+## Demo library and where files are stored
+
+There is one way to open a demo: add a file (drag it into the upload box; `.dem`, `.bz2`, `.gz`, `.zst` and `.zip` work) or pick one of your saved demos from the list. Every demo you add is saved to the library, so next time you just pick it, and the last one you used opens by itself. A demo that is already in the library (same file, any name) is not saved twice.
+
+Everything the app stores lives in one folder next to `start.bat` / `start.sh`:
+
+```
+data/
+  demos/        your demo library (plain files; you can also copy .dem files in by hand)
+  cache/
+    parsed/     parsed demos, so opening one again is instant
+    unpacked/   demos unpacked from .bz2 / .gz / .zst / .zip
+  radars/       radar images (tools/fetch_radars.py)
+  library.json  the list of demos        state.json  last demo and player
+```
+
+Open *Library and storage* in the app to see the folder, the sizes, delete a demo or clear the cache. You can also delete `data/cache/` by hand at any time: it is rebuilt when needed; only `demos/` holds something that cannot be rebuilt. Move the folder with the `AIMAUDIT_DATA_DIR` environment variable. `data/` is git-ignored.
+
 ## Radar images for the Map page
 
 The Map page draws points on the real radar. The radar images are Valve's artwork and are not part of this repository, so fetch them once, on your own machine:
@@ -59,7 +77,7 @@ The Map page draws points on the real radar. The radar images are Valve's artwor
 python tools/fetch_radars.py
 ```
 
-This downloads the images and their calibration from the public [awpy-data](https://github.com/pnxenopoulos/awpy-data) release into `~/.cs2-aimaudit/radars` (about 3 MB). The app finds them there, or in an existing awpy cache (`~/.awpy`), or in the folder set by `AIMAUDIT_RADAR_DIR`. Without radar images the Map page still works: points are drawn on a plain grid in game units.
+This downloads the images and their calibration from the public [awpy-data](https://github.com/pnxenopoulos/awpy-data) release into the `data/radars` folder next to `start.bat` (about 3 MB). The app finds them there, or in an existing awpy cache (`~/.awpy`), or in the folder set by `AIMAUDIT_RADAR_DIR`. Without radar images the Map page still works: points are drawn on a plain grid in game units.
 
 ## Privacy
 

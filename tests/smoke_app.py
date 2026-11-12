@@ -41,7 +41,11 @@ for _s in (sys.stdout, sys.stderr):
 import pandas as pd  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
+# every file the app stores goes to a throw-away data folder (realpath: on
+# Windows CI the temp dir has an 8.3 short name that realpath expands)
+os.environ["AIMAUDIT_DATA_DIR"] = os.path.realpath(tempfile.mkdtemp(prefix="cs2aa_smoke_data_"))
 import core  # noqa: E402
+import store  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -299,10 +303,10 @@ def make_match(rounds, weapons=("ak47",)):
 # ------------------------------------------------------------- app runner
 # realpath: on Windows CI the temp dir contains an 8.3 short name
 # (RUNNER~1) that os.path.realpath expands inside decompressed_demo(),
-# so FakeParser.demos keys and demo_path must already be resolved.
-STATE_DIR = os.path.realpath(tempfile.mkdtemp(prefix="cs2aa_smoke_state_"))
+# so FakeParser.demos keys must already be resolved.
 DEMO_DIR = os.path.realpath(tempfile.mkdtemp(prefix="cs2aa_smoke_demos_"))
-core.STATE_PATH = os.path.join(STATE_DIR, "state.json")  # keep the home clean
+_DEMO_IDS: dict[str, str] = {}  # file name -> library id of the latest registration
+_demo_n = [0]
 
 
 def fresh_at(timeout=300, **session):
@@ -314,13 +318,25 @@ def fresh_at(timeout=300, **session):
     return at
 
 
+def register_demo(demo, fname):
+    """
+    Save a fake demo into the library exactly like an upload does, and
+    return its library id. Unique bytes per call -> a unique id, so two
+    scenarios that reuse a file name never share a cached parse.
+    """
+    _demo_n[0] += 1
+    src = os.path.join(DEMO_DIR, fname)
+    with open(src, "wb") as f:
+        f.write(f"smoke fake demo {fname} #{_demo_n[0]}".encode())
+    entry = store.add_demo(src)
+    FakeParser.demos[os.path.realpath(store.demo_path(entry))] = demo
+    _DEMO_IDS[fname] = entry["id"]
+    return entry["id"]
+
+
 def open_demo(demo, fname, **session):
-    """Register a fake demo under a temp path and run the app on it."""
-    path = os.path.join(DEMO_DIR, fname)
-    with open(path, "wb") as f:
-        f.write(b"smoke fake demo - content is irrelevant for FakeParser")
-    FakeParser.demos[path] = demo
-    return fresh_at(demo_path=path, **session)
+    """Register a fake demo in the library and run the app on it."""
+    return fresh_at(demo_id=register_demo(demo, fname), **session)
 
 
 def err_of(at):
@@ -516,7 +532,7 @@ def scenario_player_stepper():
     caps = [c.value for c in at.caption]
     check(
         "compact demo row names the file",
-        any("stepper.dem" in str(c) for c in caps),
+        any("**stepper**" in str(c) for c in caps),
         [str(c)[:40] for c in caps][:4],
     )
     act(
@@ -544,8 +560,8 @@ def scenario_player_stepper():
         lambda: at.button(key="demo_change_btn").click().run(),
     )
     check(
-        "change panel shows the uploader",
-        widget(at, "file_uploader", "demo_file") is not None,
+        "change panel shows the library picker",
+        widget(at, "selectbox", "lib_pick") is not None,
     )
     act(
         at,
@@ -554,7 +570,7 @@ def scenario_player_stepper():
     )
     check(
         "cancel keeps the demo loaded",
-        ss_get(at, "demo_src", "").endswith("stepper.dem"),
+        ss_get(at, "demo_loaded") == _DEMO_IDS["stepper.dem"],
     )
     check("cancel closes the panel", ss_get(at, "demo_change") is False)
 
@@ -809,7 +825,7 @@ def scenario_filter_panel():
     # old link format (res as a multiselect list, preset=all with a
     # slider-moved range) must open as the equivalent new state
     at2 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
-    at2.session_state["demo_path"] = os.path.join(DEMO_DIR, "panel.dem")
+    at2.session_state["demo_id"] = _DEMO_IDS["panel.dem"]
     at2.query_params["f"] = _pack_view(
         {
             "lang": "en",
@@ -849,30 +865,11 @@ def scenario_filter_panel():
     link = at3.query_params.get("f")
     check("filtered view is packed into the URL", bool(link))
     at4 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
-    at4.session_state["demo_path"] = os.path.join(DEMO_DIR, "panel3.dem")
+    at4.session_state["demo_id"] = _DEMO_IDS["panel3.dem"]
     at4.query_params["f"] = link
     at4.run()
     check("link restores without exception", not at4.exception, err_of(at4))
     check("link restores the distance band", ss_get(at4, "flt_dist") == "mid")
-
-
-def scenario_quoted_path():
-    """
-    Fix regression: a path pasted via Windows 'Copy as path' (quoted)
-    used to end in 'File not found'.
-    """
-
-    print("== quoted path (Windows 'Copy as path') ==")
-    path = os.path.join(DEMO_DIR, "quoted.dem")
-    with open(path, "wb") as f:
-        f.write(b"smoke fake demo")
-    FakeParser.demos[path] = make_match([1, 2])
-    at = fresh_at(demo_path=f'"{path}"')  # double quotes, as Explorer gives
-    check("double-quoted path opens the demo", not at.exception, err_of(at))
-    check("double-quoted path: no error element", not at.error)
-    at = fresh_at(demo_path=f"'{path}'")  # single quotes, as shells give
-    check("single-quoted path opens the demo", not at.exception, err_of(at))
-    check("single-quoted path: no error element", not at.error)
 
 
 def scenario_knife_round():
@@ -954,13 +951,85 @@ def scenario_knife_round():
     )
 
 
+class _empty_library:
+    """Run a block against an empty data folder (the first-start situation)."""
+
+    def __enter__(self):
+        self.old = os.environ["AIMAUDIT_DATA_DIR"]
+        os.environ["AIMAUDIT_DATA_DIR"] = os.path.realpath(tempfile.mkdtemp(prefix="cs2aa_empty_"))
+
+    def __exit__(self, *exc):
+        os.environ["AIMAUDIT_DATA_DIR"] = self.old
+        return False
+
+
 def scenario_bad_input():
     print("== bad input ==")
-    at = fresh_at(demo_path="/no/such/demo.dem")
-    check("missing path: no exception", not at.exception, err_of(at))
-    check("missing path: friendly error shown", len(at.error) == 1)
+    did = register_demo(make_match([1, 2]), "vanishing.dem")
+    os.remove(store.demo_path(store.get_demo(did)))  # deleted from demos/ by hand
+    at = fresh_at(demo_id=did)
+    check("vanished demo file: no exception", not at.exception, err_of(at))
+    check("vanished demo file: falls back to another saved demo", not at.error)
+    with _empty_library():
+        at = fresh_at()
+        check("empty library: no exception", not at.exception, err_of(at))
+        check("empty library: the start card says what to do", len(at.info) >= 1 and not at.error)
+
+
+def scenario_library():
+    """One input: saved demos in a list, delete, clear cache, meta, switching."""
+    print("== demo library ==")
+    ida = register_demo(make_match([1, 2]), "lib_a.dem")
+    idb = register_demo(make_match([1]), "lib_b.dem")
+    at = fresh_at(demo_id=ida)
+    check("library demo opens", not at.exception, err_of(at))
+    check(
+        "once loaded the picker is folded into the compact header",
+        widget(at, "selectbox", "lib_pick") is None and widget(at, "button", "demo_change_btn") is not None,
+    )
+    act(at, "open the change-demo panel", lambda: at.button(key="demo_change_btn").click().run())
+    sel = at.selectbox(key="lib_pick")
+    check(
+        "the saved demos are the options of the one demo picker",
+        any("lib_a" in str(o) for o in sel.options) and any("lib_b" in str(o) for o in sel.options),
+        list(sel.options)[:4],
+    )
+    check("there is no path field any more", not any(getattr(w, "key", "") == "demo_path" for w in at.text_input))
+    meta = store.get_demo(ida)
+    check(
+        "a loaded demo remembers its map and players in the library",
+        meta["map"] == "de_smoke" and len(meta["players"]) >= 2 and meta["tickrate"] == 64,
+        meta,
+    )
+    check("opening a demo marks it as the latest", store.list_demos()[0]["id"] == ida)
+    check("the parsed demo was cached to the data folder", store.storage_report()["parsed"] > 0)
+    # switch to the other saved demo with the picker
+    act(at, "pick another saved demo", lambda: at.selectbox(key="lib_pick").select(idb).run())
+    check("picker switches the demo", at.session_state["demo_id"] == idb and not at.exception, err_of(at))
+    check("the picked demo is now the latest", store.list_demos()[0]["id"] == idb)
+    # a new browser session reopens the last demo
     at = fresh_at()
-    check("no input at all: no exception", not at.exception, err_of(at))
+    check("a new session opens the last demo", at.session_state["demo_id"] == idb and not at.exception, err_of(at))
+    act(at, "open the change-demo panel again", lambda: at.button(key="demo_change_btn").click().run())
+    # clear cache keeps the demos
+    act(at, "clear cache", lambda: at.button(key="lib_clear").click().run())
+    check(
+        "clear cache empties the caches, demos stay",
+        store.storage_report()["parsed"] == 0 and store.get_demo(ida) is not None and store.get_demo(idb) is not None,
+    )
+    # delete needs a confirmation
+    act(at, "delete: ask", lambda: at.button(key=f"del_{idb}").click().run())
+    check("delete asks first, nothing removed yet", store.get_demo(idb) is not None and at.button(key=f"delyes_{idb}") is not None)
+    act(at, "delete: cancel", lambda: at.button(key=f"delno_{idb}").click().run())
+    check("cancel keeps the demo", store.get_demo(idb) is not None)
+    act(at, "delete: ask again", lambda: at.button(key=f"del_{idb}").click().run())
+    act(at, "delete: confirm", lambda: at.button(key=f"delyes_{idb}").click().run())
+    check(
+        "delete removes the demo and the app falls back to another one",
+        store.get_demo(idb) is None and not os.path.exists(os.path.join(store.demos_dir(), f"lib_b__{idb[:8]}.dem"))
+        and at.session_state["demo_id"] == ida and not at.exception,
+        err_of(at),
+    )
 
 
 def scenario_matrix():
@@ -1471,7 +1540,8 @@ def run_real(path):
     print(f"== real demo: {path} ==")
     path = os.path.abspath(path)
     t0 = time.time()
-    at = fresh_at(timeout=600, demo_path=path)
+    entry = store.add_demo(path)  # the real flow: the demo goes to the library
+    at = fresh_at(timeout=600, demo_id=entry["id"])
     check("runs without exception", not at.exception, err_of(at))
     print(f"  (loaded and rendered in {time.time() - t0:.1f}s)")
     if at.exception:
@@ -1590,8 +1660,8 @@ def main():
         scenario_long25()
         scenario_filter_panel()
         scenario_knife_round()
-        scenario_quoted_path()
         scenario_bad_input()
+        scenario_library()
         scenario_tables()
         scenario_context()
         scenario_first_shots()

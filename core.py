@@ -8,6 +8,8 @@ from __future__ import annotations
 import bisect
 import bz2
 import gzip
+import hashlib
+import importlib.metadata
 import json
 import os
 import re
@@ -22,6 +24,8 @@ from functools import cached_property
 import numpy as np
 import pandas as pd
 from demoparser2 import DemoParser
+
+import store
 
 TICKRATE = 64
 NA = "<NA>"
@@ -914,7 +918,7 @@ def decompressed_demo(path: str) -> str:
         raise ValueError(f"Cannot read demo file: {p}") from e
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in stem)[:80]
     target = os.path.join(
-        tempfile.gettempdir(),
+        _unpack_dir(),
         f"cs2_aimaudit_{safe}_{st.st_size}_{int(st.st_mtime)}.dem",
     )
     if os.path.exists(target) and os.path.getsize(target) > 0:
@@ -949,72 +953,39 @@ def decompressed_demo(path: str) -> str:
     return target
 
 
-def normalize_input_path(raw) -> str:
-    """
-    Clean up a path typed or pasted into the demo path box.
-
-    Windows Explorer's 'Copy as path' wraps the path in double quotes, a
-    shell drag-and-drop leaves single quotes, and ~ / %USERPROFILE% show
-    up when a path is copied out of a terminal. os.path.isfile() on a
-    quoted path is False (the UI then says 'File not found'), so quote
-    characters and spaces are stripped first; after that ~ and $VAR /
-    %VAR% are expanded.
-    """
-    if raw is None:
-        return ""
-    s = str(raw).strip()
-    s = s.strip("\"'").strip()
-    if not s:
-        return s
-    if s.startswith("~"):
-        # normpath: expanduser keeps '/' after the home dir on Windows,
-        # producing mixed separators (C:\Users\x/y.dem)
-        s = os.path.normpath(os.path.expanduser(s))
-    if "%" in s:
-        # os.path.expandvars ignores %VAR% on non-Windows - do it by hand
-        def _env(m):
-            return os.environ.get(m.group(1), m.group(0))
-
-        s = re.sub(r"%([A-Za-z_][A-Za-z0-9_]*)%", _env, s)
-    return os.path.expandvars(s)
+def _unpack_dir() -> str:
+    """cache/unpacked in the data folder; the system temp dir when it is read-only."""
+    d = store.unpacked_dir()
+    return d if os.path.isdir(d) and os.access(d, os.W_OK) else tempfile.gettempdir()
 
 
 # ------------------------------------------------------------ app state
-# Small local state next to nothing else: recent demo paths and the last
-# selected player. Everything stays on this machine; if the file is not
-# writable the app simply does not remember anything.
-STATE_PATH = os.path.join(os.path.expanduser("~"), ".cs2-aimaudit", "state.json")
-RECENT_MAX = 10
-
-
+# Small local state next to the demo library (store.state_path): the last
+# selected demo and player. Everything stays in the data folder; if it is not
+# writable the app simply does not remember anything. A state file left by an
+# older version in ~/.cs2-aimaudit is read once and then superseded.
 def load_state() -> dict:
     """Load the local state file; {} when missing or unreadable."""
-    try:
-        with open(STATE_PATH, encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    for path in (store.state_path(), os.path.join(store.LEGACY_DIR, "state.json")):
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            continue
+    return {}
 
 
 def save_state(d: dict) -> None:
-    """Atomically save the state file; silent when the home dir is read-only."""
+    """Atomically save the state file; silent when the data folder is read-only."""
     try:
-        os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-        tmp = STATE_PATH + ".tmp"
+        path = store.state_path()
+        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, STATE_PATH)
+        os.replace(tmp, path)
     except OSError:
         pass
-
-
-def remember_demo(path: str, state: dict) -> dict:
-    """Move `path` to the front of state['recent_demos'] (capped at RECENT_MAX)."""
-    rec = [p for p in state.get("recent_demos", []) if isinstance(p, str) and p != path]
-    rec.insert(0, path)
-    state["recent_demos"] = rec[:RECENT_MAX]
-    return state
 
 
 def tickrate_from_header(header: dict) -> int:
@@ -2168,15 +2139,16 @@ def radar_roots() -> list[str]:
     """
     Folders that may hold radar data (a map_data.json plus the images, in
     `<root>/radars/` or `<root>` itself), best first: $AIMAUDIT_RADAR_DIR,
-    ~/.cs2-aimaudit/radars (written by tools/fetch_radars.py) and the
-    newest awpy cache ($AWPY_DATA_DIR or ~/.awpy, one folder per version).
+    <data folder>/radars (written by tools/fetch_radars.py), a radars folder
+    of an older version in ~/.cs2-aimaudit and the newest awpy cache ($AWPY_DATA_DIR or ~/.awpy, one folder per version).
     The app itself never downloads anything.
     """
     roots: list[str] = []
     env = os.environ.get("AIMAUDIT_RADAR_DIR")
     if env:
         roots.append(os.path.expanduser(env))
-    roots.append(os.path.join(os.path.expanduser("~"), ".cs2-aimaudit", "radars"))
+    roots.append(store.radars_dir())
+    roots.append(os.path.join(store.LEGACY_DIR, "radars"))
     awpy = os.environ.get("AWPY_DATA_DIR") or os.path.join(
         os.path.expanduser("~"), ".awpy"
     )
@@ -2740,6 +2712,43 @@ def hitgroup_counts(
     if not len(hi) or "hitgroup" not in hi.columns:
         return pd.Series(dtype="int64")
     return hi["hitgroup"].value_counts()
+
+
+def _parse_version() -> str:
+    """
+    Identity of what load_demo produces: the demoparser2 version plus a hash
+    of this file, so a cached parse is never used after the parser or the
+    parsing code changed (no version number to forget to bump).
+    """
+    try:
+        with open(__file__, "rb") as fh:
+            code = hashlib.sha1(fh.read()).hexdigest()[:8]
+    except OSError:
+        code = "nocode"
+    try:
+        dp = importlib.metadata.version("demoparser2")
+    except Exception:  # noqa: BLE001
+        dp = "x"
+    return re.sub(r"[^\w.\-]", "_", f"f1-{dp}-{code}")
+
+
+PARSE_VERSION = _parse_version()
+
+
+def load_demo_cached(path: str, progress=None) -> tuple["Demo", bool]:
+    """
+    load_demo through the disk cache of the data folder: (demo, from_cache).
+
+    Only library demos are cached (their file name carries the content id);
+    a demo parsed once opens again in a fraction of a second, also after the
+    app was restarted. Any problem with the cache just means parsing again.
+    """
+    cached = store.read_parsed(path, PARSE_VERSION)
+    if isinstance(cached, Demo):
+        return cached, True
+    demo = load_demo(path, progress=progress)
+    store.write_parsed(path, PARSE_VERSION, demo)
+    return demo, False
 
 
 def timeline_data(

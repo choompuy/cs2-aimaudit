@@ -25,7 +25,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")
+# every file the app stores goes to a throw-away data folder in this run
+os.environ["AIMAUDIT_DATA_DIR"] = tempfile.mkdtemp(prefix="cs2aa_data_")
 import core  # noqa: E402
+import store  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -1133,7 +1136,7 @@ print("== decompressed_demo: broken archives ==")
 
 
 def _parts_in_tmp():
-    d = tempfile.gettempdir()
+    d = store.unpacked_dir()
     return sorted(
         f
         for f in os.listdir(d)
@@ -1183,83 +1186,29 @@ try:
 except ImportError:
     print("  skip broken zst (zstandard not installed)")
 
-# ------------------------------------------------- input path normalization
-print("== normalize_input_path ==")
-check(
-    "plain path unchanged",
-    core.normalize_input_path("/a/b/match.dem") == "/a/b/match.dem",
-)
-check("None -> empty", core.normalize_input_path(None) == "")
-check("empty -> empty", core.normalize_input_path("") == "")
-check("whitespace stripped", core.normalize_input_path("  /a/b.dem \n") == "/a/b.dem")
-check(
-    "double quotes stripped (Explorer 'Copy as path')",
-    core.normalize_input_path('"/a/b/match.dem"') == "/a/b/match.dem",
-)
-check(
-    "single quotes stripped (shell drop)",
-    core.normalize_input_path("'/a/b/match.dem'") == "/a/b/match.dem",
-)
-check(
-    "nested quotes stripped",
-    core.normalize_input_path("\"'/a/b.dem'\"") == "/a/b.dem",
-)
-check(
-    "only leading quote stripped",
-    core.normalize_input_path('"/a/b.dem') == "/a/b.dem",
-)
-check(
-    "~ expands",
-    core.normalize_input_path("~/x/match.dem")
-    == os.path.join(os.path.expanduser("~"), "x", "match.dem"),
-)
-os.environ["CS2AA_TEST_DIR"] = "/env/demo/dir"
-check(
-    "%VAR% expands (Windows style, on any OS)",
-    core.normalize_input_path("%CS2AA_TEST_DIR%/x.dem") == "/env/demo/dir/x.dem",
-)
-check(
-    "unknown %VAR% kept as is",
-    core.normalize_input_path("%CS2AA_NOPE%/x.dem") == "%CS2AA_NOPE%/x.dem",
-)
-with tempfile.TemporaryDirectory(prefix="cs2aa_path_") as td:
-    fp = os.path.join(td, "match.dem")
-    with open(fp, "wb") as f:
-        f.write(b"x")
-    check(
-        "quoted real file passes isfile()",
-        os.path.isfile(core.normalize_input_path(f'"{fp}"')),
-    )
-del os.environ["CS2AA_TEST_DIR"]
-
 # ------------------------------------------------------------- app state
-print("== app state (recent demos) ==")
-with tempfile.TemporaryDirectory(prefix="cs2aa_state_") as td:
-    core.STATE_PATH = os.path.join(td, "state.json")
+print("== app state (data folder) ==")
+_legacy_keep = store.LEGACY_DIR
+store.LEGACY_DIR = tempfile.mkdtemp(prefix="cs2aa_legacy_")  # no state of a real home
+try:
+    _sp = store.state_path()
+    if os.path.exists(_sp):
+        os.remove(_sp)
     check("missing state file -> {}", core.load_state() == {})
-    st_ = core.remember_demo("/a/b.dem", {})
-    st_ = core.remember_demo("/c/d.dem", st_)
-    st_ = core.remember_demo("/a/b.dem", st_)  # dedupe + move to front
-    check("recent order + dedupe", st_["recent_demos"] == ["/a/b.dem", "/c/d.dem"], st_)
-    core.save_state(st_)
-    check("state round-trip", core.load_state() == st_)
-    st2 = {}
-    for i in range(15):
-        st2 = core.remember_demo(f"/x/{i}.dem", st2)
-    check(
-        "recent capped",
-        len(st2["recent_demos"]) == core.RECENT_MAX
-        and st2["recent_demos"][0] == "/x/14.dem",
-        st2["recent_demos"],
-    )
-    with open(core.STATE_PATH, "w", encoding="utf-8") as f:
+    core.save_state({"last_player": "p1", "last_demo": "d1"})
+    check("state round-trip", core.load_state() == {"last_player": "p1", "last_demo": "d1"})
+    with open(_sp, "w", encoding="utf-8") as f:
         f.write("{ not json")
     check("corrupt state -> {}", core.load_state() == {})
-    core.STATE_PATH = os.path.join(td, "ro", "sub", "state.json")
-    os.chmod(td, 0o500)  # read-only parent: save must stay silent
-    core.save_state({"x": 1})
-    check("read-only home -> silent", True)
-    os.chmod(td, 0o700)
+    os.remove(_sp)
+    with open(os.path.join(store.LEGACY_DIR, "state.json"), "w", encoding="utf-8") as f:
+        f.write('{"last_player": "old"}')
+    check("state of an older version is read once", core.load_state() == {"last_player": "old"})
+    core.save_state({"last_player": "new"})
+    check("... and superseded by the data folder", core.load_state() == {"last_player": "new"})
+    os.remove(_sp)
+finally:
+    store.LEGACY_DIR = _legacy_keep
 
 # -------------------------------------------------- tickrate from header
 print("== tickrate from header ==")
@@ -1984,7 +1933,7 @@ print("== corrupt archives ==")
 _cd = tempfile.mkdtemp()
 _parts = lambda: {
     f
-    for f in os.listdir(tempfile.gettempdir())
+    for f in os.listdir(store.unpacked_dir())
     if f.startswith("cs2_aimaudit_") and f.endswith(".part")
 }  # noqa: E731
 _parts_before = _parts()
@@ -2644,15 +2593,8 @@ check(
     _summ(weapons={"awp"}, dist=(0.0, 100.0))["kills"].eq(_all["kills"]).all(),
 )
 check(
-    "filter: kd_ratio = kills / deaths (NaN without deaths)",
-    all(
-        (
-            np.isnan(r.kd_ratio)
-            if r.deaths == 0
-            else r.kd_ratio == round(r.kills / r.deaths, 2)
-        )
-        for r in _all.itertuples()
-    ),
+    "filter: kd_ratio = kills / max(1, deaths)",
+    all(r.kd_ratio == round(r.kills / max(1, r.deaths), 2) for r in _all.itertuples()),
 )
 _i_all = core.impact_stats(imp_demo).set_index("sid")
 _i_t = core.impact_stats(imp_demo, f=core.Filters(side="T")).set_index("sid")
@@ -2966,6 +2908,222 @@ finally:
         os.environ.pop("AIMAUDIT_RADAR_DIR", None)
     else:
         os.environ["AIMAUDIT_RADAR_DIR"] = _old_env2
+
+# ---- the data folder, the demo library and the disk caches (store.py)
+print("== store: data folder ==")
+import io  # noqa: E402
+
+_dd = os.path.abspath(os.environ["AIMAUDIT_DATA_DIR"])
+check("data folder = AIMAUDIT_DATA_DIR", store.data_dir() == _dd, store.data_dir())
+check(
+    "sub folders are created inside it",
+    all(
+        os.path.isdir(d) and os.path.commonpath([d, _dd]) == _dd
+        for d in (store.demos_dir(), store.unpacked_dir(), store.parsed_dir(), store.radars_dir())
+    ),
+)
+_save = (store.APP_DIR, store.LEGACY_DIR, os.environ.pop("AIMAUDIT_DATA_DIR"))
+try:
+    _app = tempfile.mkdtemp(prefix="cs2aa_app_")
+    store.APP_DIR, store.LEGACY_DIR = _app, tempfile.mkdtemp(prefix="cs2aa_home_")
+    store._resolve.cache_clear()
+    check(
+        "default data folder is <app folder>/data, next to the launcher",
+        store.data_dir() == os.path.join(_app, "data"),
+        store.data_dir(),
+    )
+    _ro = tempfile.mkdtemp(prefix="cs2aa_ro_")
+    with open(os.path.join(_ro, "data"), "w") as fh:  # a FILE named data: not usable
+        fh.write("x")
+    store.APP_DIR = _ro
+    store._resolve.cache_clear()
+    check(
+        "app folder not writable -> falls back to the home folder",
+        store.data_dir() == store.LEGACY_DIR,
+        store.data_dir(),
+    )
+finally:
+    store.APP_DIR, store.LEGACY_DIR = _save[0], _save[1]
+    os.environ["AIMAUDIT_DATA_DIR"] = _save[2]
+    store._resolve.cache_clear()
+check("env folder is back after the test", store.data_dir() == _dd)
+
+print("== store: demo library ==")
+check("empty library lists nothing", store.list_demos() == [])
+_b1 = b"PBDEMS2\0" + os.urandom(5000)
+_e1 = store.add_demo(io.BytesIO(_b1), "My Match.dem")
+check(
+    "upload saved as a plain file with an id marker",
+    os.path.isfile(store.demo_path(_e1))
+    and _e1["file"] == f"My Match__{_e1['id'][:8]}.dem"
+    and store.demo_key(_e1["file"]) == _e1["id"][:8]
+    and _e1["size"] == len(_b1)
+    and _e1["name"] == "My Match",
+    _e1,
+)
+_e1b = store.add_demo(io.BytesIO(_b1), "another name.dem")
+check(
+    "the same bytes under another name are not stored twice",
+    _e1b["id"] == _e1["id"] and len(store.list_demos()) == 1 and len(os.listdir(store.demos_dir())) >= 1
+    and not any(f.startswith(".incoming") for f in os.listdir(store.demos_dir())),
+)
+_e2 = store.add_demo(io.BytesIO(b"BZh" + os.urandom(2000)), "match.dem.bz2")
+check(
+    "compound extension kept (.dem.bz2), marker before it",
+    _e2["file"] == f"match__{_e2['id'][:8]}.dem.bz2",
+    _e2["file"],
+)
+try:
+    store.add_demo(io.BytesIO(b""), "empty.dem")
+    check("empty upload -> ValueError", False)
+except ValueError:
+    check("empty upload -> ValueError", True)
+check(
+    "no half-written .incoming file left",
+    not any(f.startswith(".incoming") for f in os.listdir(store.demos_dir())),
+)
+_srcf = os.path.join(tempfile.mkdtemp(), "from disk.dem")
+with open(_srcf, "wb") as fh:
+    fh.write(os.urandom(3000))
+_e3 = store.add_demo(_srcf)
+check(
+    "a path is copied, the original stays",
+    os.path.isfile(_srcf) and os.path.isfile(store.demo_path(_e3)) and _e3["name"] == "from disk",
+)
+# a file dropped into demos/ by hand joins the library (named with a marker)
+_hand = os.path.join(store.demos_dir(), "dropped by hand.dem")
+with open(_hand, "wb") as fh:
+    fh.write(os.urandom(4000))
+_names = {e["name"] for e in store.list_demos()}
+check("hand-copied demo is adopted", "dropped by hand" in _names, _names)
+check(
+    "... and renamed with the id marker",
+    not os.path.exists(_hand)
+    and any(store.demo_key(f) for f in os.listdir(store.demos_dir()) if f.startswith("dropped by hand")),
+)
+with open(os.path.join(store.demos_dir(), "copy of first.dem"), "wb") as fh:
+    fh.write(_b1)
+check(
+    "a hand-copied duplicate of a known demo is not listed twice",
+    sum(1 for e in store.list_demos() if e["id"] == _e1["id"]) == 1,
+)
+store.touch(_e2["id"])
+check("latest opened is listed first", store.list_demos()[0]["id"] == _e2["id"])
+store.update_meta(_e1["id"], map="de_mirage", tickrate=64, players=["A", "B"])
+_got = store.get_demo(_e1["id"])
+check(
+    "meta of a loaded demo is remembered",
+    _got["map"] == "de_mirage" and _got["tickrate"] == 64 and _got["players"] == ["A", "B"],
+)
+os.remove(store.demo_path(_e3))
+check("a deleted file leaves the library", _e3["id"] not in {e["id"] for e in store.list_demos()})
+
+print("== store: parsed cache, unpack cache, delete, storage panel ==")
+_p1 = store.demo_path(_e1)
+check("demo without an id marker is never cached", store.write_parsed("/x/plain.dem", "v1", {"a": 1}) is False)
+check("write_parsed -> read_parsed round trip", store.write_parsed(_p1, "v1", {"a": 1}) and store.read_parsed(_p1, "v1") == {"a": 1})
+check("another code version misses", store.read_parsed(_p1, "v2") is None)
+store.write_parsed(_p1, "v2", {"a": 2})
+check(
+    "a new version replaces the old file",
+    store.read_parsed(_p1, "v1") is None and store.read_parsed(_p1, "v2") == {"a": 2},
+)
+with open(os.path.join(store.parsed_dir(), f"{_e1['id'][:8]}-v2.pkl"), "wb") as fh:
+    fh.write(b"not a pickle")
+check(
+    "corrupt cache file -> None and removed",
+    store.read_parsed(_p1, "v2") is None
+    and not os.path.exists(os.path.join(store.parsed_dir(), f"{_e1['id'][:8]}-v2.pkl")),
+)
+_p2 = store.demo_path(_e2)
+store.write_parsed(_p1, "v3", b"x" * 4000)
+os.utime(os.path.join(store.parsed_dir(), f"{_e1['id'][:8]}-v3.pkl"), (1, 1))  # oldest
+store.write_parsed(_p2, "v3", b"y" * 4000)
+store.prune_parsed(5000)
+check(
+    "pruning drops the least recently used cache first",
+    store.read_parsed(_p1, "v3") is None and store.read_parsed(_p2, "v3") is not None,
+)
+_up = os.path.join(store.unpacked_dir(), f"cs2_aimaudit_match__{_e2['id'][:8]}.dem_9_9.dem")
+with open(_up, "wb") as fh:
+    fh.write(b"u" * 500)
+_rep = store.storage_report()
+check(
+    "storage report: sizes of demos / caches, and the folder",
+    _rep["data"] == _dd and _rep["demos"] > 0 and _rep["parsed"] > 0 and _rep["unpacked"] >= 500,
+    _rep,
+)
+_freed = store.delete_demo(_e2["id"])
+check(
+    "delete: file, parsed cache and unpacked copy are gone, demos of others stay",
+    _freed > 0
+    and not os.path.exists(store.demo_path(_e2))
+    and not os.path.exists(_up)
+    and store.read_parsed(_p2, "v3") is None
+    and os.path.isfile(_p1)
+    and _e2["id"] not in {e["id"] for e in store.list_demos()},
+)
+store.write_parsed(_p1, "v4", b"z" * 100)
+_fr = store.clear_cache()
+check(
+    "clear cache frees the caches and keeps every demo",
+    _fr > 0 and store.storage_report()["parsed"] == 0 and os.path.isfile(_p1),
+)
+check("human_size", store.human_size(512) == "512 B" and store.human_size(1536) == "1.5 KB")
+
+# radars may lie flat next to map_data.json (what tools/fetch_radars.py writes)
+_flat = tempfile.mkdtemp(prefix="cs2aa_flat_")
+_tiny_png(os.path.join(_flat, "de_flat.png"), 16)
+with open(os.path.join(_flat, "map_data.json"), "w", encoding="utf-8") as fh:
+    _json.dump({"de_flat": {"pos_x": 0, "pos_y": 0, "scale": 1.0}}, fh)
+_old_env3 = os.environ.get("AIMAUDIT_RADAR_DIR")
+os.environ["AIMAUDIT_RADAR_DIR"] = _flat
+try:
+    check("radar: flat folder (png next to map_data.json) is found", core.load_radar("de_flat") is not None)
+finally:
+    if _old_env3 is None:
+        os.environ.pop("AIMAUDIT_RADAR_DIR", None)
+    else:
+        os.environ["AIMAUDIT_RADAR_DIR"] = _old_env3
+check(
+    "radar roots: the data folder's radars come right after AIMAUDIT_RADAR_DIR",
+    core.radar_roots()[0] == store.radars_dir(),
+    core.radar_roots()[:2],
+)
+
+print("== core: unpack cache in the data folder, parsed demo cache ==")
+_bzp = os.path.join(tempfile.mkdtemp(), "x.dem.bz2")
+with open(_bzp, "wb") as fh:
+    fh.write(bz2.compress(b"PBDEMS2\0" + b"1" * 300))
+check(
+    "unpacked demos go to <data>/cache/unpacked",
+    os.path.dirname(core.decompressed_demo(_bzp)) == os.path.realpath(store.unpacked_dir())
+    or os.path.dirname(core.decompressed_demo(_bzp)) == store.unpacked_dir(),
+    core.decompressed_demo(_bzp),
+)
+FakeParser.demos["cached__deadbeef.dem"] = FakeParser.demos["impact.dem"]
+_d1, _hit1 = core.load_demo_cached("cached__deadbeef.dem")
+check("first open parses (not from cache)", _hit1 is False and len(_d1.players) > 0)
+FakeParser.demos.pop("cached__deadbeef.dem")  # the parser is gone: only the cache can answer
+_d2, _hit2 = core.load_demo_cached("cached__deadbeef.dem")
+check(
+    "second open comes from the disk cache, identical",
+    _hit2 is True and _d2.players.equals(_d1.players) and _d2.deaths.equals(_d1.deaths) and _d2.sides == _d1.sides,
+)
+check("parse version names parser + code", core.PARSE_VERSION.startswith("f1-") and len(core.PARSE_VERSION) > 8)
+_other = core.PARSE_VERSION
+try:
+    core.PARSE_VERSION = "f1-other"
+    try:
+        core.load_demo_cached("cached__deadbeef.dem")
+        check("changed parser/code version -> cache not used", False)
+    except Exception:  # noqa: BLE001 - the fake parser is gone, so a miss raises
+        check("changed parser/code version -> cache not used", True)
+finally:
+    core.PARSE_VERSION = _other
+check("state file lives in the data folder", os.path.dirname(store.state_path()) == store.data_dir())
+core.save_state({"last_demo": "abc"})
+check("state round trip", core.load_state() == {"last_demo": "abc"})
 
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":

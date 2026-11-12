@@ -9,7 +9,6 @@ import html
 import json
 import os
 import subprocess
-import tempfile
 
 import numpy as np
 import pandas as pd
@@ -21,6 +20,7 @@ from plotly.subplots import make_subplots
 import core
 import i18n
 import mapview
+import store
 import theme
 from ui.strip import duel_strip
 from ui.table import Col, data_table
@@ -195,7 +195,10 @@ def _say(step, **kw):
 
 @st.cache_resource(show_spinner=False)
 def get_demo(path: str, mtime: float) -> core.Demo:
-    return core.load_demo(path, progress=_say)
+    # through the disk cache of the data folder: a demo parsed once opens
+    # again instantly, also after the app was restarted
+    demo, _from_cache = core.load_demo_cached(path, progress=_say)
+    return demo
 
 
 @st.cache_data(show_spinner=False)
@@ -235,65 +238,155 @@ def get_duels(path: str, mtime: float, window_s: float):
     return core.build_duels(demo, window_s)
 
 
-# ------------------------------------------------------------ file input
+# ------------------------------------------------------------ demo library
+# ONE way to open a demo: add a file (it is saved to the library in the data
+# folder next to the launcher) or pick one of the saved demos. There is no
+# path field any more: a stale path used to silently win over a new upload.
+# The choice lives in plain session keys, not widget states: once a demo is
+# loaded the picker is folded into the compact header row, and Streamlit drops
+# the state of widgets that did not render.
+#   demo_id      the library demo that should be open
+#   demo_loaded  the library demo that is loaded (they differ = a fresh load)
+#   demo_change  the "Change demo" panel is open
 state = core.load_state()
-recent = [
-    p for p in state.get("recent_demos", []) if isinstance(p, str) and os.path.exists(p)
-]
-# The loaded demo is remembered in a plain session key (not a widget
-# state): once a demo is loaded the upload UI is hidden behind a compact
-# header row, and Streamlit drops the states of widgets that did not
-# render — demo_src is what survives and re-opens the same demo.
-_prev_src = st.session_state.get("demo_src")
+lib = store.list_demos()
+by_id = {e["id"]: e for e in lib}
+st.session_state.setdefault("up_n", 0)
+_loaded_id = st.session_state.get("demo_loaded")
 _change_open = bool(st.session_state.get("demo_change"))
-up = None
-if _prev_src is None or _change_open:
-    up = st.file_uploader(
-        t("upload_label"), type=["dem", "bz2", "gz", "zst", "zip"], key="demo_file"
+
+
+def _lib_label(e: dict) -> str:
+    return "  ·  ".join(
+        [
+            e["name"],
+            e.get("map") or "—",
+            store.human_size(e["size"]),
+            str(e.get("added", ""))[:10],
+        ]
     )
-    with st.expander(t("path_expander")):
-        if recent:
 
-            def _pick_recent():
-                v = st.session_state.get("recent_pick")
-                if v:
-                    st.session_state["demo_path"] = v
 
-            st.selectbox(
-                t("recent_label"),
-                [""] + recent,
-                format_func=lambda v: t("recent_pick_hint") if not v else v,
-                key="recent_pick",
-                on_change=_pick_recent,
+def _pick_from_library() -> None:
+    st.session_state["demo_id"] = st.session_state["lib_pick"]
+
+
+def _ask_delete(did: str) -> None:
+    st.session_state["del_pending"] = did
+
+
+def _cancel_delete() -> None:
+    st.session_state.pop("del_pending", None)
+
+
+def _confirm_delete(did: str) -> None:
+    freed = store.delete_demo(did)
+    st.session_state.pop("del_pending", None)
+    for k in ("demo_id", "demo_loaded"):
+        if st.session_state.get(k) == did:
+            st.session_state.pop(k, None)
+    st.session_state["_freed"] = freed
+
+
+def _clear_cache() -> None:
+    st.session_state["_freed"] = store.clear_cache()
+
+
+def _library_panel(entries: list[dict]) -> None:
+    """Where the files are, how big, delete a demo, clear the cache."""
+    rep = store.storage_report()
+    with st.expander(t("lib_manage")):
+        st.caption(t("lib_folder"))
+        st.code(rep["data"], language=None)
+        st.caption(
+            t(
+                "lib_sizes",
+                demos=store.human_size(rep["demos"]),
+                parsed=store.human_size(rep["parsed"]),
+                unpacked=store.human_size(rep["unpacked"]),
+                radars=store.human_size(rep["radars"]),
             )
-        st.text_input(
-            t("path_label"),
-            placeholder=t("path_ph"),
-            key="demo_path",
-            help=t("path_help"),
         )
+        st.caption(t("lib_by_hand"))
+        for e in entries:
+            c1, c2 = st.columns([5, 3], vertical_alignment="center")
+            c1.markdown(
+                f"**{e['name']}** · {e.get('map') or '—'} · {store.human_size(e['size'])}"
+            )
+            if st.session_state.get("del_pending") == e["id"]:
+                c2.button(
+                    t("lib_delete_yes"),
+                    key=f"delyes_{e['id']}",
+                    on_click=_confirm_delete,
+                    args=(e["id"],),
+                    type="primary",
+                )
+                c2.button(
+                    t("lib_delete_no"), key=f"delno_{e['id']}", on_click=_cancel_delete
+                )
+            else:
+                c2.button(
+                    t("lib_delete"),
+                    key=f"del_{e['id']}",
+                    on_click=_ask_delete,
+                    args=(e["id"],),
+                    help=t("lib_delete_help"),
+                )
+        st.button(
+            t("lib_clear"),
+            key="lib_clear",
+            on_click=_clear_cache,
+            help=t("lib_clear_help"),
+        )
+        if "_freed" in st.session_state:
+            st.success(
+                t("lib_freed", size=store.human_size(st.session_state.pop("_freed")))
+            )
 
-# Windows "Copy as path" adds quotes, terminals leave ~ / %VAR% / single
-# quotes behind - core.normalize_input_path cleans all that up before the
-# os.path.isfile check, otherwise the app says "File not found".
-path_in = core.normalize_input_path(st.session_state.get("demo_path", ""))
-if path_in:
-    path_in = os.path.expandvars(os.path.expanduser(path_in))
-if path_in:
-    if not os.path.isfile(path_in):
-        st.error(t("err_path_missing", path=path_in))
-        st.stop()
-    src = path_in  # read straight from disk, no upload copy
-elif up:
-    src = os.path.join(tempfile.gettempdir(), up.name)
-    if not os.path.exists(src) or os.path.getsize(src) != up.size:
-        with open(src, "wb") as f:
-            f.write(up.getbuffer())
-elif _prev_src and os.path.exists(_prev_src):
-    # the upload UI is hidden behind the compact header row; the demo
-    # opened earlier stays loaded until the user picks another one
-    src = _prev_src
-else:
+
+if lib and st.session_state.get("demo_id") not in by_id:
+    # first run of a session (or the open demo was deleted): the last used one
+    _last = state.get("last_demo")
+    st.session_state["demo_id"] = _last if _last in by_id else lib[0]["id"]
+
+# the picker is shown while nothing is loaded yet (also after a failed load,
+# so another demo can be tried) and behind the "Change demo" button
+if _loaded_id is None or _change_open or not lib:
+    if lib:
+        _ids = [e["id"] for e in lib]
+        st.selectbox(
+            t("lib_label"),
+            _ids,
+            index=_ids.index(st.session_state["demo_id"]),
+            format_func=lambda i: _lib_label(by_id[i]),
+            key="lib_pick",
+            on_change=_pick_from_library,
+            help=t("lib_help"),
+        )
+    up = st.file_uploader(
+        t("upload_label"),
+        type=["dem", "bz2", "gz", "zst", "zip"],
+        key=f"demo_upload_{st.session_state['up_n']}",
+    )
+    if up is not None:
+        # an upload always wins over whatever was selected before: it is saved
+        # to the library (a demo already there is recognised by content)
+        try:
+            with st.spinner(t("lib_saving")):
+                added = store.add_demo(up, up.name)
+        except (OSError, ValueError) as e:
+            st.error(t("lib_save_failed", err=str(e)))
+            st.stop()
+        st.session_state["demo_id"] = added["id"]
+        st.session_state["up_n"] += 1  # a fresh, empty uploader
+        st.session_state["_added"] = added["name"]
+        st.rerun()
+    if lib:
+        _library_panel(lib)
+if "_added" in st.session_state:
+    st.toast(t("lib_added", name=st.session_state.pop("_added")))
+
+if not lib:
     # the empty state is a 3-step card with the demo instructions
     # inline (the same text the Guide shows), so a first-time player
     # knows what they will get before any file is loaded
@@ -310,6 +403,8 @@ else:
         with st.expander(t("demo_how_title")):
             st.markdown(t("demo_how"))
     st.stop()
+entry = by_id[st.session_state["demo_id"]]
+src = store.demo_path(entry)
 try:
     path = core.decompressed_demo(src)
 except ValueError as e:
@@ -322,7 +417,7 @@ mtime = os.path.getmtime(path)
 # The progress plate is created only while this exact file is not loaded
 # yet; every later rerun skips it, so the compact header row sits at the
 # top instead of the "Demo loaded" box.
-fresh_load = src != _prev_src
+fresh_load = entry["id"] != _loaded_id
 status = st.status(t("loading")) if fresh_load else None
 _status["box"] = status
 try:
@@ -352,13 +447,21 @@ if demo.players.empty:
     st.error(t("err_no_events"))
     st.stop()
 
-# remember what opened fine (recent list stays local, see core.load_state)
-rec = state.get("recent_demos") or []
-if not rec or rec[0] != src:
-    core.remember_demo(src, state)
+# remember what this demo is (map, tick rate, players) in the library, mark
+# it as the latest opened and make it the one that opens next time
+if fresh_load:
+    store.touch(entry["id"])
+store.update_meta(
+    entry["id"],
+    map=demo.header.get("map_name") or None,
+    tickrate=int(demo.tickrate),
+    players=[str(n) for n in demo.players["name"]],
+)
+if state.get("last_demo") != entry["id"]:
+    state["last_demo"] = entry["id"]
     core.save_state(state)
 # the demo is now loaded: remember it and fold the "Change demo" panel
-st.session_state["demo_src"] = src
+st.session_state["demo_loaded"] = entry["id"]
 if fresh_load:
     st.session_state["demo_change"] = False
     # fold the upload block / progress plate into the compact header
@@ -383,7 +486,7 @@ def _close_change():
 
 # the compact demo row replaces the upload block, the "Demo loaded"
 # plate and the map caption: one line with what matters about the file
-info = [f"**{os.path.basename(src)}**"]
+info = [f"**{entry['name']}**"]
 if demo.header.get("map_name"):
     info.append(f"**{t('map')}:** {demo.header['map_name']}")
 info.append(f"**{t('players_n')}:** {len(demo.players)}")

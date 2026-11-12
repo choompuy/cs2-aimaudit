@@ -22,6 +22,10 @@ htmlcov/
 # --- Streamlit
 .streamlit/secrets.toml
 
+# --- The data folder next to the launcher (demo library, caches, radars):
+# large, personal, and Valve's radar art must not be committed
+/data/
+
 # --- Demos and app exports: large and personal, never commit them
 *.dem
 *.dem.info
