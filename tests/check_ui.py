@@ -244,8 +244,11 @@ for fn, cols in {
         "flash_assists",
     ],
 }.items():
-    src = (ROOT / "core.py").read_text(encoding="utf-8")
-    # crude: every column name must appear somewhere in core.py source
+    # core is a package: read every module of it
+    src = "\n".join(
+        p.read_text(encoding="utf-8") for p in sorted((ROOT / "core").glob("*.py"))
+    )
+    # crude: every column name must appear somewhere in core source
     missing = [c for c in cols if c not in src]
     bad(f"{fn} columns present in core source", not missing, missing)
 
@@ -545,6 +548,70 @@ try:
         )
 except Exception as exc:  # noqa: BLE001
     bad("schema: loads and validates", False, repr(exc))
+
+# ---- 13. import graph: no cycles between the runtime modules
+# (the layering must stay one-way: model <- filters <- loader/metrics <-
+# replay <- checks, and core/ui/theme must never import app-level code.)
+import ast  # noqa: E402
+
+
+def _local_modules() -> dict[str, Path]:
+    mods: dict[str, Path] = {}
+    for pattern, prefix in (
+        (ROOT.glob("*.py"), None),
+        (ROOT.glob("core/*.py"), "core"),
+        (ROOT.glob("ui/*.py"), "ui"),
+        (ROOT.glob("theme/*.py"), "theme"),
+    ):
+        for path in pattern:
+            name = path.stem
+            if prefix:
+                name = prefix if name == "__init__" else f"{prefix}.{name}"
+            mods[name] = path
+    return mods
+
+
+_mods = _local_modules()
+_edges: dict[str, set[str]] = {m: set() for m in _mods}
+for _name, _path in _mods.items():
+    for _node in ast.walk(ast.parse(_path.read_text(encoding="utf-8"))):
+        _targets = []
+        if isinstance(_node, ast.Import):
+            _targets = [a.name for a in _node.names]
+        elif isinstance(_node, ast.ImportFrom) and _node.module and _node.level == 0:
+            _targets = [_node.module]
+        for _t in _targets:
+            while _t and _t not in _mods:
+                _t = _t.rpartition(".")[0]
+            if _t and _t != _name:
+                _edges[_name].add(_t)
+
+_color = dict.fromkeys(_mods, 0)  # 0 white, 1 gray, 2 black
+_stack: list[str] = []
+
+
+def _dfs(u: str) -> str | None:
+    _color[u] = 1
+    _stack.append(u)
+    for v in sorted(_edges[u]):
+        if _color[v] == 1:
+            return " -> ".join(_stack[_stack.index(v) :] + [v])
+        if _color[v] == 0:
+            found = _dfs(v)
+            if found:
+                return found
+    _stack.pop()
+    _color[u] = 2
+    return None
+
+
+_cycle = None
+for _m in sorted(_mods):
+    if _color[_m] == 0:
+        _cycle = _dfs(_m)
+        if _cycle:
+            break
+bad("import graph: no cycles", not _cycle, _cycle)
 
 print(f"\n{'FAILURES: ' + str(FAIL) if FAIL else 'ALL OK'}")
 sys.exit(1 if FAIL else 0)

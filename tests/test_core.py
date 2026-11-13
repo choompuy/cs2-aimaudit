@@ -413,7 +413,10 @@ check("vector input", arr[0] == 250.0 and abs(arr[1] - 145) < 1e-9 and np.isnan(
 # ------------------------------------------------------------- load_demo
 print("== load_demo (match) ==")
 FakeParser.demos["match.dem"] = make_match()
-core.DemoParser = FakeParser  # monkeypatch
+# monkeypatch: DemoParser is used by core.loader (load_demo) and
+# core.replay (timeline_data / replay_data); the facade copy is patched
+# too for direct core.DemoParser(...) calls.
+core.DemoParser = core.loader.DemoParser = core.replay.DemoParser = FakeParser
 demo = core.load_demo("match.dem")
 check("warmup fires dropped", len(demo.fires) == 6, f"got {len(demo.fires)}")
 check("warmup excluded", demo.excluded.get("warmup") == 1, demo.excluded)
@@ -3400,14 +3403,16 @@ check(
 check("parse version names parser + code", core.PARSE_VERSION.startswith("f1-") and len(core.PARSE_VERSION) > 8)
 _other = core.PARSE_VERSION
 try:
-    core.PARSE_VERSION = "f1-other"
+    # patch the loader module too: load_demo_cached reads PARSE_VERSION
+    # from its own module globals
+    core.PARSE_VERSION = core.loader.PARSE_VERSION = "f1-other"
     try:
         core.load_demo_cached("cached__deadbeef.dem")
         check("changed parser/code version -> cache not used", False)
     except Exception:  # noqa: BLE001 - the fake parser is gone, so a miss raises
         check("changed parser/code version -> cache not used", True)
 finally:
-    core.PARSE_VERSION = _other
+    core.PARSE_VERSION = core.loader.PARSE_VERSION = _other
 check("state file lives in the data folder", os.path.dirname(store.state_path()) == store.data_dir())
 core.save_state({"last_demo": "abc"})
 check("state round trip", core.load_state() == {"last_demo": "abc"})

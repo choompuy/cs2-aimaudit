@@ -29,7 +29,8 @@ import core  # noqa: E402
 import smoke_app  # noqa: E402  (sets AIMAUDIT_DATA_DIR to a temp dir)
 import ui.table as ut  # noqa: E402
 
-core.DemoParser = smoke_app.FakeParser
+# DemoParser lives in core.loader / core.replay
+core.DemoParser = core.loader.DemoParser = core.replay.DemoParser = smoke_app.FakeParser
 
 # --- recorder: intercept data_table and keep the payload it is about to send
 RECORD: dict[str, dict] = {}
@@ -91,9 +92,7 @@ def main() -> int:
     step("duels_basic_ru", lambda: at.toggle(key="du_full").set_value(False).run())
     step("weapons_ru", lambda: page("shooting"))
     step("overview_all_ru", lambda: page("overview"))
-    step(
-        "overview_basic_ru", lambda: at.toggle(key="ov_full").set_value(False).run()
-    )
+    step("overview_basic_ru", lambda: at.toggle(key="ov_full").set_value(False).run())
 
     for label, payload in RECORD.items():
         path = out / f"{label}.json"

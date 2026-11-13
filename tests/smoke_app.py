@@ -1783,7 +1783,10 @@ def main():
             sys.exit(2)
         run_real(arg)  # real demoparser2, no FakeParser patch
     else:
-        core.DemoParser = FakeParser  # patch BEFORE any app run
+        # patch BEFORE any app run: DemoParser is used by core.loader
+        # (load_demo) and core.replay (timeline/replay data); the facade
+        # name is patched too for direct core.DemoParser calls.
+        core.DemoParser = core.loader.DemoParser = core.replay.DemoParser = FakeParser
         scenario_one_round()
         scenario_round_replay()
         scenario_player_stepper()
