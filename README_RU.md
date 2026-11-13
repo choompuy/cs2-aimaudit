@@ -103,13 +103,19 @@ python tools/fetch_radars.py
 ## Разработка
 
 ```bash
-python tests/test_core.py   # синтетический матч, .dem не нужен
-python tests/check_ui.py    # проверки согласованности i18n / API
+python tests/test_core.py        # синтетический матч, .dem не нужен
+python tests/check_ui.py         # проверки i18n / схемы таблиц / слоёв
+python tests/smoke_app.py --fast # сквозные AppTest-сценарии (фейковый парсер)
 ```
 
-- `core.py` — парсинг и все метрики (demoparser2), без UI.
-- `app.py` — интерфейс на Streamlit.
+- `core/` — парсинг и все метрики (demoparser2), без UI.
+- `app.py` — входная точка Streamlit (диспетчер); страницы лежат в `views/`,
+  оболочка в `shell.py`, панель фильтров в `filters_ui.py`.
+- `ui/tables.toml` — схема таблиц: форматы, сортировка, раскраска и полосы
+  всех гридов описаны данными.
 - `i18n.py` — строки русский/английский.
+- `docs/ARCHITECTURE.md` — карта модулей, правила зависимостей и рецепты
+  «как добавить метрику / колонку / страницу / фильтр».
 - `docs/DEMOPARSER_NOTES.md` — конспект по API demoparser2.
 
 Pull request'ы приветствуются. Баг-репорты с приложенным debug-JSON особенно ценны.

@@ -103,13 +103,19 @@ Open the **Data report / debug** expander at the bottom of the page. The built-i
 ## Development
 
 ```bash
-python tests/test_core.py   # synthetic match, no .dem file needed
-python tests/check_ui.py    # i18n / API consistency checks
+python tests/test_core.py        # synthetic match, no .dem file needed
+python tests/check_ui.py         # i18n / schema / layering guardrails
+python tests/smoke_app.py --fast # AppTest end-to-end (fake parser)
 ```
 
-- `core.py` — parsing and all metrics (demoparser2), no UI code.
-- `app.py` — Streamlit UI.
+- `core/` — parsing and all metrics (demoparser2), no UI code.
+- `app.py` — Streamlit entry point (dispatcher); the pages live in `views/`,
+  the shell in `shell.py`, the filter panel in `filters_ui.py`.
+- `ui/tables.toml` — the table schema: formats, sorting, grading and bars
+  for every grid, described as data.
 - `i18n.py` — English/Russian strings.
+- `docs/ARCHITECTURE.md` — module map, dependency rules and how to add a
+  metric, column, page or filter.
 - `docs/DEMOPARSER_NOTES.md` — notes on the demoparser2 API.
 
 Pull requests are welcome. Bug reports with the debug JSON attached are especially valuable.

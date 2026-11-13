@@ -1,8 +1,10 @@
-# tested minimums; CI also runs against the newest allowed versions
-streamlit>=1.56,<2
-demoparser2>=0.42.1
-pandas>=3.0,<4
-numpy>=2.0,<3
-plotly>=6.0,<8
+# exact pins: the app is tested against precisely these versions.
+# Bump deliberately (one line + green CI). Transitive dependencies
+# stay floating; the weekly scheduled CI run catches their breakage.
+streamlit==1.67.0
+demoparser2==0.42.2
+pandas==3.1.1
+numpy==2.5.4
+plotly==7.1.0
 # transparently unpacks .dem.zst demos (.bz2/.gz/.zip are stdlib)
-zstandard>=0.25,<1
+zstandard==0.25.0

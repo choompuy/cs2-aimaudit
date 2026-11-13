@@ -5,9 +5,10 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Weekly (Mondays) upstream check: the matrix installs the newest
-    # versions allowed by the requirements.txt ceilings, so scheduled
-    # runs catch upstream breakage early.
+    # Weekly (Mondays) upstream check: direct dependencies are pinned
+    # exactly in requirements.txt, but transitive dependencies still
+    # float, so scheduled runs catch their breakage (and runner image
+    # updates) early.
     - cron: "23 5 * * 1"
   workflow_dispatch:
 
@@ -60,26 +61,3 @@ jobs:
         run: python -m compileall -q app.py core i18n.py mapview.py store.py context.py filters_ui.py shell.py ui views theme tools
       - name: Full UI smoke test
         run: python tests/smoke_app.py --all
-
-  floors:
-    # The requirements.txt floors must be honest: install the lowest
-    # allowed versions on the lowest supported Python and run the same
-    # three test suites.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-      - name: Install uv
-        run: pip install uv
-      - name: Install the lowest allowed versions
-        run: uv pip install --resolution lowest-direct -r requirements.txt --system
-      - name: Byte-compile sources
-        run: python -m compileall -q app.py core i18n.py mapview.py store.py context.py filters_ui.py shell.py ui views theme tools
-      - name: Core tests (synthetic demo, no .dem needed)
-        run: python tests/test_core.py
-      - name: UI consistency checks
-        run: python tests/check_ui.py
-      - name: UI smoke test (fast)
-        run: python tests/smoke_app.py --fast

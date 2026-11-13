@@ -690,5 +690,44 @@ for _m in sorted(_mods):
             break
 bad("import graph: no cycles", not _cycle, _cycle)
 
+# ---- 14. layering: core/ui/theme never import app-level code. The
+# dependency chain is one-way (ui, theme, i18n <- core <- context <-
+# filters_ui, shell, views <- app); a violation here would mean a leaf
+# module grew UI/navigation logic again. Beyond the prompt's explicit
+# app/views/shell this also bans filters_ui/context for the same reason.
+_APP_LEVEL = {"app", "views", "shell", "filters_ui", "context"}
+_layer_bad = sorted(
+    f"{_name} -> {_t}"
+    for _name in _mods
+    if _name.split(".")[0] in {"core", "ui", "theme"}
+    for _t in _edges[_name]
+    if _t.split(".")[0] in _APP_LEVEL
+)
+bad(
+    "layering: core/ui/theme free of app-level imports",
+    not _layer_bad,
+    _layer_bad[:4],
+)
+
+# ---- 15. module size guardrails: warn past 1300 lines, fail past 1500,
+# so no module quietly grows back into a second app.py. Scope is the app
+# code (_mods = root modules + core/ + ui/ + theme/ + views/); tests/
+# are deliberately out of scope - splitting them is a separate task.
+
+
+def _warn(name, extra=""):
+    print(f"  warn {name} {extra}")
+
+
+_sizes = {
+    _name: len(_path.read_text(encoding="utf-8").splitlines())
+    for _name, _path in _mods.items()
+}
+_over = sorted(f"{_n}: {_s}" for _n, _s in _sizes.items() if _s > 1500)
+bad("module size: none over 1500 lines", not _over, _over)
+for _n, _s in sorted(_sizes.items()):
+    if 1300 < _s <= 1500:
+        _warn("module size: over 1300 lines", f"{_n}: {_s}")
+
 print(f"\n{'FAILURES: ' + str(FAIL) if FAIL else 'ALL OK'}")
 sys.exit(1 if FAIL else 0)
