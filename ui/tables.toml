@@ -1,0 +1,273 @@
+# ============================================================================
+# CS2-AimAudit — table schema. The single source of truth for the grid
+# tables (ui/table.py renderer): which columns exist, their formats, sort
+# directions, bars, grading and stripes. The same idea as theme/tokens.toml
+# for the palette: a new column or table is added here, not in app.py.
+#
+# Layers
+#   [metric.<id>]            one column definition: format, sorting, grading.
+#                            label is an i18n key (default "col_<id>").
+#   [table.<id>]             column order, the Basic subset, stripe rule,
+#                            height, selection. "extra" lists data columns
+#                            the rows carry but never display (sort keys,
+#                            stripe sources).
+#   [table.<id>.override.<col>]
+#                            per-table tweaks on top of the metric: label,
+#                            grade, sticky, even kind.
+#
+# Values
+#   kind   num | text | badge                (default num)
+#   fmt    str.format spec for numbers, units inside ("{:.1f}%", "{:.0f} u")
+#   best   high | low | none                 what sorts and grades first
+#   grade  none | auto | [bad, good] | [bad, ok, good]
+#          value colour by quality (tier tokens); "auto" = position in the
+#          column; with ok: below it slides to red, above to green
+#   bar    none | pct | rel                  background bar: 0..100 or a
+#          share of the column maximum
+#   tone   colour token name for the bar / badge (accent, context, ...)
+#   sort_by  another data column holding the raw sort value
+#   sticky   pin the column while the table scrolls horizontally
+#   tones  badge colour map: raw/display value -> tone token
+#
+# tests/check_ui.py validates this file (i18n keys exist, fmt formats,
+# grade/best/bar/tone values are legal, basic ⊆ columns, references
+# resolve, colour tokens exist in theme/).
+# ============================================================================
+
+# ------------------------------------------------------------------ metrics
+[metric.player]
+kind = "text"
+sort_by = "player_raw"
+sticky = true
+
+[metric.team]
+kind = "badge"
+tones = { T = "warning", CT = "info" }
+
+[metric.kdr]
+fmt = "{:.2f}"
+best = "high"
+help = "col_kdr_help"
+
+[metric.kills]
+fmt = "{:.0f}"
+bar = "rel"
+tone = "context"
+best = "high"
+
+[metric.deaths]
+fmt = "{:.0f}"
+bar = "rel"
+tone = "context"
+best = "low"
+
+[metric.shots]
+fmt = "{:.0f}"
+bar = "rel"
+tone = "context"
+
+[metric.hits]
+fmt = "{:.0f}"
+bar = "rel"
+tone = "context"
+
+[metric.accuracy]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "high"
+
+[metric.hs_hits]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "high"
+
+[metric.hs_kills]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "high"
+
+[metric.moving]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "low"
+
+[metric.risky]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "low"
+
+[metric.first_shot]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "high"
+
+[metric.first_acc]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "high"
+
+[metric.open_rate]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "high"
+label = "col_open"
+help = "col_open_help"
+
+[metric.sides]
+kind = "text"
+
+[metric.aim_err]
+fmt = "{:.1f}°"
+best = "low"
+
+[metric.duration]
+fmt = "{:.2f} s"
+best = "low"
+
+[metric.weapon]
+kind = "text"
+
+[metric.median_speed]
+fmt = "{:.0f} u/s"
+best = "low"
+
+[metric.median_dist]
+fmt = "{:.0f} u"
+
+# duels: a headshot flag (✓ / empty); the weapons table overrides it into
+# the "HS (of hits)" percentage - same data column name, different meaning
+[metric.hs]
+kind = "text"
+sort_by = "hs_raw"
+
+[metric.round]
+fmt = "{:.0f}"
+best = "low"
+
+[metric.round_sec]
+fmt = "{:.1f} s"
+best = "low"
+help = "col_round_sec_help"
+
+[metric.result]
+kind = "badge"
+sort_by = "result_raw"
+tones = { kill = "positive", death = "negative" }
+
+[metric.opponent]
+kind = "text"
+sticky = true
+
+[metric.distance]
+fmt = "{:.0f} u"
+
+[metric.zone]
+kind = "text"
+help = "col_zone_help"
+
+[metric.first]
+kind = "badge"
+sort_by = "first_raw"
+tones = { me = "positive", opponent = "negative", simultaneous = "warning" }
+
+[metric.my_shots]
+fmt = "{:.0f}"
+
+[metric.opp_shots]
+fmt = "{:.0f}"
+
+[metric.speed]
+fmt = "{:.0f} u/s"
+best = "low"
+
+[metric.errhw]
+fmt = "{:.2f}"
+best = "low"
+
+[metric.side]
+kind = "text"
+
+[metric.flags]
+kind = "text"
+
+[metric.tick]
+fmt = "{:.0f}"
+best = "low"
+
+# ------------------------------------------------------------------- tables
+# One table for both teams (Team column + subtle team tint); ~9 columns
+# by default, "All columns" adds the detail metrics.
+[table.overview]
+columns = [
+  "player", "team", "kdr", "kills", "deaths", "shots", "hits", "accuracy",
+  "hs_hits", "hs_kills", "moving", "risky", "first_shot", "first_acc",
+  "open_rate", "sides", "aim_err", "duration",
+]
+basic = [
+  "player", "team", "kdr", "kills", "deaths", "accuracy", "hs_hits",
+  "risky", "first_shot",
+]
+stripe = { field = "team", map = { T = "warning", CT = "info" } }
+extra = ["player_raw"]
+selectable = true
+
+# K/D gets a fixed grading scale only here: below 0.7 slides to red,
+# 1.0 stays the neutral text colour, above climbs to green
+[table.overview.override.kdr]
+grade = [0.7, 1.0, 1.4]
+
+# Weapons of the selected player: no Basic/All split, no selection.
+[table.weapons]
+columns = [
+  "weapon", "shots", "median_speed", "median_dist", "moving", "risky",
+  "hits", "hs", "accuracy", "first_acc",
+]
+
+[table.weapons.override.weapon]
+sticky = true
+
+[table.weapons.override.moving]
+label = "col_moving_w"
+
+[table.weapons.override.risky]
+label = "col_risky_w"
+
+# weapon_stats names the headshot-percentage column "hs"; shown with the
+# same conventions as the overview's hs_hits
+[table.weapons.override.hs]
+kind = "num"
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "high"
+label = "col_hs_hits"
+sort_by = "none"
+
+# ~9 columns by default, "All columns" reveals the detail metrics and the
+# technical tick column; the opponent name stays pinned when the full
+# table scrolls horizontally.
+[table.duels]
+columns = [
+  "round", "round_sec", "result", "opponent", "weapon", "hs", "distance",
+  "zone", "first", "aim_err", "my_shots", "opp_shots", "duration", "speed",
+  "errhw", "side", "flags", "tick",
+]
+basic = [
+  "round", "round_sec", "result", "opponent", "weapon", "hs", "distance",
+  "first", "aim_err",
+]
+stripe = { field = "result_raw", map = { kill = "positive", death = "negative" }, default = "negative" }
+extra = ["result_raw", "first_raw", "hs_raw"]
+max_height = 720
+selectable = true
+
+[table.duels.override.aim_err]
+label = "col_err"

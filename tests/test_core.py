@@ -645,7 +645,7 @@ check(
 
 # ------------------------------------------------ first shots / mouse flick
 print("== first shots / mouse flick ==")
-# gap semantics (notes s.15): > ENGAGE_GAP_TICKS since the same sid's
+# gap semantics: > ENGAGE_GAP_TICKS since the same sid's
 # previous shot = fresh aim event; the array is order-independent
 _g = core._first_shot_arr([122, 100, 123], ["a", "a", "a"])
 check(
@@ -778,7 +778,7 @@ check(
 )
 check("totals None without config", demo.totals is None, type(demo.totals))
 
-# ---------------------------------- scoreboard cross-check (notes s.14)
+# ---------------------------------- scoreboard cross-check
 print("== data_checks: scoreboard cross-check ==")
 # match.dem live facts: S1 kills S3 once; raw death rows: S3 x1.
 # Warmup kill/death (S2->S4) dropped by our filter AND not counted by
@@ -2198,7 +2198,7 @@ check(
 
 # scoreboard slack: a server that does NOT count knife/grenade kills in
 # kills_total must still pass - ours may exceed game by exactly the
-# player's non-gun kills (notes s.14; the three probed demos count them,
+# player's non-gun kills (the three probed demos count them,
 # other versions may not)
 m9["totals"] = {
     S1: ("Alpha", 2, 1),

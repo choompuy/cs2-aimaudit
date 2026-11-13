@@ -22,9 +22,9 @@ import i18n
 import mapview
 import store
 import theme
+from ui import schema
 from ui.roundrep import round_payload, round_replay
 from ui.strip import duel_strip
-from ui.table import Col, data_table
 
 st.set_page_config(
     page_title="CS2-AimAudit",
@@ -1138,7 +1138,7 @@ my_duels = core.duels_for(duels_f, me) if len(duels_f) else pd.DataFrame()
 # control (Duels / Timeline); the all-players Overview keeps both
 if res_sel and len(my_duels):
     my_duels = my_duels[my_duels["result"].isin(res_sel)]
-# round-impact layer (notes s.16): opening duels, trades, multi-kills,
+# round-impact layer: opening duels, trades, multi-kills,
 # assists. Round structure, so like the K/D in the summary it follows the
 # Side and Rounds filters (a player's rounds on that side), not the
 # weapon / distance ones. The openings table on the Duels page is the
@@ -1216,26 +1216,6 @@ if page == "overview":
     ov_sids = ov["sid"].tolist()
     sel_row = ov_sids.index(me) if me in ov_sids else None
 
-    ov_labels = {
-        "player": t("col_player"),
-        "team": t("col_team"),
-        "kdr": t("col_kdr"),
-        "kills": t("col_kills"),
-        "deaths": t("col_deaths"),
-        "shots": t("col_shots"),
-        "hits": t("col_hits"),
-        "accuracy": t("col_accuracy"),
-        "hs_hits": t("col_hs_hits"),
-        "hs_kills": t("col_hs_kills"),
-        "moving": t("col_moving"),
-        "risky": t("col_risky"),
-        "first_shot": t("col_first_shot"),
-        "first_acc": t("col_first_acc"),
-        "open_rate": t("col_open"),
-        "sides": t("col_sides"),
-        "aim_err": t("col_aim_err"),
-        "duration": t("col_duration"),
-    }
     ov_cells = {
         "player": [
             ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"])
@@ -1258,169 +1238,19 @@ if page == "overview":
         "aim_err": ov["aim_err"].to_numpy(),
         "duration": ov["duration"].to_numpy(),
     }
-    _ov_basic = [
-        "player",
-        "team",
-        "kdr",
-        "kills",
-        "deaths",
-        "accuracy",
-        "hs_hits",
-        "risky",
-        "first_shot",
-    ]
-    _ov_all = [
-        "player",
-        "team",
-        "kdr",
-        "kills",
-        "deaths",
-        "shots",
-        "hits",
-        "accuracy",
-        "hs_hits",
-        "hs_kills",
-        "moving",
-        "risky",
-        "first_shot",
-        "first_acc",
-        "open_rate",
-        "sides",
-        "aim_err",
-        "duration",
-    ]
-    _ov_shown = _ov_all if ov_full else _ov_basic
 
     def _pick_player_row(i):
         """Grid row click -> select that player (callback, runs before widgets)."""
         if 0 <= i < len(ov_sids):
             st.session_state["me"] = ov_sids[i]
 
-    _pct_bad = {"tone": "context", "best": "low"}
-    _ov_grid = {
-        "player": Col(
-            "player", ov_labels["player"], kind="text", sort="player_raw", sticky=True
-        ),
-        "team": Col(
-            "team",
-            ov_labels["team"],
-            kind="badge",
-            tones={"T": "warning", "CT": "info"},
-        ),
-        "kdr": Col(
-            "kdr",
-            ov_labels["kdr"],
-            fmt="{:.2f}",
-            best="high",
-            grade=(0.7, 1.0, 1.4),
-            help=t("col_kdr_help"),
-        ),
-        "kills": Col(
-            "kills",
-            ov_labels["kills"],
-            fmt="{:.0f}",
-            bar="rel",
-            tone="context",
-            best="high",
-        ),
-        "deaths": Col(
-            "deaths",
-            ov_labels["deaths"],
-            fmt="{:.0f}",
-            bar="rel",
-            tone="context",
-            best="low",
-        ),
-        "shots": Col(
-            "shots", ov_labels["shots"], fmt="{:.0f}", bar="rel", tone="context"
-        ),
-        "hits": Col("hits", ov_labels["hits"], fmt="{:.0f}", bar="rel", tone="context"),
-        "accuracy": Col(
-            "accuracy",
-            ov_labels["accuracy"],
-            fmt="{:.1f}%",
-            bar="pct",
-            tone="context",
-            best="high",
-        ),
-        "hs_hits": Col(
-            "hs_hits",
-            ov_labels["hs_hits"],
-            fmt="{:.1f}%",
-            bar="pct",
-            tone="context",
-            best="high",
-        ),
-        "hs_kills": Col(
-            "hs_kills",
-            ov_labels["hs_kills"],
-            fmt="{:.1f}%",
-            bar="pct",
-            tone="context",
-            best="high",
-        ),
-        "moving": Col(
-            "moving",
-            ov_labels["moving"],
-            fmt="{:.1f}%",
-            bar="pct",
-            tone="context",
-            best="low",
-        ),
-        "risky": Col(
-            "risky",
-            ov_labels["risky"],
-            fmt="{:.1f}%",
-            bar="pct",
-            tone="context",
-            best="low",
-        ),
-        "first_shot": Col(
-            "first_shot",
-            ov_labels["first_shot"],
-            fmt="{:.1f}%",
-            bar="pct",
-            tone="context",
-            best="high",
-        ),
-        "first_acc": Col(
-            "first_acc",
-            ov_labels["first_acc"],
-            fmt="{:.1f}%",
-            bar="pct",
-            tone="context",
-            best="high",
-        ),
-        "open_rate": Col(
-            "open_rate",
-            ov_labels["open_rate"],
-            fmt="{:.1f}%",
-            bar="pct",
-            tone="context",
-            best="high",
-            help=t("col_open_help"),
-        ),
-        "sides": Col("sides", ov_labels["sides"], kind="text"),
-        "aim_err": Col(
-            "aim_err",
-            ov_labels["aim_err"],
-            fmt="{:.1f}°",
-            best="low",
-        ),
-        "duration": Col(
-            "duration",
-            ov_labels["duration"],
-            fmt="{:.2f} s",
-            best="low",
-        ),
-    }
-    data_table(
+    schema.table(
+        "overview",
         {**ov_cells, "player_raw": ov["player"].astype(str).to_numpy()},
-        [_ov_grid[k] for k in _ov_shown],
         key="ov_grid",
         selected=sel_row,
-        stripe=[{"T": "warning", "CT": "info"}.get(x) for x in ov["team"]],
         on_click=_pick_player_row,
+        all_columns=ov_full,
     )
 
 # -------------------------------------------------------------- shooting
@@ -1440,7 +1270,7 @@ elif page == "shooting":
     )
     risky_pct = sh_me.loc[known, "risky"].mean() * 100 if known.any() else np.nan
     fs = dd[dd["first"].isin(["me", "opponent"])] if len(dd) else dd
-    # round-impact row of the selected player (follows Side / Rounds, notes s.16)
+    # round-impact row of the selected player (follows Side / Rounds)
     imp_me = impact[impact["sid"] == me]
     imp_me = imp_me.iloc[0] if len(imp_me) else None
     first_pct = (fs["first"] == "me").mean() * 100 if len(fs) else np.nan
@@ -1815,41 +1645,9 @@ elif page == "shooting":
     if len(w):
         # same table conventions as the other tables - units in the
         # numbers, progress bars for percentages, weapon name pinned.
-        w_labels = {
-            "weapon": t("col_weapon"),
-            "shots": t("col_shots"),
-            "median_speed": t("col_median_speed"),
-            "median_dist": t("col_median_dist"),
-            "moving": t("col_moving_w"),
-            "risky": t("col_risky_w"),
-            "hits": t("col_hits"),
-            "hs": t("col_hs_hits"),
-            "accuracy": t("col_accuracy"),
-            "first_acc": t("col_first_acc"),
-        }
-        w = w.rename(columns=w_labels)
-        _w_pct = {"bar": "pct", "tone": "context", "fmt": "{:.1f}%"}
-        data_table(
-            {k: w[lbl].to_numpy() for k, lbl in w_labels.items()},
-            [
-                Col("weapon", w_labels["weapon"], kind="text", sticky=True),
-                Col(
-                    "shots", w_labels["shots"], fmt="{:.0f}", bar="rel", tone="context"
-                ),
-                Col(
-                    "median_speed",
-                    w_labels["median_speed"],
-                    fmt="{:.0f} u/s",
-                    best="low",
-                ),
-                Col("median_dist", w_labels["median_dist"], fmt="{:.0f} u"),
-                Col("moving", w_labels["moving"], best="low", **_w_pct),
-                Col("risky", w_labels["risky"], best="low", **_w_pct),
-                Col("hits", w_labels["hits"], fmt="{:.0f}", bar="rel", tone="context"),
-                Col("hs", w_labels["hs"], best="high", **_w_pct),
-                Col("accuracy", w_labels["accuracy"], best="high", **_w_pct),
-                Col("first_acc", w_labels["first_acc"], best="high", **_w_pct),
-            ],
+        schema.table(
+            "weapons",
+            {c: w[c].to_numpy() for c in schema.columns("weapons")},
             key="w_grid",
         )
 
@@ -1881,26 +1679,6 @@ elif page == "duels":
         _tcol, _ = st.columns([1, 2])
         with _tcol:
             du_full = st.toggle(t("all_columns"), key="du_full")
-        du_labels = {
-            "round": t("col_round"),
-            "round_sec": t("col_round_sec"),
-            "result": t("col_result"),
-            "opponent": t("col_opponent"),
-            "weapon": t("col_weapon"),
-            "hs": t("col_hs"),
-            "distance": t("col_distance"),
-            "zone": t("col_zone"),
-            "first": t("col_first"),
-            "aim_err": t("col_err"),
-            "my_shots": t("col_my_shots"),
-            "opp_shots": t("col_opp_shots"),
-            "duration": t("col_duration"),
-            "speed": t("col_speed"),
-            "errhw": t("col_errhw"),
-            "side": t("col_side"),
-            "flags": t("col_flags"),
-            "tick": t("col_tick"),
-        }
         du_cells = {
             "round": ddf["round"].to_numpy(),
             "round_sec": ddf["round_sec"].to_numpy(),
@@ -1921,18 +1699,6 @@ elif page == "duels":
             "flags": flags,
             "tick": ddf["tick"].to_numpy(),
         }
-        _du_basic = [
-            "round",
-            "round_sec",
-            "result",
-            "opponent",
-            "weapon",
-            "hs",
-            "distance",
-            "first",
-            "aim_err",
-        ]
-        _du_shown = list(du_labels) if du_full else _du_basic
 
         def _duel_click_row(i):
             """Grid row click -> open that duel in the Timeline."""
@@ -1940,84 +1706,17 @@ elif page == "duels":
                 st.session_state["tl_duel"] = int(i)
                 st.session_state["page"] = "timeline"
 
-        _du_grid = {
-            "round": Col("round", du_labels["round"], fmt="{:.0f}", best="low"),
-            "round_sec": Col(
-                "round_sec",
-                du_labels["round_sec"],
-                fmt="{:.1f} s",
-                best="low",
-                help=t("col_round_sec_help"),
-            ),
-            "result": Col(
-                "result",
-                du_labels["result"],
-                kind="badge",
-                sort="result_raw",
-                tones={"kill": "positive", "death": "negative"},
-            ),
-            "opponent": Col(
-                "opponent", du_labels["opponent"], kind="text", sticky=True
-            ),
-            "weapon": Col("weapon", du_labels["weapon"], kind="text"),
-            "hs": Col("hs", du_labels["hs"], kind="text", sort="hs_raw"),
-            "distance": Col("distance", du_labels["distance"], fmt="{:.0f} u"),
-            "zone": Col(
-                "zone", du_labels["zone"], kind="text", help=t("col_zone_help")
-            ),
-            "first": Col(
-                "first",
-                du_labels["first"],
-                kind="badge",
-                sort="first_raw",
-                tones={
-                    "me": "positive",
-                    "opponent": "negative",
-                    "simultaneous": "warning",
-                },
-            ),
-            "aim_err": Col(
-                "aim_err",
-                du_labels["aim_err"],
-                fmt="{:.1f}°",
-                best="low",
-            ),
-            "my_shots": Col("my_shots", du_labels["my_shots"], fmt="{:.0f}"),
-            "opp_shots": Col("opp_shots", du_labels["opp_shots"], fmt="{:.0f}"),
-            "duration": Col(
-                "duration",
-                du_labels["duration"],
-                fmt="{:.2f} s",
-                best="low",
-            ),
-            "speed": Col(
-                "speed",
-                du_labels["speed"],
-                fmt="{:.0f} u/s",
-                best="low",
-            ),
-            "errhw": Col(
-                "errhw",
-                du_labels["errhw"],
-                fmt="{:.2f}",
-                best="low",
-            ),
-            "side": Col("side", du_labels["side"], kind="text"),
-            "flags": Col("flags", du_labels["flags"], kind="text"),
-            "tick": Col("tick", du_labels["tick"], fmt="{:.0f}", best="low"),
-        }
-        data_table(
+        schema.table(
+            "duels",
             {
                 **du_cells,
                 "result_raw": ddf["result"].astype(str).to_numpy(),
                 "first_raw": ddf["first"].astype(str).to_numpy(),
                 "hs_raw": ddf["headshot"].astype(int).to_numpy(),
             },
-            [_du_grid[k] for k in _du_shown],
             key="du_grid",
-            stripe=["positive" if v == "kill" else "negative" for v in ddf["result"]],
             on_click=_duel_click_row,
-            max_height=720,
+            all_columns=du_full,
         )
         st.caption(t("du_click_hint"))
 
@@ -2181,7 +1880,8 @@ def _round_block(r, tick):
             # (minus a small pre-roll to see the approach) to a bit after
             # the resolution (to see the outcome / the trade)
             first = [
-                x for x in (dr.get("my_first_tick"), dr.get("opp_first_tick"))
+                x
+                for x in (dr.get("my_first_tick"), dr.get("opp_first_tick"))
                 if pd.notna(x)
             ]
             start = int(min(first)) if first else tk - int(1.0 * tr)
@@ -2216,14 +1916,11 @@ def _round_block(r, tick):
         side_of=lambda s: demo.side_at(round_no, s),
         radar=core.load_radar(str(demo.header.get("map_name") or "")),
         duels=duels,
-        rounds=[
-            {"n": n, "win": winners.get(n, "")} for n in range(1, n_rounds + 1)
-        ],
+        rounds=[{"n": n, "win": winners.get(n, "")} for n in range(1, n_rounds + 1)],
         at=None if sel >= 0 else data["t0"],
         sel=sel,
         key_players=(
-            [(me, name_of.get(me, me))]
-            + [(o, name_of.get(o, o)) for o in opps[:5]]
+            [(me, name_of.get(me, me))] + [(o, name_of.get(o, o)) for o in opps[:5]]
         ),
         labels={
             "play": t("rr_play"),

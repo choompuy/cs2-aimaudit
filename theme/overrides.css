@@ -42,7 +42,7 @@
    Tabular (fixed-width) digits everywhere numbers line up in columns:
    markdown tables, chips, custom HTML. Canvas-rendered surfaces
    (st.dataframe cells, Plotly) draw text themselves and are unaffected
-   by CSS — the shared component (step 2) applies its own variant.
+   by CSS — the shared component applies its own variant.
    Inter's tnum feature is verified present in the shipped woff2. */
 
 /* ---- 3. compact app header --------------------------------------------------

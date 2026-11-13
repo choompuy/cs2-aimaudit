@@ -149,7 +149,7 @@ HIT_WINDOW = 3
 MAX_DUEL_DIST = 10000.0
 
 # ------------------------------------------------- shot context
-# Per-shot context from server fields (docs/DEMOPARSER_NOTES.md s.13):
+# Per-shot context from server fields:
 # flash_duration above FLASH_SHOT_S -> the shot counts as fired while
 # flashed; velo_modifier below SLOWED_MAX -> still slowed by recent damage;
 # round_second outside [0, ROUND_SEC_MAX] -> bad clock data -> NaN.
@@ -163,10 +163,10 @@ ROUND_SEC_MAX = 300.0
 ENGAGE_GAP_TICKS = 22
 # Pre-fire mouse window: usercmd deltas summed over the FLICK_WIN_TICKS
 # ticks (~250 ms) before a first shot = how much the mouse was moving when
-# the player committed (docs/DEMOPARSER_NOTES.md s.15).
+# the player committed.
 FLICK_WIN_TICKS = 16
 # Trade window: a teammate avenging your death within this many seconds
-# counts as a trade (the usual community definition; notes s.16).
+# counts as a trade (the usual community definition).
 TRADE_S = 5.0
 # Eye / head heights (units, above the pawn origin). Crouching lowers both
 # by ~18 units; we scale linearly with duck_amount (0..1).
@@ -307,8 +307,8 @@ def halves_from_sides(sides: dict, n_rounds: int) -> list[tuple[int, int]]:
 def round_winners(demo: "Demo") -> dict[int, str]:
     """
     Round winners ('CT'/'T') for the replay's round bar, inferred from
-    eliminations: CS2 demos expose no round_end/winner event (docs
-    s.12.1), so the only honest signal is "a side lost every player in
+    eliminations: CS2 demos expose no round_end/winner event, so the
+    only honest signal is "a side lost every player in
     that round" - then the other side won it. Every death counts towards
     the VICTIM's side loss count (kills, teamkills, suicides/world, the
     bomb), because the team did lose that player either way.
@@ -1133,19 +1133,18 @@ class Demo:
     #                      tick AND tick-1; `speed` is our own position delta
     excluded: dict = field(default_factory=dict)
     #                      rounds dropped before the live match: {warmup,
-    #                      knife_round, restart: round counts} - see
-    #                      docs/DEMOPARSER_NOTES.md section 12
+    #                      knife_round, restart: round counts}
     tickrate: int = TICKRATE  # from the demo header (fallback: 64)
     sides: dict = field(default_factory=dict)  # round(1-based) -> sid -> T/CT
     totals: pd.DataFrame | None = None
     #                      game kills_total / deaths_total per player,
     #                      sampled at the last event tick (None when the
     #                      parser or props are unavailable) - input of the
-    #                      data_checks scoreboard cross-check, notes s.14
+    #                      data_checks scoreboard cross-check
     mouse: pd.DataFrame | None = None
     #                      usercmd mouse deltas (|dx|+|dy| per tick) around
     #                      first-shot windows, None when the demo/parser
-    #                      does not provide them - input of flick_move, s.15
+    #                      does not provide them - input of flick_move
 
     def side_at(self, round_no: int, sid: str) -> str:
         """Player's side in a given round (falls back to the static team)."""
@@ -1180,7 +1179,7 @@ def _first_shot_arr(ticks, sids) -> np.ndarray:
     """
     Boolean array aligned to the inputs: True where the row is the FIRST
     shot of an engagement for that player - no shot by the same sid within
-    the previous ENGAGE_GAP_TICKS ticks (~350 ms, notes s.15). A spray's
+    the previous ENGAGE_GAP_TICKS ticks (~350 ms). A spray's
     follow-up shots are recoil control; the fresh aim event is what the
     flick analysis looks at. Rows may arrive in any order.
     """
@@ -1259,7 +1258,7 @@ def load_demo(path: str, progress=None) -> Demo:
         "player_death",
         "weapon_fire",
         "player_hurt",
-        # round/match structure (docs/DEMOPARSER_NOTES.md s.12):
+        # round/match structure:
         # begin_new_match marks the live-match start (FACEIT knife
         # rounds sit before it), round_freeze_end bounds the rounds
         "begin_new_match",
@@ -1348,7 +1347,7 @@ def load_demo(path: str, progress=None) -> Demo:
     # the LAST begin_new_match. Everything before that tick is dropped and
     # counted per cause for the UI banner. Fallback without the event: the
     # first round segment with zero gun fires and knife-only kills is the
-    # knife round. See docs/DEMOPARSER_NOTES.md section 12.
+    # knife round.
     excluded: dict[str, int] = {"warmup": 0, "knife_round": 0, "restart": 0}
 
     def _between(df, lo, hi):
@@ -1531,7 +1530,7 @@ def load_demo(path: str, progress=None) -> Demo:
     # shooter state at the fire ticks: flash_duration (seconds of
     # blindness left) and velo_modifier (<1 = slowed by recent damage). A
     # separate parse_ticks call: an unknown prop must not take the
-    # POS/buttons chain down with it (the buttons lesson, notes s.4). On
+    # POS/buttons chain down with it (the buttons lesson). On
     # failure the columns stay absent -> flags come out NA, not False.
     try:
         state = p.parse_ticks(["flash_duration", "velo_modifier"], ticks=ticks_list)
@@ -1553,7 +1552,7 @@ def load_demo(path: str, progress=None) -> Demo:
             )
     tickrate = tickrate_from_header(header)
     td = _add_speed(td, tickrate)
-    # usercmd mouse deltas around first-shot windows (notes s.15): a THIRD
+    # usercmd mouse deltas around first-shot windows: a THIRD
     # separate parse_ticks call - the rows must never merge into `td`
     # (they would change the delta-position speed chain), and an unknown
     # prop must not take anything down with it (the buttons lesson). None
@@ -1591,7 +1590,7 @@ def load_demo(path: str, progress=None) -> Demo:
             md = md.drop_duplicates(["tick", "sid"])
             if len(md):
                 mouse = md.sort_values(["tick", "sid"]).reset_index(drop=True)
-    # scoreboard aggregates (notes s.14): the game's own kills_total /
+    # scoreboard aggregates: the game's own kills_total /
     # deaths_total at the last event tick, for the data_checks
     # cross-check. Verified on the real demos: the game updates them
     # live (a kill is already counted at the tick of the last death of
@@ -2422,7 +2421,7 @@ def openings_table(demo: Demo) -> pd.DataFrame:
     An 'opening duel' is the round's first death caused by an enemy:
     suicides / world damage / teamkill rows are skipped and the next valid
     death of that round becomes the opening (on the real demos 2-3 rounds
-    per match start with such a row, notes s.16). ANY weapon counts,
+    per match start with such a row). ANY weapon counts,
     knife and grenades included - this is 'how the round started', not a
     gun-duel metric; the Duels page table marks rows with the selected
     player. Returns an empty frame when the demo has no enemy kills.
@@ -2602,7 +2601,7 @@ def player_summary(
     dth = demo.deaths
     have_d = len(dth) and {"attacker_steamid", "user_steamid"} <= set(dth.columns)
     teams = demo.teams
-    # opening-duel win rate (impact_stats, notes s.16): whole-match, like
+    # opening-duel win rate (impact_stats): whole-match, like
     # the K/D below - it is round structure, not a filterable shot metric
     open_rate = impact_stats(demo, f=f).set_index("sid")["open_rate"].to_dict()
     keep = _round_side_keep(demo, f)
@@ -2696,12 +2695,12 @@ def player_summary(
                     round((fs["first"] == "me").mean() * 100, 1) if len(fs) else np.nan
                 ),
                 # first-shot accuracy: hit rate on first shots of
-                # engagements (crosshair placement quality, notes s.15)
+                # engagements (crosshair placement quality)
                 "first_acc": (
                     round(fsh["hit"].mean() * 100, 1) if len(fsh) else np.nan
                 ),
                 # opening-duel win rate: share of the rounds' first enemy
-                # kills won (killer vs victim, notes s.16)
+                # kills won (killer vs victim)
                 "open_rate": open_rate.get(p.sid, np.nan),
                 "aim_err": (
                     round(dd["my_err"].median(), 1)
@@ -3194,7 +3193,7 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
         }
     )
 
-    # 12. scoreboard cross-check (notes s.14): the game's own
+    # scoreboard cross-check: the game's own
     # kills_total / deaths_total at the last event tick vs our tables.
     # Verified on all three real demos, every player:
     #   kills_total  == our enemy kills (knife/grenade kills included)

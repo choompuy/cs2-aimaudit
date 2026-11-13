@@ -479,5 +479,72 @@ for theme_name in theme.available_themes():
             f"{ratio:.2f}:1",
         )
 
+# ---- 12. table schema (ui/tables.toml + ui/schema.py): the grids are
+# described by data. validate() checks every rule the file must hold:
+# i18n keys exist in both locales, fmt formats a number, best/grade/bar/
+# tone values are legal (bad != good, ok between), basic ⊆ columns,
+# sort_by/stripe references resolve, colour tokens exist in theme/.
+try:
+    import ui.schema as schema
+    from ui.table import Col
+
+    errs = schema.validate()
+    bad("tables.toml schema valid", not errs, errs[:6])
+
+    def _spec(**m):
+        return {"metric": {"m": m}, "table": {"t": {"columns": ["m"]}}}
+
+    bad(
+        "schema: minimal spec valid",
+        schema.validate(_spec(label="col_kills")) == [],
+        schema.validate(_spec(label="col_kills")),
+    )
+    # negative examples: config mistakes must fail validation, not render
+    bad("schema: broken fmt rejected", schema.validate(_spec(fmt="{:.2")) != [])
+    bad(
+        "schema: unknown i18n key rejected",
+        schema.validate(_spec(label="col_nope")) != [],
+    )
+    bad(
+        "schema: grade ok outside bad..good rejected",
+        schema.validate(_spec(grade=[0.0, 5.0, 1.0])) != [],
+    )
+    bad("schema: grade bad == good rejected", schema.validate(_spec(grade=[1.0, 1.0])) != [])
+    bad("schema: unknown tone rejected", schema.validate(_spec(tone="magenta")) != [])
+    bad(
+        "schema: bar on a text column rejected",
+        schema.validate(_spec(kind="text", bar="pct")) != [],
+    )
+    bad(
+        "schema: basic outside columns rejected",
+        schema.validate(
+            {"metric": {"m": {}}, "table": {"t": {"columns": ["m"], "basic": ["x"]}}}
+        )
+        != [],
+    )
+    bad(
+        "schema: dangling sort_by rejected",
+        schema.validate(
+            {
+                "metric": {"m": {"sort_by": "nope"}},
+                "table": {"t": {"columns": ["m"], "extra": []}},
+            }
+        )
+        != [],
+    )
+    # the migrated grids really build through the schema
+    for tid, n_basic, n_all in (("overview", 9, 18), ("weapons", 10, 10), ("duels", 9, 18)):
+        cols = schema.build_cols(tid, t=lambda k, **kw: k)
+        cols_all = schema.build_cols(tid, all_columns=True, t=lambda k, **kw: k)
+        bad(
+            f"schema: {tid} builds ({n_basic} basic / {n_all} all)",
+            len(cols) == n_basic
+            and len(cols_all) == n_all
+            and all(type(c) is Col for c in cols + cols_all),
+            (len(cols), len(cols_all)),
+        )
+except Exception as exc:  # noqa: BLE001
+    bad("schema: loads and validates", False, repr(exc))
+
 print(f"\n{'FAILURES: ' + str(FAIL) if FAIL else 'ALL OK'}")
 sys.exit(1 if FAIL else 0)

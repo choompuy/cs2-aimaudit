@@ -32,6 +32,8 @@ htmlcov/
 cs2_aimaudit_debug_*.json
 cs2lab_debug_*.json
 
+tools/_payload_*/
+
 # --- OS / IDE
 .DS_Store
 Thumbs.db
