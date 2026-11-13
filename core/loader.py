@@ -374,7 +374,7 @@ def tickrate_from_header(header: dict) -> int:
     """
     Tick rate from the demo header: playback_ticks / playback_time.
 
-    The previously hard-coded 64 is wrong for 128-tick demos (FACEIT and
+    A hard-coded 64 is wrong for 128-tick demos (FACEIT and
     community servers): every speed and every seconds<->ticks conversion
     would be off by 2x. Falls back to 64 when the header is missing or
     implausible (corrupt header, partial demo).

@@ -30,9 +30,20 @@ def bad(name, cond, extra=""):
         print(f"  ok  {name}")
 
 
-app = (ROOT / "app.py").read_text(encoding="utf-8")
+# app-level Python sources: app.py and the modules that carry the app
+# code (context.py, ui/*.py, shell.py, filters_ui.py, views/*.py).
+# t() and core.X scans must cover all of them.
+APP_SOURCES = [ROOT / "app.py", ROOT / "i18n.py", ROOT / "context.py"]
+APP_SOURCES += sorted((ROOT / "ui").glob("*.py"))
+views_dir = ROOT / "views"
+if views_dir.is_dir():
+    APP_SOURCES += sorted(views_dir.glob("*.py"))
+for _extra in ("filters_ui.py", "shell.py"):
+    if (ROOT / _extra).is_file():
+        APP_SOURCES.append(ROOT / _extra)
+app = "\n".join(p.read_text(encoding="utf-8") for p in APP_SOURCES)
 
-# ---- 1. all t("key") literals in app.py exist in both languages
+# ---- 1. all t("key") literals in the app sources exist in both languages
 used = set(re.findall(r'(?<![A-Za-z_0-9])t\("([a-z_0-9]+)"\)', app))
 # dynamic keys built in app.py
 used |= {f"k_{b}" for b in core.BUTTONS}
@@ -89,7 +100,7 @@ for k in i18n.STR["en"]:
             f"en={ph(i18n.STR['en'][k])} ru={ph(i18n.STR['ru'][k])}",
         )
 
-# ---- 4. every core.X referenced by app.py exists
+# ---- 4. every core.X referenced by the app sources exists
 refs = set(re.findall(r"core\.([A-Za-z_][A-Za-z_0-9]*)", app))
 refs.discard("py")  # 'core.py' mentioned in the docstring
 have = set(dir(core))
@@ -337,6 +348,13 @@ bad(
 # .streamlit/config.toml, which check 9 pins to the tokens). Hex/rgb literals
 # in UI sources are how palettes drift apart.
 UI_SOURCES = [ROOT / "app.py", ROOT / "i18n.py"]
+# context/shell/filters_ui carry app code too; views/ as well
+for _extra in ("context.py", "filters_ui.py", "shell.py"):
+    if (ROOT / _extra).is_file():
+        UI_SOURCES.append(ROOT / _extra)
+views_dir = ROOT / "views"
+if views_dir.is_dir():
+    UI_SOURCES += sorted(views_dir.glob("*.py"))
 ui_dir = ROOT / "ui"
 if ui_dir.is_dir():
     UI_SOURCES += sorted(ui_dir.glob("*.py"))
@@ -367,21 +385,47 @@ try:
         Col("acc", "Acc", fmt="{:.1f}%", bar="pct", best="high"),
         Col("n", "N", fmt="{:.0f}", bar="rel"),
         Col("err", "Err", fmt="{:.1f}°", best="low"),
-        Col("res", "Res", kind="badge", tones={"kill": "positive", "death": "negative"}),
+        Col(
+            "res", "Res", kind="badge", tones={"kill": "positive", "death": "negative"}
+        ),
     ]
     _pl = table_payload(_rows, _cols, selected=1, stripe=["info", "bogus", None])
     _cell = lambda r, c: _pl["rows"][r]["c"][c]  # noqa: E731
-    bad("table: pct bar fraction", _cell(0, 1)[2] == 0.5 and _cell(1, 1)[2] == 1.0, _cell(0, 1))
-    bad("table: rel bar is a share of the column max", _cell(0, 2)[2] == 0.25 and _cell(1, 2)[2] == 1.0, _cell(0, 2))
-    bad("table: empty number -> raw None, dash, no bar", _cell(2, 1)[0] is None and _cell(2, 1)[1] == "—" and _cell(2, 1)[2] is None, _cell(2, 1))
+    bad(
+        "table: pct bar fraction",
+        _cell(0, 1)[2] == 0.5 and _cell(1, 1)[2] == 1.0,
+        _cell(0, 1),
+    )
+    bad(
+        "table: rel bar is a share of the column max",
+        _cell(0, 2)[2] == 0.25 and _cell(1, 2)[2] == 1.0,
+        _cell(0, 2),
+    )
+    bad(
+        "table: empty number -> raw None, dash, no bar",
+        _cell(2, 1)[0] is None and _cell(2, 1)[1] == "—" and _cell(2, 1)[2] is None,
+        _cell(2, 1),
+    )
     bad(
         "table: first click sorts best value first",
         [c["f"] for c in _pl["cols"]] == ["asc", "desc", "desc", "asc", "asc"],
         [c["f"] for c in _pl["cols"]],
     )
-    bad("table: badge tone by raw value", _cell(0, 4)[3] == "positive" and _cell(1, 4)[3] == "negative", _cell(0, 4))
-    bad("table: unknown stripe tone dropped", _pl["rows"][0]["s"] == "info" and _pl["rows"][1]["s"] is None, _pl["rows"][:2])
-    bad("table: selected row and display format", _pl["sel"] == 1 and _cell(0, 3)[1] == "1.5°", (_pl["sel"], _cell(0, 3)))
+    bad(
+        "table: badge tone by raw value",
+        _cell(0, 4)[3] == "positive" and _cell(1, 4)[3] == "negative",
+        _cell(0, 4),
+    )
+    bad(
+        "table: unknown stripe tone dropped",
+        _pl["rows"][0]["s"] == "info" and _pl["rows"][1]["s"] is None,
+        _pl["rows"][:2],
+    )
+    bad(
+        "table: selected row and display format",
+        _pl["sel"] == 1 and _cell(0, 3)[1] == "1.5°",
+        (_pl["sel"], _cell(0, 3)),
+    )
 except Exception as exc:  # noqa: BLE001
     bad("table: payload model builds", False, repr(exc))
 
@@ -393,16 +437,39 @@ try:
         pl = table_payload({"v": vals}, [Col("v", "V", **kw)])
         return [r["c"][0][4] for r in pl["rows"]]
 
-    bad("grade auto: best value is 1, worst 0", _scores([10, 20, 30], grade="auto") == [0.0, 0.5, 1.0], _scores([10, 20, 30], grade="auto"))
-    bad("grade auto: best=low flips the scale", _scores([10, 20, 30], grade="auto", best="low") == [1.0, 0.5, 0.0], "")
-    bad("grade auto: < 3 distinct values -> no colour", _scores([5, 5, 9], grade="auto") == [None, None, None], _scores([5, 5, 9], grade="auto"))
-    bad("grade (bad, good): order sets the direction", _scores([1.0], grade=(0.5, 1.5)) == [0.5] and _scores([0.5], grade=(1.5, 0.5)) == [1.0], "")
+    bad(
+        "grade auto: best value is 1, worst 0",
+        _scores([10, 20, 30], grade="auto") == [0.0, 0.5, 1.0],
+        _scores([10, 20, 30], grade="auto"),
+    )
+    bad(
+        "grade auto: best=low flips the scale",
+        _scores([10, 20, 30], grade="auto", best="low") == [1.0, 0.5, 0.0],
+        "",
+    )
+    bad(
+        "grade auto: < 3 distinct values -> no colour",
+        _scores([5, 5, 9], grade="auto") == [None, None, None],
+        _scores([5, 5, 9], grade="auto"),
+    )
+    bad(
+        "grade (bad, good): order sets the direction",
+        _scores([1.0], grade=(0.5, 1.5)) == [0.5]
+        and _scores([0.5], grade=(1.5, 0.5)) == [1.0],
+        "",
+    )
     bad(
         "grade (bad, ok, good): ok is the neutral colour",
-        _scores([0.7, 0.85, 1.0, 1.4, 9.0], grade=(0.7, 1.0, 1.4)) == [0.0, 0.3, 0.6, 1.0, 1.0],
+        _scores([0.7, 0.85, 1.0, 1.4, 9.0], grade=(0.7, 1.0, 1.4))
+        == [0.0, 0.3, 0.6, 1.0, 1.0],
         _scores([0.7, 0.85, 1.0, 1.4, 9.0], grade=(0.7, 1.0, 1.4)),
     )
-    bad("grade: none / empty cell -> no colour", _scores([None, 3.0], grade=(0, 6)) == [None, 0.5] and _scores([1.0, 2.0]) == [None, None], "")
+    bad(
+        "grade: none / empty cell -> no colour",
+        _scores([None, 3.0], grade=(0, 6)) == [None, 0.5]
+        and _scores([1.0, 2.0]) == [None, None],
+        "",
+    )
 except Exception as exc:  # noqa: BLE001
     bad("grade: model builds", False, repr(exc))
 
@@ -452,7 +519,9 @@ try:
     )
     bad(
         "strip: labels normalized to strings, empty default",
-        strip_payload(_s_items, 0, round_label=lambda r, n: "", labels={"prev": None})["lab"]
+        strip_payload(_s_items, 0, round_label=lambda r, n: "", labels={"prev": None})[
+            "lab"
+        ]
         == {"prev": ""}
         and strip_payload(_s_items, 0, round_label=lambda r, n: "")["lab"] == {},
         "lab normalization",
@@ -512,7 +581,10 @@ try:
         "schema: grade ok outside bad..good rejected",
         schema.validate(_spec(grade=[0.0, 5.0, 1.0])) != [],
     )
-    bad("schema: grade bad == good rejected", schema.validate(_spec(grade=[1.0, 1.0])) != [])
+    bad(
+        "schema: grade bad == good rejected",
+        schema.validate(_spec(grade=[1.0, 1.0])) != [],
+    )
     bad("schema: unknown tone rejected", schema.validate(_spec(tone="magenta")) != [])
     bad(
         "schema: bar on a text column rejected",
@@ -536,7 +608,11 @@ try:
         != [],
     )
     # the migrated grids really build through the schema
-    for tid, n_basic, n_all in (("overview", 9, 18), ("weapons", 10, 10), ("duels", 9, 18)):
+    for tid, n_basic, n_all in (
+        ("overview", 9, 18),
+        ("weapons", 10, 10),
+        ("duels", 9, 18),
+    ):
         cols = schema.build_cols(tid, t=lambda k, **kw: k)
         cols_all = schema.build_cols(tid, all_columns=True, t=lambda k, **kw: k)
         bad(
@@ -562,6 +638,7 @@ def _local_modules() -> dict[str, Path]:
         (ROOT.glob("core/*.py"), "core"),
         (ROOT.glob("ui/*.py"), "ui"),
         (ROOT.glob("theme/*.py"), "theme"),
+        (ROOT.glob("views/*.py"), "views"),
     ):
         for path in pattern:
             name = path.stem
