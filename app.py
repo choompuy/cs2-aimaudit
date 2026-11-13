@@ -22,6 +22,7 @@ import i18n
 import mapview
 import store
 import theme
+from ui.roundrep import round_payload, round_replay
 from ui.strip import duel_strip
 from ui.table import Col, data_table
 
@@ -209,16 +210,29 @@ def get_timeline(
 
 
 @st.cache_data(show_spinner=False)
-def get_replay(
+def get_round_replay(
     path: str,
     mtime: float,
+    round_no: int,
     me: str,
-    opp: str,
-    tick: int,
-    before_s: float,
+    opps: tuple[str, ...],
     tickrate: int,
 ):
-    return core.replay_data(path, [me, opp], tick, before_s=before_s, tickrate=tickrate)
+    """Tick data of the whole round for the round replay (ui/roundrep.py).
+
+    ``opps`` are ALL duel opponents of the round: their held keys get a
+    panel while their duel segment is selected."""
+    demo = get_demo(path, mtime)
+    return core.round_replay_data(
+        path,
+        round_no,
+        me,
+        key_sids=[s for s in (me, *opps) if s],
+        tickrate=tickrate,
+        fires=demo.fires,
+        deaths=demo.deaths,
+        hurts=demo.hurts,
+    )
 
 
 # The heavy frames behind st.cache_data, keyed on the demo file and
@@ -2122,69 +2136,161 @@ elif page == "duels":
 
 # ------------------------------------------------------------- timeline
 # a fragment - picking another duel re-renders only the timeline
-def _replay_block(r, tick):
-    """2D replay of the selected duel: only the two duellists (Timeline page)."""
-    opp = r["opponent"]
-    with st.spinner(t("tl_loading")):
-        rp, _missing = get_replay(path, mtime, me, opp, tick, window_s, demo.tickrate)
-    f_me, f_opp = rp.get(me), rp.get(opp)
-    if (
-        f_me is None
-        or f_opp is None
-        or f_me.empty
-        or f_opp.empty
-        or not {"X", "Y", "yaw"} <= set(f_me.columns) & set(f_opp.columns)
-    ):
-        st.info(t("rp_no_data"))
+def _round_block(r, tick):
+    """Round replay: the WHOLE round on the radar (ui/roundrep.py).
+
+    The map shows everyone of both teams (HP in the circle, the view
+    arrow, the weapon under the name), the timeline carries kill marks
+    coloured by the killer's side, my duels of the round are cards on
+    the right (a click locks the playhead to that duel's segment and
+    brings up the duelists' key panels), and the rounds bar below the
+    timeline switches the replay between rounds (winner-coloured chips,
+    one fragment rerun per switch).
+    """
+    round_no = int(r["round"]) if pd.notna(r["round"]) else 0
+    if round_no < 1:
+        st.info(t("rr_no_round"))
         return
-    lo = min(int(f_me["tick"].min()), int(f_opp["tick"].min()))
-    hi = max(int(f_me["tick"].max()), int(f_opp["tick"].max()))
-    in_win = shots["tick"].between(lo, hi)
-    shot_ticks = {
-        "me": [int(x) for x in shots.loc[in_win & (shots["sid"] == me), "tick"]],
-        "opp": [int(x) for x in shots.loc[in_win & (shots["sid"] == opp), "tick"]],
-    }
-    hits = []
-    if len(demo.hurts) and {"attacker_steamid", "user_steamid", "tick"} <= set(
-        demo.hurts.columns
-    ):
-        for h in demo.hurts[demo.hurts["tick"].between(lo, hi)].itertuples():
-            if h.attacker_steamid == me and h.user_steamid == opp:
-                hits.append((int(h.tick), "me"))
-            elif h.attacker_steamid == opp and h.user_steamid == me:
-                hits.append((int(h.tick), "opp"))
-    keys = [b for b in core.BUTTONS if b in f_me.columns and b in f_opp.columns]
-    fig = mapview.build_replay_figure(
-        {"me": f_me, "opp": f_opp},
-        core.load_radar(str(demo.header.get("map_name") or "")),
-        tick,
-        demo.tickrate,
-        shots=shot_ticks,
-        hits=hits,
-        keys=keys,
+    # the rounds bar can move the replay to any round; selecting another
+    # duel in the strip (tl_duel changes) pulls it back to that duel's
+    # own round (the reset lives in _timeline_fragment)
+    rr_round = st.session_state.get("rr_round")
+    follow_duel = rr_round is None or int(rr_round) == round_no
+    if rr_round is not None and int(rr_round) != round_no:
+        round_no = int(rr_round)
+
+    rd = (
+        my_duels[my_duels["round"] == round_no]
+        if len(my_duels) and "round" in my_duels.columns
+        else pd.DataFrame()
+    )
+    opps = tuple(dict.fromkeys(rd["opponent"].astype(str))) if len(rd) else ()
+    with st.spinner(t("tl_loading")):
+        try:
+            data = get_round_replay(path, mtime, round_no, me, opps, demo.tickrate)
+        except ValueError:  # "no_round_data": honest info, not a crash
+            st.info(t("rr_no_round"))
+            return
+
+    tr = demo.tickrate
+    duels = []
+    if len(rd):
+        for _, dr in rd.iterrows():
+            tk = int(dr["tick"])
+            # the duel segment: from the first shot of EITHER duelist
+            # (minus a small pre-roll to see the approach) to a bit after
+            # the resolution (to see the outcome / the trade)
+            first = [
+                x for x in (dr.get("my_first_tick"), dr.get("opp_first_tick"))
+                if pd.notna(x)
+            ]
+            start = int(min(first)) if first else tk - int(1.0 * tr)
+            duels.append(
+                {
+                    "a": max(data["t0"], start - int(0.75 * tr)),
+                    "b": min(data["t1"], tk + int(1.5 * tr)),
+                    "tick": tk,
+                    "result": str(dr["result"]),
+                    "opp": name_of.get(dr["opponent"], str(dr["opponent"])),
+                    "opp_sid": str(dr["opponent"]),
+                    "weapon": str(dr["weapon"]),
+                    "hs": bool(dr["headshot"]),
+                    "dur": dr["duration_s"],
+                }
+            )
+    duels.sort(key=lambda z: z["tick"])
+
+    # preselect the duel this page was opened from (locks its segment)
+    sel = -1
+    if follow_duel:
+        for pos, tk_r in enumerate(rd["tick"] if len(rd) else []):
+            if int(tk_r) == tick:
+                sel = pos
+                break
+
+    winners = core.round_winners(demo)
+    payload = round_payload(
+        data,
+        me=me,
+        names=name_of,
+        side_of=lambda s: demo.side_at(round_no, s),
+        radar=core.load_radar(str(demo.header.get("map_name") or "")),
+        duels=duels,
+        rounds=[
+            {"n": n, "win": winners.get(n, "")} for n in range(1, n_rounds + 1)
+        ],
+        at=None if sel >= 0 else data["t0"],
+        sel=sel,
+        key_players=(
+            [(me, name_of.get(me, me))]
+            + [(o, name_of.get(o, o)) for o in opps[:5]]
+        ),
         labels={
-            "me": name_of.get(me, me),
-            "opp": name_of.get(opp, opp),
-            "time": t("rp_time"),
-            "pause": t("rp_pause"),
-            "keys": {k: t(f"k_{k}") for k in keys},
+            "play": t("rr_play"),
+            "pause": t("rr_pause"),
+            "restart": t("rr_restart"),
+            "duel_prev": t("rr_duel_prev"),
+            "duel_next": t("rr_duel_next"),
+            "speed": t("rr_speed"),
+            "time": t("rr_time"),
+            "you": t("rr_you"),
+            "tm": t("rr_tm"),
+            "en": t("rr_en"),
+            "dead": t("rr_dead"),
+            "shot": t("rr_shot"),
+            "hit": t("rr_hit"),
+            "lvl0": t("rr_lvl0"),
+            "lvl1": t("rr_lvl1"),
+            "howto": t("rr_howto"),
+            "kill": t("res_kill"),
+            "death": t("res_death"),
+            "hs": t("col_hs"),
+            "players": t("rr_players"),
+            "players_hide": t("rr_players_hide"),
+            "players_show": t("rr_players_show"),
+            "duels": t("rr_duels"),
+            "no_duels": t("rr_no_duels"),
+            "exit": t("rr_exit_duel"),
+            "locked": t("rr_locked"),
+            "rounds": t("rr_rounds"),
+            "round": t("rr_round"),
+            "won_ct": t("rr_won_ct"),
+            "won_t": t("rr_won_t"),
+            "leg_ct": t("rr_leg_ct"),
+            "leg_t": t("rr_leg_t"),
+            "view_reset": t("rr_view_reset"),
+            **{f"k_{k}": t(f"k_{k}") for k in (data.get("keys") or [])},
         },
         colors={
             "me": PAL["you"],
-            "opp": theme.tok("opponent"),
+            "tm": theme.tok("info"),
+            "en": theme.tok("tier.poor"),
             "dead": PAL["bad"],
-            "outline": theme.tok("text-primary"),
-            "ui_bg": theme.tok("surface-2"),
-            "ui_fg": theme.tok("text-primary"),
-            "ui_border": theme.tok("border-subtle"),
+            "ring": theme.tok("text-primary"),
+            "hit": theme.tok("chart-5"),
+            "flash": theme.tok("text-primary"),
+            "good": theme.tok("positive"),
+            "bad": PAL["bad"],
+            "bg": theme.tok("bg-app"),
+            "grid": theme.tok("border-subtle"),
+            "text": theme.tok("text-primary"),
+            "text2": theme.tok("text-secondary"),
+            "hpText": theme.tok("text-primary"),
+            "ct": theme.tok("info"),
+            "t": theme.tok("warning"),
+            "ctb": theme.tok("team-ct"),
+            "ttb": theme.tok("team-t"),
+            "acc": theme.tok("accent"),
         },
     )
-    if fig is None:
-        st.info(t("rp_no_data"))
+    if not payload["players"]:
+        st.info(t("rr_no_data"))
         return
-    style_figure(fig, height=600, margin=dict(t=56, r=10, l=10, b=80))
-    st.plotly_chart(fig, width="stretch")
-    st.caption(t("rp_howto"))
+
+    def _on_round(n: int):
+        st.session_state["rr_round"] = int(n)
+
+    round_replay(payload, key="tl_roundrep", on_round=_on_round)
 
 
 @st.fragment
@@ -2231,6 +2337,11 @@ def _timeline_fragment():
         )
         st.caption(t("tl_strip_hint"))
         i = st.session_state["tl_duel"]
+        # picking another duel returns the round replay to that duel's
+        # own round (drops a round chosen earlier from the rounds bar)
+        if st.session_state.get("rr_round_duel") != i:
+            st.session_state["rr_round_duel"] = i
+            st.session_state.pop("rr_round", None)
         r = my_duels.iloc[i]
         tick = int(r["tick"])
         with st.spinner(t("tl_loading")):
@@ -2295,7 +2406,7 @@ def _timeline_fragment():
             or "charts"
         )
         if view == "replay":
-            _replay_block(r, tick)
+            _round_block(r, tick)
             return
         if tdf is None or tdf.empty:
             st.info(t("tl_empty"))

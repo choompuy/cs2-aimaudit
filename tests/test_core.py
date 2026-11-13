@@ -2777,137 +2777,424 @@ finally:
     else:
         os.environ["AIMAUDIT_RADAR_DIR"] = _old_env
 
-# ---- 2D duel replay: replay_data (two duellists, one parse) + the figure
-print("== replay_data / build_replay_figure ==")
+# ---- round replay: the whole round for every player (core + payload)
+print("== round_replay_data / round_payload ==")
 import mapview  # noqa: E402
+from ui.roundrep import round_payload  # noqa: E402
 
-_rp_rows = []
-for _sid, _nm, _x0, _vx, _alive_to in (
-    (S1, "Alpha", 0.0, 4.0, 512),
-    (S2, "Bravo", 900.0, -2.0, 99999),
-):
-    for _tk in range(490, 560):
-        _rp_rows.append(
+# --- a dense 2-round fake: freeze ends, HP, weapons, buttons, all 4
+# players. Round 1 lives at freeze end 100..830 (next freeze end at 1000):
+# S1 hits S3 at 505 (34 hp left) and kills it at 510; S1 dies at 600 (S2
+# trade-kills it - irrelevant here, the replay just needs the rows).
+_rr_rows = []
+for _tk in range(100, 640):
+    for _sid, _nm in (
+        (S1, "Alpha"),
+        (S2, "Bravo"),
+        (S3, "Charlie"),
+        (S4, "Delta"),
+    ):
+        _alive = not (
+            (_sid == S1 and _tk >= 600) or (_sid == S3 and _tk >= 510)
+        )
+        _hp = 100
+        if _sid == S1:
+            _hp = 0 if _tk >= 600 else (34 if _tk >= 505 else 100)
+        elif _sid == S3:
+            _hp = 0 if _tk >= 510 else 100
+        _rr_rows.append(
             {
                 "tick": _tk,
                 "steamid": f64_sid(_sid),
                 "name": _nm,
-                "X": _x0 + (_tk - 490) * _vx,
-                "Y": 0.0 if _sid == S1 else 50.0,
+                "X": (10.0 + (_tk - 100)) if _sid == S1 else (510.0 if _sid == S3 else 0.0),
+                "Y": 0.0 if _sid in (S1, S3) else 1500.0,
                 "Z": 0.0,
-                "pitch": 1.0,
-                "yaw": 2.0 if _sid == S1 else 182.0,
-                "is_alive": _tk < _alive_to,
+                "pitch": 0.0,
+                "yaw": 0.0 if _sid in (S1, S2) else 180.0,
+                "is_alive": _alive,
+                "team_num": 2 if _sid in (S1, S2) else 3,
+                "health": _hp,
+                "active_weapon_name": (
+                    ("weapon_awp" if _tk >= 400 else "weapon_ak47")
+                    if _sid == S1
+                    else "weapon_ak47"
+                ),
+                "flash_duration": 0.0,
             }
         )
-_rp = make_match()
-_rp["ticks"] = pd.DataFrame(_rp_rows)
-_rbits = (1 << 3) | (1 << 0)  # FORWARD + FIRE for Alpha only
-_rp["buttons_bit"] = {(_t, f64_sid(S1)): _rbits for _t in range(490, 560)}
-FakeParser.demos["rp.dem"] = _rp
-_fr, _miss = core.replay_data("rp.dem", [S1, S2], 512, before_s=0.5, after_s=0.25)
-check("replay_data: one frame per duellist", set(_fr) == {S1, S2}, list(_fr))
-check(
-    "replay_data: frames are the right player each (positions differ)",
-    abs(_fr[S1]["X"].iloc[-1] - _fr[S2]["X"].iloc[-1]) > 100,
+_rr_events = {
+    "round_freeze_end": pd.DataFrame(
+        {
+            "tick": [100, 1000],
+            "is_warmup_period": [False, False],
+        }
+    ),
+    "begin_new_match": pd.DataFrame({"tick": [10]}),
+    "weapon_fire": pd.DataFrame(
+        {
+            "tick": [500, 505],
+            "user_steamid": pd.array([int(S1), int(S3)], dtype="uint64"),
+            "user_name": ["Alpha", "Charlie"],
+            "weapon": ["weapon_ak47", "weapon_ak47"],
+            "total_rounds_played": [0, 0],
+            "is_warmup_period": [False, False],
+        }
+    ),
+    "player_hurt": pd.DataFrame(
+        {
+            "tick": [505],
+            "attacker_steamid": pd.array([int(S1)], dtype="float64"),
+            "attacker_name": ["Alpha"],
+            "user_steamid": pd.array([int(S3)], dtype="float64"),
+            "user_name": ["Charlie"],
+            "weapon": ["weapon_ak47"],
+            "hitgroup": [1],
+            "total_rounds_played": [0],
+            "is_warmup_period": [False],
+        }
+    ),
+    "player_death": pd.DataFrame(
+        {
+            "tick": [510],
+            "attacker_steamid": pd.array([int(S1)], dtype="float64"),
+            "attacker_name": ["Alpha"],
+            "user_steamid": pd.array([int(S3)], dtype="float64"),
+            "user_name": ["Charlie"],
+            "weapon": ["weapon_ak47"],
+            "headshot": [True],
+            "distance": [500],
+            "total_rounds_played": [0],
+            "is_warmup_period": [False],
+        }
+    ),
+}
+_rr = make_match()
+_rr["ticks"] = pd.DataFrame(_rr_rows)
+_rr["events"].update(_rr_events)
+_rr["buttons_bit"] = {
+    (t, f64_sid(S1)): ((1 << 3) | (1 << 0) if t == 500 else (1 << 3))
+    for t in range(100, 640)
+}
+FakeParser.demos["rr.dem"] = _rr
+
+_rrd = core.round_replay_data(
+    "rr.dem", 1, S1, key_sids=[S3], fires=None, deaths=None, hurts=None
 )
 check(
-    "replay_data: same tick window for both",
-    _fr[S1]["tick"].tolist() == _fr[S2]["tick"].tolist() and len(_fr[S1]) > 20,
+    "round_replay_data: no events -> freeze-end index bounds (100..999)",
+    (_rrd["t0"], _rrd["t1"]) == (100, 999),
+    (_rrd["t0"], _rrd["t1"]),
 )
 check(
-    "replay_data: speed per player (256 vs 128 u/s), dead -> NaN",
-    abs(_fr[S1][_fr[S1]["tick"] < 512]["speed"].dropna() - 256.0).max() < 1e-6
-    and abs(_fr[S2]["speed"].dropna() - 128.0).max() < 1e-6
-    and _fr[S1][_fr[S1]["tick"] >= 512]["speed"].isna().all(),
+    "round_replay_data: every player of the match gets a frame",
+    set(_rrd["frames"]) == set(IDS),
+    sorted(_rrd["frames"]),
 )
 check(
-    # (the fake keys its button bits by float64 SteamID, where S1 and S2
-    # collide, so only the decoding itself is asserted here)
-    "replay_data: keys decoded, nothing missing",
-    bool(_fr[S1]["FORWARD"].all()) and bool(_fr[S1]["FIRE"].all()) and _miss == [],
-    _miss,
+    "round_replay_data: keys decoded from the bitfield",
+    "FORWARD" in _rrd["keys"] and "FIRE" in _rrd["keys"],
+    _rrd["keys"],
 )
-_rp2 = make_match()
-_rp2["ticks"] = pd.DataFrame(_rp_rows)
-_rp2["unsupported"] = set(core.BTN_NAMED) | {"buttons"}
-FakeParser.demos["rp2.dem"] = _rp2
-_fr2, _miss2 = core.replay_data("rp2.dem", [S1, S2], 512, before_s=0.5, after_s=0.25)
 check(
-    "replay_data: buttons unsupported -> positions only, all keys missing",
-    len(_fr2[S1]) > 0 and _miss2 == core.BUTTONS,
+    "round_replay_data: round column math (round 1 -> trp 0)",
+    _rrd["round"] == 1 and _rrd["tickrate"] == 64,
+)
+# events passed as DataFrames (like the app does with demo.fires etc.)
+_rrd2 = core.round_replay_data(
+    "rr.dem",
+    1,
+    S1,
+    key_sids=[S3],
+    fires=core.load_demo("rr.dem").fires,
+    deaths=core.load_demo("rr.dem").deaths,
+    hurts=core.load_demo("rr.dem").hurts,
+)
+check(
+    "round_replay_data: shots/kills/hits of the round come through",
+    _rrd2["shots"] == [(500, S1, "ak47"), (505, S3, "ak47")]
+    and _rrd2["kills"] == [(510, S1, S3, "ak47", True)]
+    and _rrd2["hits"] == [(505, S1, S3)],
+    (_rrd2["shots"], _rrd2["kills"], _rrd2["hits"]),
+)
+check(
+    "round_replay_data: events tighten the window (100..830)",
+    (_rrd2["t0"], _rrd2["t1"]) == (100, 830),
+    (_rrd2["t0"], _rrd2["t1"]),
+)
+_rr_small = core.round_replay_data(
+    "rr.dem", 1, S1, max_samples=50, deaths=core.load_demo("rr.dem").deaths
+)
+check(
+    "round_replay_data: grid is downsampled to <= max_samples",
+    _rr_small["step"] == 15
+    and len(range(_rr_small["t0"], _rr_small["t1"] + 1, _rr_small["step"])) <= 50,
+    (_rr_small["step"], _rr_small["t0"], _rr_small["t1"]),
+)
+_rr_r2 = core.round_replay_data("rr.dem", 2, S1)
+check(
+    "round_replay_data: round 2 starts at the second freeze end",
+    _rr_r2["t0"] == 1000,
+    _rr_r2["t0"],
 )
 
-_rf = {"me": _fr[S1], "opp": _fr[S2]}
-_rlab = {"me": "Alpha", "opp": "Bravo", "keys": {k: k for k in core.BUTTONS}}
-_ff = mapview.build_replay_figure(
-    _rf,
-    None,
-    512,
-    64,
-    shots={"me": [500]},
-    hits=[(505, "me")],
-    keys=core.BUTTONS,
-    labels=_rlab,
-)
+# degradation: an old parser without hp/weapon/button props
+_rr2 = make_match()
+_rr2["ticks"] = pd.DataFrame(_rr_rows)
+_rr2["events"].update(_rr_events)
+_rr2["unsupported"] = {"health", "active_weapon_name"} | set(core.BTN_NAMED) | {"buttons"}
+FakeParser.demos["rr2.dem"] = _rr2
+_rrd3 = core.round_replay_data("rr2.dem", 1, S1)
 check(
-    "replay figure: frames update the dynamic traces, slider has a step per frame",
-    _ff is not None
-    and len(_ff.data) == 14
-    and len(_ff.frames) > 3
-    and all(
-        list(fr.traces) == list(range(2, 14)) and len(fr.data) == 12
-        for fr in _ff.frames
-    )
-    and len(_ff.layout.sliders[0].steps) == len(_ff.frames)
-    and str(512) in [fr.name for fr in _ff.frames],
+    "round_replay_data: hp/weapon/buttons unsupported -> positions only",
+    _rrd3["keys"] == [] and "health" not in _rrd3["frames"][S1].columns,
+    _rrd3["keys"],
 )
-check(
-    "replay figure: dead player gets a cross after the death tick",
-    any(len(fr.data[9].x) == 1 for fr in _ff.frames if int(fr.name) > 512)
-    and all(len(fr.data[9].x) == 0 for fr in _ff.frames if int(fr.name) < 512),
-)
-check(
-    "replay figure: a shot shows as an aim line only just after it",
-    any(len(fr.data[4].x) > 0 for fr in _ff.frames if 500 <= int(fr.name) < 510)
-    and all(len(fr.data[4].x) == 0 for fr in _ff.frames if int(fr.name) > 520),
-)
-_nk = mapview.build_replay_figure(_rf, None, 512, 64, keys=[], labels=_rlab)
-check(
-    "replay figure: no key columns -> no key panel (12 traces)",
-    _nk is not None
-    and len(_nk.data) == 12
-    and all(len(fr.data) == 10 for fr in _nk.frames),
-)
-check(
-    "replay figure: missing duellist -> None",
-    mapview.build_replay_figure(
-        {"me": _fr[S1], "opp": _fr[S2].iloc[0:0]}, None, 512, 64
-    )
-    is None,
-)
-_rd2 = _tempfile.mkdtemp(prefix="cs2aa_radar2_")
-os.makedirs(os.path.join(_rd2, "radars"))
-_tiny_png(os.path.join(_rd2, "radars", "de_r.png"), 16)
-with open(os.path.join(_rd2, "map_data.json"), "w", encoding="utf-8") as fh:
-    _json.dump({"de_r": {"pos_x": -100.0, "pos_y": 100.0, "scale": 2.0}}, fh)
-_old_env2 = os.environ.get("AIMAUDIT_RADAR_DIR")
-os.environ["AIMAUDIT_RADAR_DIR"] = _rd2
+
+# a round that cannot be placed at all
 try:
-    _rr = mapview.build_replay_figure(
-        _rf, core.load_radar("de_r"), 512, 64, keys=core.BUTTONS, labels=_rlab
+    core.round_replay_data("rr.dem", 7, S1)
+    check("round_replay_data: unplaceable round raises", False)
+except ValueError as e:
+    check("round_replay_data: unplaceable round raises", str(e) == "no_round_data")
+
+# --- round winners (elimination inference for the replay's round bar) ---
+# rr.dem: only Charlie (CT) dies, Delta survives -> no winner guessed
+check(
+    "round_winners: no full elimination -> no winner",
+    core.round_winners(core.load_demo("rr.dem")) == {},
+    core.round_winners(core.load_demo("rr.dem")),
+)
+# rrw.dem: Delta (CT) dies too -> CT is eliminated in round 1 -> T won
+_rrw = make_match()
+_rrw["ticks"] = pd.DataFrame(_rr_rows)
+_rrw["events"].update(_rr_events)
+_rrw["events"]["player_death"] = pd.concat(
+    [
+        _rrw["events"]["player_death"],
+        pd.DataFrame(
+            {
+                "tick": [520],
+                "attacker_steamid": pd.array([int(S2)], dtype="float64"),
+                "attacker_name": ["Bravo"],
+                "user_steamid": pd.array([int(S4)], dtype="float64"),
+                "user_name": ["Delta"],
+                "weapon": ["weapon_ak47"],
+                "headshot": [False],
+                "distance": [500],
+                "total_rounds_played": [0],
+                "is_warmup_period": [False],
+            }
+        ),
+    ],
+    ignore_index=True,
+)
+FakeParser.demos["rrw.dem"] = _rrw
+check(
+    "round_winners: side fully eliminated -> the other side won",
+    core.round_winners(core.load_demo("rrw.dem")) == {1: "T"},
+    core.round_winners(core.load_demo("rrw.dem")),
+)
+# a world death (attacker unknown) also counts as a lost player
+_rrw2 = make_match()
+_rrw2["ticks"] = pd.DataFrame(_rr_rows)
+_rrw2["events"].update(_rr_events)
+_rrw2["events"]["player_death"] = pd.concat(
+    [
+        _rrw2["events"]["player_death"],
+        pd.DataFrame(
+            {
+                "tick": [520],
+                "attacker_steamid": pd.array([0], dtype="float64"),
+                "attacker_name": ["world"],
+                "user_steamid": pd.array([int(S4)], dtype="float64"),
+                "user_name": ["Delta"],
+                "weapon": ["world"],
+                "headshot": [False],
+                "distance": [500],
+                "total_rounds_played": [0],
+                "is_warmup_period": [False],
+            }
+        ),
+    ],
+    ignore_index=True,
+)
+FakeParser.demos["rrw2.dem"] = _rrw2
+check(
+    "round_winners: world/suicide deaths still eliminate the victim's side",
+    core.round_winners(core.load_demo("rrw2.dem")) == {1: "T"},
+    core.round_winners(core.load_demo("rrw2.dem")),
+)
+
+# --- payload (ui/roundrep.py) ------------------------------------------
+_rnames = {S1: "Alpha", S2: "Bravo", S3: "Charlie", S4: "Delta"}
+_rside = lambda s: "T" if s in (S1, S2) else "CT"
+_rpl = round_payload(
+    _rrd2,
+    me=S1,
+    names=_rnames,
+    side_of=_rside,
+    radar=None,
+    duels=[
+        {
+            "a": 400,
+            "b": 700,
+            "tick": 510,
+            "result": "kill",
+            "opp": "Charlie",
+            "opp_sid": S3,
+            "weapon": "ak47",
+            "hs": True,
+            "dur": 0.16,
+        }
+    ],
+    rounds=[{"n": 1, "win": "CT"}, {"n": 2, "win": "unknown"}],
+    at=460,
+    sel=0,
+    key_players=[(S1, "Alpha"), (S3, "Charlie")],
+)
+check(
+    "payload: roles from sides (me / tm / en)",
+    [p["role"] for p in sorted(_rpl["players"], key=lambda p: p["sid"])]
+    == ["me", "tm", "en", "en"],
+    [p["role"] for p in _rpl["players"]],
+)
+_p1 = next(p for p in _rpl["players"] if p["sid"] == S1)
+check(
+    "payload: sides passed through for kill-mark colouring",
+    _p1["side"] == "T"
+    and next(p for p in _rpl["players"] if p["sid"] == S3)["side"] == "CT",
+    [p.get("side") for p in _rpl["players"]],
+)
+check(
+    "payload: hp array + alive array + weapon changes (short names)",
+    _p1["hp"][0] == 100
+    and _p1["hp"][405] == 34  # tick 505: hit by nobody... S1 keeps 34 hp
+    and _p1["al"][410] == 1  # tick 510: still alive
+    and _p1["al"][500] == 0  # tick 600: dead
+    and _p1["w"] == [[100, "ak47"], [400, "awp"]],
+    (_p1["hp"][:3], _p1["w"]),
+)
+check(
+    "payload: key panel only for the requested players",
+    sum(1 for p in _rpl["players"] if p.get("keys")) == 2
+    and _p1["keys"]["FORWARD"][0] == 1,
+    [p["sid"] for p in _rpl["players"] if p.get("keys")],
+)
+_p1i = _rpl["players"].index(_p1)
+_p3i = _rpl["players"].index(next(p for p in _rpl["players"] if p["sid"] == S3))
+check(
+    "payload: events are player indices, marks and start pass through",
+    _rpl["shots"][0][1] == _p1i
+    and _rpl["marks"] == [[510, "kill"]]
+    and _rpl["at"] == 460
+    and _rpl["myIdx"] == _p1i,
+    (_rpl["shots"], _rpl["marks"], _rpl["myIdx"]),
+)
+check(
+    "payload: duels carry the segment, the opponent index and the card meta",
+    _rpl["duels"] == [
+        {
+            "a": 400,
+            "b": 700,
+            "tk": 510,
+            "res": "kill",
+            "opp": "Charlie",
+            "oi": _p3i,
+            "w": "ak47",
+            "hs": True,
+            "dur": 0.2,
+        }
+    ],
+    _rpl["duels"],
+)
+check(
+    "payload: rounds row for the match bar (unknown winner -> '')",
+    _rpl["rounds"] == [[1, "CT"], [2, ""]],
+    _rpl["rounds"],
+)
+check(
+    "payload: sel clamped, at defaults to the selected duel's segment start",
+    _rpl["sel"] == 0
+    and round_payload(_rrd2, me=S1, names=_rnames, side_of=_rside,
+                      duels=[{"a": 400, "b": 700, "tick": 510, "result": "kill",
+                              "opp": "Charlie", "opp_sid": S3}],
+                      sel=5)["sel"] == -1
+    and round_payload(_rrd2, me=S1, names=_rnames, side_of=_rside,
+                      duels=[{"a": 400, "b": 700, "tick": 510, "result": "kill",
+                              "opp": "Charlie", "opp_sid": S3}],
+                      sel=0)["at"] == 400,
+    _rpl["sel"],
+)
+check(
+    "payload: duel segment clamped into the round window",
+    round_payload(
+        _rrd2, me=S1, names=_rnames, side_of=_rside,
+        duels=[{"a": -1, "b": 99999, "tick": 510, "result": "kill",
+                "opp": "Charlie", "opp_sid": S3}],
+    )["duels"][0]["a"] == _rrd2["t0"],
+    _rrd2["t0"],
+)
+check(
+    "payload: no radar -> unit-grid bounds instead",
+    _rpl["radar"] is None
+    and _rpl["gridb"]["minx"] < _rpl["gridb"]["maxx"],
+    _rpl["gridb"],
+)
+check(
+    "payload: no players at all -> empty list (UI shows a hint)",
+    round_payload({"t0": 0, "t1": 1, "step": 1, "tickrate": 64, "round": 1,
+                    "frames": {}, "keys": [], "shots": [], "kills": [],
+                    "hits": []}, me=S1, names={}, side_of=_rside)["players"] == [],
+)
+
+# with a two-level radar the payload carries both images + level bits
+_rd1 = _tempfile.mkdtemp(prefix="cs2aa_radar1_")
+os.makedirs(os.path.join(_rd1, "radars"))
+_tiny_png(os.path.join(_rd1, "radars", "de_r.png"), 16)
+_tiny_png(os.path.join(_rd1, "radars", "de_r_lower.png"), 16)
+with open(os.path.join(_rd1, "map_data.json"), "w", encoding="utf-8") as fh:
+    _json.dump(
+        {
+            "de_r": {
+                "pos_x": -100.0,
+                "pos_y": 100.0,
+                "scale": 2.0,
+                "verticalsections": {
+                    "lower": {"AltitudeMin": -500.0, "AltitudeMax": -100.0}
+                },
+            }
+        },
+        fh,
+    )
+_old_env1 = os.environ.get("AIMAUDIT_RADAR_DIR")
+os.environ["AIMAUDIT_RADAR_DIR"] = _rd1
+try:
+    _rrad = core.load_radar("de_r")
+    _rpl2 = round_payload(
+        _rrd2, me=S1, names=_rnames, side_of=_rside, radar=_rrad
     )
     check(
-        "replay figure: radar image drawn below, view box set",
-        _rr is not None
-        and len(_rr.layout.images) == 1
-        and _rr.layout.xaxis.range[0] < _rr.layout.xaxis.range[1],
+        "payload: radar -> image data URIs + calibration, no grid",
+        _rpl2["radar"] is not None
+        and _rpl2["radar"]["png"].startswith("data:image/png;base64,")
+        and _rpl2["radar"]["lo"] is not None
+        and _rpl2["gridb"] is None
+        and _rpl2["radar"]["size"] > 0,
+        None if _rpl2["radar"] is None else list(_rpl2["radar"]),
+    )
+    _p1b = next(p for p in _rpl2["players"] if p["sid"] == S1)
+    check(
+        "payload: two-level radar -> every player has level bits",
+        all("lvl" in p for p in _rpl2["players"])
+        and all(v == 0 for v in _p1b["lvl"][:5]),
+        [p.get("lvl", [])[:5] for p in _rpl2["players"]],
     )
 finally:
-    if _old_env2 is None:
+    if _old_env1 is None:
         os.environ.pop("AIMAUDIT_RADAR_DIR", None)
     else:
-        os.environ["AIMAUDIT_RADAR_DIR"] = _old_env2
+        os.environ["AIMAUDIT_RADAR_DIR"] = _old_env1
 
 # ---- the data folder, the demo library and the disk caches (store.py)
 print("== store: data folder ==")

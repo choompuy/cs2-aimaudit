@@ -20,6 +20,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from functools import cached_property
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -300,6 +301,59 @@ def halves_from_sides(sides: dict, n_rounds: int) -> list[tuple[int, int]]:
         if lo <= hi:
             out.append((lo, hi))
         lo = b
+    return out
+
+
+def round_winners(demo: "Demo") -> dict[int, str]:
+    """
+    Round winners ('CT'/'T') for the replay's round bar, inferred from
+    eliminations: CS2 demos expose no round_end/winner event (docs
+    s.12.1), so the only honest signal is "a side lost every player in
+    that round" - then the other side won it. Every death counts towards
+    the VICTIM's side loss count (kills, teamkills, suicides/world, the
+    bomb), because the team did lose that player either way.
+
+    Rounds that ended with both sides fielding survivors (bomb/timeout/
+    save wins) are NOT guessed: they stay absent from the dict and the
+    UI renders them winner-neutral. Halftime swaps are per round
+    (demo.sides), a missing side for a round skips that round.
+
+    Known wrong edge case, accepted: T eliminated post-plant and the
+    bomb still explodes - the dead-T side shows no survivors so CT is
+    inferred. Without a winner event this cannot be told apart.
+    """
+    d = demo.deaths
+    if d is None or not len(d) or "user_steamid" not in d.columns:
+        return {}
+    sides = demo.sides
+    rounds = sorted(r for r in sides if isinstance(r, int) and r >= 1)
+    if not rounds:
+        return {}
+    dr = _round_col(d)
+    warm = (
+        d["is_warmup_period"].astype(bool) if "is_warmup_period" in d.columns
+        else pd.Series(False, index=d.index)
+    )
+    out: dict[int, str] = {}
+    for r in rounds:
+        fielded = {"T": 0, "CT": 0}
+        for s in sides[r].values():
+            if s in fielded:
+                fielded[s] += 1
+        if fielded["T"] < 1 or fielded["CT"] < 1:
+            continue  # sides unknown for this round -> nothing to compare
+        rows = d[(dr == r - 1) & ~warm]
+        if not len(rows):
+            continue  # nobody died at all: timeout/quick save, not guessable
+        lost = {"T": 0, "CT": 0}
+        for sid in rows["user_steamid"]:
+            s = sides[r].get(str(sid))
+            if s in lost:
+                lost[s] += 1
+        out_t = lost["T"] >= fielded["T"]
+        out_ct = lost["CT"] >= fielded["CT"]
+        if out_t != out_ct:  # exactly one side eliminated
+            out[r] = "CT" if out_t else "T"
     return out
 
 
@@ -2079,6 +2133,7 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
                     "my_would_head": df[f"{mine}_would_head"],
                     "opp_would_head": df[f"{opp}_would_head"],
                     "my_first_tick": df[f"{mine}_first_tick"],
+                    "opp_first_tick": df[f"{opp}_first_tick"],
                     "noscope": df["noscope"],
                     "thrusmoke": df["thrusmoke"],
                     "attackerblind": df["attackerblind"],
@@ -2791,23 +2846,78 @@ def timeline_data(
     return df.sort_values("tick").reset_index(drop=True), missing
 
 
-def replay_data(
+def _live_freeze_ends(parser) -> list[int]:
+    """
+    Sorted ticks of round_freeze_end events of the LIVE match: warmup
+    freeze ends and everything before begin_new_match (restarts, the knife
+    round) are dropped, so index i maps to live round i+1.
+    """
+    try:
+        ev = parser.parse_events(
+            ["round_freeze_end", "begin_new_match"]
+        )
+    except Exception:  # noqa: BLE001 - old parser / no events
+        return []
+    freeze = dict(ev).get("round_freeze_end", pd.DataFrame())
+    bnm = dict(ev).get("begin_new_match", pd.DataFrame())
+    live_start = None
+    if len(bnm) and "tick" in bnm.columns:
+        t = pd.to_numeric(bnm["tick"], errors="coerce").dropna()
+        if len(t):
+            live_start = int(t.max())
+    out: list[int] = []
+    if len(freeze) and "tick" in freeze.columns:
+        t = pd.to_numeric(freeze["tick"], errors="coerce").dropna()
+        warm = (
+            freeze["is_warmup_period"].fillna(False).astype(bool)
+            if "is_warmup_period" in freeze.columns
+            else pd.Series(False, index=freeze.index)
+        )
+        for tt, ww in zip(t, warm[t.notna()]):
+            ti = int(tt)
+            if ww:
+                continue
+            if live_start is not None and ti < live_start:
+                continue
+            out.append(ti)
+    return sorted(set(out))
+
+
+def round_replay_data(
     path: str,
-    sids: list[str],
-    tick: int,
-    before_s: float = 3.0,
-    after_s: float = 0.75,
+    round_no: int,
+    me: str,
+    *,
+    key_sids: Sequence[str] = (),
     tickrate: int | None = None,
+    fires: pd.DataFrame | None = None,
+    deaths: pd.DataFrame | None = None,
+    hurts: pd.DataFrame | None = None,
+    max_samples: int = 3200,
+    max_s: float = 180.0,
 ):
     """
-    Tick-level data of the duellists around one duel, for the 2D replay.
+    Tick-level data of the WHOLE round for the round replay: every player
+    of both teams, their positions / view / HP / weapon / keys, plus the
+    round's shots, kills and hits around the selected player.
 
-    One parse for all `sids` (the two players of the duel), split per
-    player: ({sid: frame sorted by tick}, missing_buttons). Each frame has
-    X / Y / Z, pitch / yaw, `speed` (same rules as the timeline: NaN on
-    gaps, teleports and a dead pawn), `is_alive` and the held keys.
-    Nothing but the duellists is read - grenades, teammates and other
-    enemies are not part of a duel replay.
+    Unlike replay_data (the old two-duellist replay) this reads everyone,
+    so trades by teammates and "where was I shooting" are visible. The
+    round boundaries come from the round's own events (deaths/fires with
+    that round number) bracketed by live round_freeze_end ticks; without
+    freeze ends the window is the events +/- a margin, without events at
+    all the freeze-end index of the round is used. Frames are sampled on
+    a uniform grid (<= max_samples points, event ticks snap to the grid
+    neighbourhood, the UI interpolates) and ffilled per player like the
+    timeline. Returns a dict for ui.roundrep.round_payload:
+
+    {"t0", "t1", "step", "tickrate", "round", "frames": {sid: df},
+     "keys": [available key names], "shots": [(tick, sid, weapon)],  # from fires
+     "kills": [(tick, attacker, victim, weapon, hs)],
+     "hits": [(tick, attacker, victim)]}
+    (hits cover EVERY pair of the round - the replay shows the whole
+    round, teammate trades included). Raises ValueError("no_round_data")
+    when neither events nor freeze ends can place the round.
     """
     parser = DemoParser(path)
     if tickrate is None:
@@ -2815,19 +2925,64 @@ def replay_data(
             tickrate = tickrate_from_header(parser.parse_header())
         except Exception:  # noqa: BLE001 - header is optional here
             tickrate = TICKRATE
-    ticks = list(
-        range(tick - int(before_s * tickrate), tick + int(after_s * tickrate) + 1)
-    )
+    round_no = int(round_no)
+
+    # ---- round boundaries -------------------------------------------------
+    ev_ticks: list[int] = []
+    for df in (deaths, fires):
+        if df is None or not len(df):
+            continue
+        r = _round_col(df)
+        d = df[(r + 1) == round_no]
+        if len(d) and "tick" in d.columns:
+            ev_ticks += [int(x) for x in pd.to_numeric(d["tick"], errors="coerce").dropna()]
+    fe = _live_freeze_ends(parser)
+
+    def _ev_span() -> tuple[int, int] | None:
+        if not ev_ticks:
+            return None
+        lo, hi = min(ev_ticks), max(ev_ticks)
+        lo = max(lo - int(3.0 * tickrate), 0)
+        hi = hi + int(5.0 * tickrate)
+        return lo, hi
+
+    span = _ev_span()
+    if span is not None:
+        lo, hi = span
+        prev_fe = [x for x in fe if x <= lo + int(3.0 * tickrate)]
+        if prev_fe:
+            lo = min(prev_fe[-1], lo)  # round starts at its freeze end
+        nxt_fe = [x for x in fe if x > lo]
+        if nxt_fe:
+            hi = min(hi, nxt_fe[0] - 1)
+    elif fe and 1 <= round_no <= len(fe):
+        lo = fe[round_no - 1]
+        hi = (fe[round_no] - 1) if round_no < len(fe) else lo + int(max_s * tickrate)
+    else:
+        raise ValueError("no_round_data")
+    hi = min(hi, lo + int(max_s * tickrate))
+    if hi <= lo:
+        raise ValueError("no_round_data")
+
+    # ---- uniform grid (<= max_samples points, the UI interpolates) -------
+    step = max(1, -(-(hi - lo + 1) // max_samples))
+    grid = list(range(lo, hi + 1, step))
+
     df = None
     last_err: Exception | None = None
     for props in (
+        POS
+        + BTN_NAMED
+        + ["buttons"]
+        + ALIVE_PROPS
+        + ["health", "active_weapon_name", "flash_duration"],
+        POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS + ["health"],
         POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS,
-        POS + ["buttons"] + ALIVE_PROPS,
         POS + ALIVE_PROPS,
         POS,
     ):
         try:
-            df = parser.parse_ticks(props, ticks=ticks, players=[int(x) for x in sids])
+            df = parser.parse_ticks(props, ticks=grid)
             break
         except Exception as e:  # noqa: BLE001
             last_err = e
@@ -2842,14 +2997,69 @@ def replay_data(
         name_to_sid,
     )
     df = _norm_alive(_decode_buttons(df))
+
     frames: dict[str, pd.DataFrame] = {}
-    for sid in sids:
-        d = df[df["steamid"] == sid].drop_duplicates("tick")
-        frames[sid] = (
-            _timeline_speed(d, tickrate).sort_values("tick").reset_index(drop=True)
+    for sid, d in df.groupby("steamid", sort=False):
+        frames[str(sid)] = (
+            d.drop_duplicates("tick")
+            .sort_values("tick")
+            .reset_index(drop=True)
         )
-    missing = [x for x in BUTTONS if x not in df.columns]
-    return frames, missing
+
+    # ---- events of the round (tick window, not the round column: the
+    # window is already the round) -----------------------------------------
+    out_shots: list[tuple[int, str, str]] = []
+    if (
+        fires is not None
+        and len(fires)
+        and "tick" in fires.columns
+        and "weapon" in fires.columns
+    ):
+        sid_col = "sid" if "sid" in fires.columns else "user_steamid"
+        s = fires[fires["tick"].between(lo, hi)]
+        out_shots = [
+            (int(r.tick), str(getattr(r, sid_col)), norm_weapon(r.weapon))
+            for r in s.itertuples()
+        ]
+    out_kills: list[tuple[int, str, str, str, bool]] = []
+    if deaths is not None and len(deaths) and {"tick", "attacker_steamid", "user_steamid"} <= set(
+        deaths.columns
+    ):
+        d = deaths[deaths["tick"].between(lo, hi)]
+        for r in d.itertuples():
+            out_kills.append(
+                (
+                    int(r.tick),
+                    str(r.attacker_steamid),
+                    str(r.user_steamid),
+                    norm_weapon(getattr(r, "weapon", "") or ""),
+                    bool(getattr(r, "headshot", False)),
+                )
+            )
+    out_hits: list[tuple[int, str, str]] = []
+    if hurts is not None and len(hurts) and {"tick", "attacker_steamid", "user_steamid"} <= set(
+        hurts.columns
+    ):
+        h = hurts[hurts["tick"].between(lo, hi)]
+        for r in h.itertuples():
+            a, u = str(r.attacker_steamid), str(r.user_steamid)
+            # every pair of the round: the replay shows the whole round
+            # (teammate trades too), not just the selected duelists
+            out_hits.append((int(r.tick), a, u))
+
+    keys = [k for k in BUTTONS if k in df.columns]
+    return {
+        "t0": int(lo),
+        "t1": int(hi),
+        "step": int(step),
+        "tickrate": int(tickrate),
+        "round": round_no,
+        "frames": frames,
+        "keys": keys,
+        "shots": out_shots,
+        "kills": out_kills,
+        "hits": out_hits,
+    }
 
 
 # ---------------------------------------------------------- data quality

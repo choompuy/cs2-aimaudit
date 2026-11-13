@@ -195,6 +195,10 @@ def make_match(rounds, weapons=("ak47",)):
         for t in range(t0 - 64, t0 + 17):
             for sid in IDS:
                 x, y, yaw = _POS[sid]
+                # round replay props: HP drops when the duel lands (S3
+                # dies at t0+10), Alpha holds W the whole approach and
+                # FIRE only around its own shots, weapon switches once
+                dead = sid == S3 and t >= t0 + 10
                 rows.append(
                     {
                         "tick": t,
@@ -205,7 +209,7 @@ def make_match(rounds, weapons=("ak47",)):
                         "Z": 0.0,
                         "pitch": 0.0,
                         "yaw": yaw,
-                        "is_alive": True,
+                        "is_alive": not dead,
                         "aim_punch_angle": "0 0 0",
                         "team_num": s1_team if sid in (S1, S2) else 5 - s1_team,
                         # shooter state: Alpha's t0+2 shot (the headshot
@@ -213,6 +217,14 @@ def make_match(rounds, weapons=("ak47",)):
                         # answer comes still slowed (0.4) from the damage.
                         "flash_duration": 1.5 if (sid == S1 and t == t0 + 2) else 0.0,
                         "velo_modifier": 0.4 if (sid == S3 and t == t0 + 5) else 1.0,
+                        "health": 0 if dead else 100,
+                        "active_weapon_name": (
+                            ("weapon_awp" if t >= t0 + 8 else "weapon_ak47")
+                            if sid == S1
+                            else "weapon_ak47"
+                        ),
+                        "FORWARD": sid == S1 and not dead,
+                        "FIRE": sid == S1 and t in (t0, t0 + 2),
                     }
                 )
     return {
@@ -491,24 +503,143 @@ def scenario_one_round():
     )
     act(
         at,
-        "timeline: 2D replay view",
+        "timeline: round replay view",
         lambda: at.session_state.__setitem__("tl_view", "replay") or at.run(),
     )
-    charts = at.get("plotly_chart")
-    spec = ""
-    try:
-        spec = charts[0].proto.spec
-    except Exception:  # noqa: BLE001 - AppTest proto layout differs between versions
-        pass
     check(
-        "replay: an animated chart (frames + slider) for the two duellists",
-        len(charts) == 1 and '"frames"' in spec and '"sliders"' in spec,
-        (len(charts), bool(spec)),
+        "replay: the old two-duellist plotly chart is gone",
+        not at.get("plotly_chart"),
+        len(at.get("plotly_chart") or []),
     )
     act(
         at,
         "timeline: back to charts",
         lambda: at.session_state.__setitem__("tl_view", "charts") or at.run(),
+    )
+    # the payload behind the canvas: the whole round, every player, with
+    # HP / weapon / keys - checked straight against the fake demo so the
+    # data contract is asserted, not just "no exception"
+    _demo_path = os.path.realpath(
+        store.demo_path(store.get_demo(at.session_state["demo_id"]))
+    )
+    _m = core.load_demo(_demo_path)
+    _rr = core.round_replay_data(
+        _demo_path,
+        1,
+        S1,
+        key_sids=[S3],
+        fires=_m.fires,
+        deaths=_m.deaths,
+        hurts=_m.hurts,
+    )
+    check(
+        "replay data: every player of the round + hp/weapon/keys parsed",
+        set(_rr["frames"]) == set(IDS)
+        and "health" in _rr["frames"][S1].columns
+        and "active_weapon_name" in _rr["frames"][S1].columns
+        and "FORWARD" in _rr["keys"],
+        (sorted(_rr["frames"]), _rr["keys"]),
+    )
+    check(
+        "replay data: round 1 events (3 shots, 1 kill, 1 hit)",
+        len(_rr["shots"]) == 3 and len(_rr["kills"]) == 1 and len(_rr["hits"]) == 1,
+        (_rr["shots"], _rr["kills"], _rr["hits"]),
+    )
+    from ui.roundrep import round_payload as _rp
+
+    _pl = _rp(
+        _rr,
+        me=S1,
+        names=NAMES,
+        side_of=lambda s: _m.side_at(1, s),
+        radar=None,
+        duels=[
+            {
+                "a": 950,
+                "b": 1100,
+                "tick": 1010,
+                "result": "kill",
+                "opp": "Charlie",
+                "opp_sid": S3,
+                "weapon": "ak47",
+                "hs": True,
+                "dur": 0.16,
+            }
+        ],
+        rounds=[{"n": 1, "win": "T"}],
+        sel=0,
+        key_players=[(S1, NAMES[S1]), (S3, NAMES[S3])],
+    )
+    _p0 = _pl["players"][0]
+    _i_at = int(_pl["at"]) - _pl["t0"]  # the replay starts at the duel
+    check(
+        "replay payload: roles, hp, weapon change, key panel",
+        [p["role"] for p in sorted(_pl["players"], key=lambda p: p["sid"])]
+        == ["me", "tm", "en", "en"]
+        and _p0["hp"][0] == 100
+        and _p0["w"][0][1] == "ak47"
+        # before the first parsed tick the keys are honestly 0 (not pressed)
+        and _p0["keys"]["FORWARD"][_i_at] == 1,
+        ([p["role"] for p in _pl["players"]], _pl["keys"]),
+    )
+    check(
+        "replay payload: duel card + locked segment + rounds bar",
+        _pl["duels"][0]["a"] == 950
+        and _pl["duels"][0]["b"] == 1100
+        and _pl["duels"][0]["oi"] >= 0
+        and _pl["duels"][0]["opp"] == "Charlie"
+        and _pl["rounds"] == [[1, "T"]]
+        and _pl["sel"] == 0
+        and _pl["at"] == 950,
+        (_pl["duels"], _pl["rounds"], _pl["sel"], _pl["at"]),
+    )
+
+
+def scenario_round_replay():
+    """The replay's rounds bar: switching rounds, reset on duel change."""
+    at = open_demo(make_match([1, 2]), "rr_switch.dem")
+    check("runs without exception", not at.exception, err_of(at))
+    goto(at, "timeline")
+    act(
+        at,
+        "timeline duel renders",
+        lambda: at.session_state.__setitem__("tl_duel", 0) or at.run(),
+    )
+    act(
+        at,
+        "timeline: round replay view",
+        lambda: at.session_state.__setitem__("tl_view", "replay") or at.run(),
+    )
+    check(
+        "replay: the old two-duellist plotly chart is gone",
+        not at.get("plotly_chart"),
+        len(at.get("plotly_chart") or []),
+    )
+    # a round-bar chip click lands as rr_round in the session (the
+    # component trigger calls the same setter); the replay follows it
+    act(
+        at,
+        "rounds bar switches the replay to round 2",
+        lambda: at.session_state.__setitem__("rr_round", 2) or at.run(),
+    )
+    # picking another duel in the strip returns the replay to that duel's
+    # own round: the stale rr_round must be dropped
+    act(
+        at,
+        "switch to the round-2 duel",
+        lambda: at.session_state.__setitem__("tl_duel", 1) or at.run(),
+    )
+    check(
+        "rr_round is dropped when the duel changes",
+        ss_get(at, "rr_round") is None,
+        ss_get(at, "rr_round"),
+    )
+    act(
+        at,
+        "rounds bar switches again, then back to charts",
+        lambda: at.session_state.__setitem__("rr_round", 1)
+        or at.session_state.__setitem__("tl_view", "charts")
+        or at.run(),
     )
 
 
@@ -1654,6 +1785,7 @@ def main():
     else:
         core.DemoParser = FakeParser  # patch BEFORE any app run
         scenario_one_round()
+        scenario_round_replay()
         scenario_player_stepper()
         scenario_duel_strip()
         scenario_two_rounds()
