@@ -65,7 +65,7 @@ def render(ctx) -> None:
 
     # shot discipline: firing while flashed / while damage-slowed.
     # NA (prop unknown on old demos) never counts as False - a verdict is
-    # only issued when the data actually exists.
+    # only issued when the data exists.
     fl_me = sh_me["flashed"]
     sl_me = sh_me["slowed"]
     fl_known, sl_known = int(fl_me.notna().sum()), int(sl_me.notna().sum())
@@ -117,7 +117,7 @@ def render(ctx) -> None:
         n_lost = int((dth_df["first"] == "opponent").sum())
         if n_lost and n_lost / len(dth_df) >= 0.5:
             tips.append((1, t("tip_lost_first", n=n_lost, m=len(dth_df)), "lost"))
-    # opening-duel verdict: only when the player actually takes openings
+    # opening-duel verdict: only when the player takes openings
     # often enough (>= 5) and keeps losing them (<= 30% won)
     if imp_me is not None and imp_me["open_attempts"] >= 5:
         _o_rate = imp_me["open_rate"]
@@ -239,8 +239,8 @@ def render(ctx) -> None:
                     )
 
     # one headline tile per theme — Accuracy, Movement (risky, the
-    # distance-aware one), Crosshair, Duels — instead of anonymous rows;
-    # the rest are grouped under section headers behind "All metrics"
+    # distance-aware one), Crosshair, Duels; the rest are grouped under
+    # section headers behind "All metrics"
     # (mirrors the tables' Basic/Full switch).
     acc_pct = hits_n / len(sh_me) * 100 if len(sh_me) else np.nan
     c = st.columns(4)

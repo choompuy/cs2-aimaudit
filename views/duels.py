@@ -84,10 +84,9 @@ def render(ctx) -> None:
         )
         st.caption(t("du_click_hint"))
 
-        # duels by named map zone - "where do my fights actually
-        # happen". The zone comes from the death event (last_place_name at
-        # the kill tick); duels without a known zone are skipped, not
-        # lumped into a fake "(unknown)" row.
+        # duels by named map zone. The zone comes from the death event
+        # (last_place_name at the kill tick); duels without a known zone
+        # are skipped.
         _zd = (
             my_duels[my_duels["my_zone"].astype(str).str.len() > 0]
             if len(my_duels)

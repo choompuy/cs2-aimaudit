@@ -175,7 +175,7 @@ def table_payload(
 
 
 def _renderer():
-    # registered on every run on purpose: the registry lives in the Streamlit
+    # registered on every run: the registry lives in the Streamlit
     # runtime (AppTest and server restarts start with an empty one), and
     # re-registering an identical definition is cheap and idempotent
     return st.components.v2.component("aimaudit_table", css=_CSS, js=_JS)

@@ -161,7 +161,7 @@ def run(argv: list[str]) -> int:
                 # merged in via other= (same pattern as core.py), not
                 # native fields. Fall back without other= in case this
                 # demoparser2 build refuses it for some event - the
-                # columns then simply stay absent.
+                # columns then stay absent.
                 try:
                     dfs = dict(
                         parser.parse_events(

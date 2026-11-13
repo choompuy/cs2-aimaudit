@@ -24,18 +24,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # demoparser2 publishes CPython 3.11-3.14 wheels for Linux and
-        # Windows only: no macOS wheels and no sdist since 0.42.1, so a
-        # macOS job cannot even install it. Re-add macOS when upstream
-        # ships wheels again.
+        # demoparser2 publishes CPython wheels for Linux and Windows
+        # only: no macOS wheels and no sdist since 0.42.1, so a macOS
+        # job cannot even install it. Re-add macOS when upstream ships
+        # wheels again. The matrix is about OSes only: Python is pinned
+        # to a single version, matching the exact dependency pins in
+        # requirements.txt - the suite is only guaranteed on this
+        # interpreter. Bump the pin (here + README + requirements)
+        # deliberately, like any other dependency.
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.13"
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources
@@ -54,7 +57,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources

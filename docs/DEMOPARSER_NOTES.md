@@ -45,7 +45,7 @@ parser.list_game_events() -> List[str]   # roughly as slow as parse_event
 - `player=["X", "Y"]` — "player" props are added to the event with the
   participant prefix: for `bomb_planted` you get `user_X`, `user_Y`.
 - `other=["total_rounds_played"]` — GAME state (only game-state props are
-  valid in `other`!). Our core.py calls
+  valid in `other`!). Our core/loader.py calls
   `parse_events(["player_death", "weapon_fire", "player_hurt"], other=["total_rounds_played"])`
   — this is correct usage: `total_rounds_played` = m_totalRoundsPlayed.
 - `parse_events([...])` returns a list of `(event_name, df)` tuples —

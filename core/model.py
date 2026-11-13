@@ -45,8 +45,8 @@ HITGROUPS = {
 }
 
 
-# Weapon classes (CS2 internal names after norm_weapon). Lets "all rifles"
-# be one click instead of seven. Everything unmapped is "other".
+# Weapon classes (CS2 internal names after norm_weapon).
+# Everything unmapped is "other".
 WEAPON_CLASSES: dict[str, set[str]] = {
     "rifle": {"ak47", "m4a1", "m4a1_silencer", "famas", "galilar", "aug", "sg556"},
     "sniper": {"awp", "ssg08", "scar20", "g3sg1"},
@@ -72,7 +72,7 @@ WEAPON_TO_CLASS: dict[str, str] = {w: c for c, ws in WEAPON_CLASSES.items() for 
 
 
 # ------------------------------------------------------------- buttons
-# Named button props actually supported by demoparser2 (README props table).
+# Named button props supported by demoparser2 (README props table).
 # LEFT/RIGHT are strafe A/D (IN_MOVELEFT/IN_MOVERIGHT), TURNLEFT/RIGHT are not
 # exposed as named props.
 BTN_NAMED = [
@@ -227,8 +227,7 @@ EYE_STAND, HEAD_STAND, DUCK_DROP = 64.0, 62.0, 18.0
 HEAD_WIDTH = 18.0
 
 
-# Below these counts a rate is noise: the UI shows a small-sample hint
-# instead of pretending the number means something.
+# Below these counts a rate is noise: the UI shows a small-sample hint.
 MIN_N_SHOTS = 10
 
 
@@ -239,7 +238,7 @@ def wilson_ci(k: float, n: float, z: float = 1.96) -> tuple[float, float]:
     """
     Wilson score interval (in %) for a binomial rate k/n.
 
-    With 8 duels a '62%' means almost nothing; a rate is honest only next
+    With 8 duels a '62%' means almost nothing; a rate means little next
     to its uncertainty. Returns (nan, nan) when n <= 0.
     """
 

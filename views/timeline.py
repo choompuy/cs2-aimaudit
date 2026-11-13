@@ -75,7 +75,7 @@ def _timeline_fragment(ctx):
         with st.spinner(t("tl_loading")):
             try:
                 data = get_round_replay(path, mtime, round_no, me, opps, demo.tickrate)
-            except ValueError:  # "no_round_data": honest info, not a crash
+            except ValueError:  # "no_round_data": an info message, not a crash
                 st.info(t("rr_no_round"))
                 return
 
@@ -571,8 +571,8 @@ def _timeline_fragment(ctx):
                 fx = (int(r["my_first_tick"]) - tick) / demo.tickrate
                 if float(xs.min()) <= fx <= float(xs.max()):
                     first_x = fx
-            # x = 0 is the duel event - we know if it was your kill or
-            # your death, so name it exactly instead of "kill/death"
+            # x = 0 is the duel event - label it with the result, not
+            # "kill/death"
             ev_text = fmt_result(r["result"])
             for row_i in range(1, rows_n + 1):
                 # annotation kwargs only on the top row: passing

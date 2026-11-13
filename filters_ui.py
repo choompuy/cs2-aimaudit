@@ -60,8 +60,7 @@ def load_url_state() -> None:
             for k, sk in _URL_KEYS:
                 if saved.get(k) is not None:
                     st.session_state[sk] = saved[k]
-            # a link that restores filters opens with the card expanded, so
-            # the filters are visible instead of hiding behind the summary
+            # a link that restores filters opens with the card expanded
             if (
                 saved.get("weapons")
                 or saved.get("classes")
@@ -101,7 +100,7 @@ def render(ctx) -> None:
     show_result = page_now in ("duels", "timeline")
     show_panel = page_now != "guide"
     # distance bands reuse the stop-quality thresholds: close is inside
-    # SAFE_DIST (run-and-gun territory), long is beyond STRICT_DIST
+    # SAFE_DIST, long is beyond STRICT_DIST
     DIST_KEYS = ("all", "close", "mid", "long")
     DIST_RANGES = {
         "close": (0.0, core.SAFE_DIST),
@@ -118,7 +117,7 @@ def render(ctx) -> None:
         st.session_state["flt_classes"] = [
             c for c in st.session_state["flt_classes"] if c in set(present_classes)
         ]
-    # a preset is offered only when the match actually has that part: with
+    # a preset is offered only when the match has that part: with
     # sides, halves decide; without them the MR12 heuristics on round count
     # (Custom needs the range slider, i.e. at least two rounds)
     preset_opts = ["all"] + (["pistols"] if n_rounds >= 2 else [])
@@ -132,8 +131,8 @@ def render(ctx) -> None:
         preset_opts = ["all", "first", "second", "pistols"]
     if n_rounds >= 2:
         preset_opts.append("custom")
-    # ---- state migration: old links / old session keys keep working
-    # res used to be a multiselect list ["kill","death"] -> both/kill/death
+    # ---- old links / old session keys keep working
+    # res arrives as a multiselect list ["kill","death"] -> both/kill/death
     _res = st.session_state.get("flt_res")
     if isinstance(_res, (list, tuple, set)):
         st.session_state["flt_res"] = (
@@ -143,12 +142,12 @@ def render(ctx) -> None:
         )
     elif _res not in ("both", "kill", "death"):
         st.session_state["flt_res"] = "both"
-    # dist is new: anything unknown resets to "all"
+    # anything unknown resets to "all"
     if st.session_state.get("flt_dist") not in DIST_KEYS:
         st.session_state["flt_dist"] = "all"
     # an old link could carry preset=all with a slider-moved range: that
-    # state is called Custom now (only when the link actually carried a
-    # range - a fresh session has no flt_rounds yet)
+    # state maps to Custom (only when the link carried a range - a fresh
+    # session has no flt_rounds yet)
     if (
         st.session_state.get("flt_preset", "all") == "all"
         and st.session_state.get("flt_rounds") is not None
@@ -212,8 +211,8 @@ def render(ctx) -> None:
             )
 
     def _slider_custom():
-        # a manual range IS the Custom preset now (it used to fall back to
-        # "all", which hid that a range was active)
+        # a manual range is the Custom preset (falling back to "all"
+        # would hide that a range is active)
         st.session_state["flt_preset"] = "custom"
 
     def _clr(key, value):
@@ -335,7 +334,7 @@ def render(ctx) -> None:
         st.session_state["flt_open"] = is_open
 
     # how much data is in view: the one caption shared by the collapsed
-    # summary row and the open card (the per-page "Showing..." bar is gone)
+    # summary row and the open card
     _counts = t("flt_sum_counts", shots=len(shots_f), duels=len(duels_f))
     if not filters.empty():
         _counts += " " + t("flt_sum_of", shots=len(shots), duels=len(duels_all))
@@ -343,7 +342,7 @@ def render(ctx) -> None:
     # The sticky bar: the filter summary row and the page tabs stay
     # visible while the page scrolls (position: sticky in
     # theme/overrides.css, scoped to this container's key; on Streamlit
-    # builds without .st-key-* classes the rule simply does not match and
+    # builds without .st-key-* classes the rule does not match and
     # the bar scrolls away - no fallback hacks).
     _hdr = st.container(key="hdr_sticky", gap="xsmall")
 
@@ -463,8 +462,7 @@ def render(ctx) -> None:
                 # summary line shows
                 st.caption(_counts)
         else:
-            # one line: the active filters, how much is in view, and the
-            # tools that used to be separate rows (Reset)
+            # one line: the active filters, how much is in view, Reset
             _sum = (
                 t("flt_sum", parts=" · ".join(_label for _label, _ in _chips))
                 if _chips

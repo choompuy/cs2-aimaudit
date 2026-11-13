@@ -3,7 +3,7 @@
 **Audit your aim — local CS2 demo analysis. Shooting, duels, movement and key presses, with nothing ever leaving your computer.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Python](https://img.shields.io/badge/python-3.13-blue)
 ![UI](https://img.shields.io/badge/UI-Streamlit-FF4B4B)
 ![Privacy](https://img.shields.io/badge/privacy-100%25%20local-green)
 
@@ -42,7 +42,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Requires Python 3.11+ (tested on 3.11–3.14) and a CS2 match demo (`.dem`).
+Requires Python 3.13 (the exact version CI tests, matching the pinned dependencies in `requirements.txt`) and a CS2 match demo (`.dem`).
 
 ### Where to get a demo
 

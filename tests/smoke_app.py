@@ -2,8 +2,8 @@
 UI smoke test: runs the REAL app.py through streamlit AppTest on synthetic
 demos - no real .dem file needed.
 
-test_core.py never executes app.py, so UI-level crashes slipped through:
-a one-round demo used to kill the whole app (st.slider with
+test_core.py never executes app.py, so UI-level crashes slip through:
+a one-round demo can kill the whole app (st.slider with
 min_value == max_value raises StreamlitInvalidMinMaxError). This script
 runs the actual UI end to end against fake demos and fails on any uncaught
 exception, missing widget or unfriendly error.
@@ -13,8 +13,8 @@ Usage, from the repo root:
     python tests/smoke_app.py --all       # + the full interaction matrix
     python tests/smoke_app.py match.dem   # a REAL demo (.dem/.bz2/.gz/.zip/.zst)
 
-The fake parser mirrors tests/test_core.py::FakeParser (duplicated on purpose
-so both scripts stay runnable on their own). The local state file (recent
+The fake parser mirrors tests/test_core.py::FakeParser (duplicated so
+both scripts stay runnable on their own). The local state file (recent
 demos, last player) is redirected to a temp dir - the real
 ~/.cs2-aimaudit/state.json is never touched.
 """
@@ -472,7 +472,7 @@ def open_filters(at):
 
 # ---------------------------------------------------------------- scenarios
 def scenario_one_round():
-    """The regression: a demo with a single round used to crash the app."""
+    """A demo with a single round must not crash the app."""
     print("== one-round demo (slider crash regression) ==")
     at = open_demo(make_match([1]), "one_round.dem")
     check("runs without exception", not at.exception, err_of(at))
@@ -578,7 +578,7 @@ def scenario_one_round():
         == ["me", "tm", "en", "en"]
         and _p0["hp"][0] == 100
         and _p0["w"][0][1] == "ak47"
-        # before the first parsed tick the keys are honestly 0 (not pressed)
+        # before the first parsed tick the keys are 0 (not pressed)
         and _p0["keys"]["FORWARD"][_i_at] == 1,
         ([p["role"] for p in _pl["players"]], _pl["keys"]),
     )

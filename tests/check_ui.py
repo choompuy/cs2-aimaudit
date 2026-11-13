@@ -107,7 +107,7 @@ have = set(dir(core))
 unknown = sorted(refs - have)
 bad("core attrs exist", not unknown, unknown)
 
-# ---- 5. keys actually formatted with the right kwargs (smoke: t() runs)
+# ---- 5. keys formatted with the right kwargs (smoke: t() runs)
 for lang in ("en", "ru"):
     t = i18n.make_t(lang)
     t("tl_label", round=1, result="r", weapon="w", opp="o")
@@ -303,7 +303,7 @@ bad(
 # ---- 9. design system: .streamlit/config.toml [theme] matches the tokens
 # tools/sync_theme.py regenerates the section from theme/tokens.toml; if the
 # file was hand-edited (or sync was forgotten after a token change) the app
-# silently renders with a stale palette for all native widgets.
+# renders with a stale palette for all native widgets.
 import theme  # noqa: E402
 from theme.loader import config_theme_dict, font_faces  # noqa: E402
 
@@ -693,8 +693,8 @@ bad("import graph: no cycles", not _cycle, _cycle)
 # ---- 14. layering: core/ui/theme never import app-level code. The
 # dependency chain is one-way (ui, theme, i18n <- core <- context <-
 # filters_ui, shell, views <- app); a violation here would mean a leaf
-# module grew UI/navigation logic again. Beyond the prompt's explicit
-# app/views/shell this also bans filters_ui/context for the same reason.
+# module grew UI/navigation logic again. Beyond app/views/shell this also
+# bans filters_ui/context for the same reason.
 _APP_LEVEL = {"app", "views", "shell", "filters_ui", "context"}
 _layer_bad = sorted(
     f"{_name} -> {_t}"

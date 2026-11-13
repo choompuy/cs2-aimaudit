@@ -593,7 +593,7 @@ def _round_side_keep(demo: Demo, f: "Filters | None"):
     round (Demo.side_at, so a halftime swap is handled per round). Weapon,
     class and distance are shot-level filters and stay out of it. None is
     also returned when the deaths carry no round counter - guessing rounds
-    would silently drop or keep the wrong kills.
+    would drop or keep the wrong kills.
     """
     if f is None or not (f.rounds or f.rounds_set or f.side):
         return None
@@ -616,7 +616,7 @@ def round_winners(demo: Demo) -> dict[int, str]:
     """
     Round winners ('CT'/'T') for the replay's round bar, inferred from
     eliminations: CS2 demos expose no round_end/winner event, so the
-    only honest signal is "a side lost every player in
+    only signal is "a side lost every player in
     that round" - then the other side won it. Every death counts towards
     the VICTIM's side loss count (kills, teamkills, suicides/world, the
     bomb), because the team did lose that player either way.
@@ -882,7 +882,7 @@ def player_summary(
         elif have_d:
             # K/D like the in-game scoreboard: every ENEMY kill/death with
             # any weapon (knife and grenades included), whole match. Duels
-            # above are gun-only, so the two must not be mixed silently.
+            # above are gun-only, so the two must not be mixed.
             # Static teams are fine here: teammates share the label before
             # and after the halftime swap. World/suicide deaths have no
             # known attacker and stay out, teamkills stay out both ways.
@@ -991,7 +991,7 @@ def weapon_stats(
     if len(sh):
         g["risky"] = sh.groupby("weapon")["_r"].mean() * 100
         # first-shot accuracy per weapon: hit rate on the weapon's first
-        # shots of engagements (the AWP/USP number that actually matters);
+        # shots of engagements (the AWP/USP number that matters);
         # NaN for weapons that only appear inside sprays
         fsh = sh[sh["first_shot"]]
         if len(fsh):

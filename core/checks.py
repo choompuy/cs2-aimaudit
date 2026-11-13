@@ -36,7 +36,7 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
 
     checks: list[dict] = []
 
-    # 1. steamids that failed to resolve -> stats silently missing
+    # 1. steamids that failed to resolve -> stats missing
     n_na, total_ev = 0, 0
     for df, cols in (
         (demo.deaths, ["attacker_steamid", "user_steamid"]),
@@ -71,7 +71,7 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
     )
 
     # 4. shots with unknown speed (no t-1 tick / death / teleport right
-    # before the shot). Better an honest NaN than a garbage number.
+    # before the shot). NaN, not a garbage number.
     n = int(shots["speed"].isna().sum()) if len(shots) else 0
     f = n / max(len(shots), 1)
     checks.append(
@@ -122,7 +122,7 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
         checks.append({"id": "angles", "level": "ok", "n": 0, "med": float("nan")})
 
     # 10. per-round side data (halftime swap): without it the shown side
-    # silently falls back to the end-of-match team for those rounds
+    # falls back to the end-of-match team for those rounds
     if len(shots) and demo.sides:
         n = int((~shots["round"].isin(set(demo.sides))).sum())
         f = n / len(shots)

@@ -88,8 +88,7 @@ def round_bounds(n_rounds: int, preset: str, halves=None) -> tuple[int, int]:
     (lo, hi) ranges from halves_from_sides; when given they define the
     halves (MR15, overtime lengths and all), otherwise MR12 is assumed:
     first half 1-12, second 13-24, overtime 25+. A preset beyond the match
-    gives an empty range (lo > hi) on purpose - the UI simply does not
-    offer it.
+    gives an empty range (lo > hi) - the UI does not offer it.
     """
 
     n = max(int(n_rounds), 1)

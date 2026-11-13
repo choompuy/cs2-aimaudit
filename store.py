@@ -19,7 +19,7 @@ the app folder is not writable (installed system-wide) the data goes to
 ~/.cs2-aimaudit instead. Nothing here touches the network.
 
 This module is plain Python (no Streamlit, no demo parsing) so it can be
-tested on its own; core.py and app.py build on it.
+tested on its own; the core/ package and app.py build on it.
 """
 
 from __future__ import annotations
@@ -399,7 +399,7 @@ def read_parsed(path: str, code_ver: str):
     try:
         with open(f, "rb") as fh:
             obj = pickle.load(fh)  # our own file in our own data folder
-    except Exception:  # noqa: BLE001 - truncated / from another build: just reparse
+    except Exception:  # noqa: BLE001 - truncated / from another build: reparse
         _remove(f)
         return None
     try:

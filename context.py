@@ -118,7 +118,7 @@ class Ctx:
     """
     The run-shared state the shell fills and every view reads.
 
-    Flat on purpose: each view's render(ctx) unpacks the few fields it
+    Flat: each view's render(ctx) unpacks the few fields it
     needs into locals. Fields are grouped by the shell function that
     produces them.
     """

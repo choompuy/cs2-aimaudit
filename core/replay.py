@@ -561,7 +561,7 @@ def round_replay_data(
         for r in h.itertuples():
             a, u = str(r.attacker_steamid), str(r.user_steamid)
             # every pair of the round: the replay shows the whole round
-            # (teammate trades too), not just the selected duelists
+            # (teammate trades too), not only the selected duelists
             out_hits.append((int(r.tick), a, u))
 
     keys = [k for k in BUTTONS if k in df.columns]

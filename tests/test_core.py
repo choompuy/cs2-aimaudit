@@ -20,7 +20,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # Windows consoles default to legacy codepages (cp1252) and the output
-# below prints → and ≈: force UTF-8 instead of crashing. CI sets
+# below prints → and ≈: force UTF-8 so it does not crash. CI sets
 # PYTHONUTF8=1 as well - this covers a local run on a stock console.
 for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
@@ -171,7 +171,7 @@ def make_match():
     punch = {(100, S1): "5.0 0.0 0.0"}
     # shooter state at the fire ticks: S1 is flashed (2.0s left) at
     # its 110 shot and damage-slowed (velo 0.4) at the 120 one; S3 answers
-    # at 115 still slowed (0.35) from the hit it just took. Everything else
+    # at 115 still slowed (0.35) from the hit it took. Everything else
     # is the clean state (0.0 / 1.0).
     flash = {(110, S1): 2.0}
     velo = {(120, S1): 0.4, (115, S3): 0.35}
@@ -922,7 +922,7 @@ check(
 # ---------------------------------------------- fix_ids: the Heylaurens bug
 print("== fix_ids: rounded floats in non-float column ==")
 # Only sids that are multiples of 16 survive float64; a column of rounded
-# floats in a NON-float dtype used to become Int64->str and lose everyone
+# floats in a NON-float dtype lose everyone
 # else (in a real 10-player match exactly one player kept his hits).
 H = "76561199129512544"  # % 16 == 0 -> float-exact
 C = "76561198323851243"  # rounds to ...248
@@ -2788,7 +2788,7 @@ from ui.roundrep import round_payload  # noqa: E402
 # --- a dense 2-round fake: freeze ends, HP, weapons, buttons, all 4
 # players. Round 1 lives at freeze end 100..830 (next freeze end at 1000):
 # S1 hits S3 at 505 (34 hp left) and kills it at 510; S1 dies at 600 (S2
-# trade-kills it - irrelevant here, the replay just needs the rows).
+# trade-kills it - irrelevant here, the replay needs the rows).
 _rr_rows = []
 for _tk in range(100, 640):
     for _sid, _nm in (

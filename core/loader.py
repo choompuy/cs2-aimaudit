@@ -79,7 +79,7 @@ def fix_ids(
     plain UInt64, and sometimes ROUNDED FLOATS hidden inside an object /
     nullable column. Converting any of those through Int64 -> str bakes the
     float rounding in: only players whose SteamID happens to be a multiple of
-    16 survive, everyone else silently disappears from the stats (seen in the
+    16 survive, everyone else disappears from the stats (seen in the
     wild: a 10-player match where exactly one player kept his hits).
 
     So: NEVER convert through Int64. Every numeric-ish value is mapped through
@@ -253,7 +253,7 @@ def _unpack(ext: str, p: str, tmp: str) -> None:
                 with z.open(members[0]) as src, open(tmp, "wb") as dst:
                     shutil.copyfileobj(src, dst)
     except ValueError:
-        # one of our own clear messages - just drop the partial .part
+        # one of our own error messages - drop the partial .part
         try:
             os.remove(tmp)
         except OSError:
@@ -344,7 +344,7 @@ def _unpack_dir() -> str:
 # ------------------------------------------------------------ app state
 # Small local state next to the demo library (store.state_path): the last
 # selected demo and player. Everything stays in the data folder; if it is not
-# writable the app simply does not remember anything. A state file left by an
+# writable the app does not remember anything. A state file left by an
 # older version in ~/.cs2-aimaudit is read once and then superseded.
 def load_state() -> dict:
     """Load the local state file; {} when missing or unreadable."""
@@ -495,13 +495,13 @@ def load_demo(path: str, progress=None) -> Demo:
     # every event (player=) plus the round clock (other=): round_second =
     # game_time - round_start_time, where round_start_time is the freeze
     # END (verified on real demos). Old parsers/demos may not know the
-    # fields - fall back step by step; the columns then simply stay absent
+    # fields - fall back step by step; the columns then stay absent
     # and every consumer treats them as missing data, never as false.
     for kw in (
         # first choice also asks for the position (X/Y/Z) of both players
         # at every event: the Map page draws kills / deaths from it. Old
         # parsers that reject it fall through to the next step, the
-        # columns stay absent and the page says so instead of guessing.
+        # columns stay absent and the page says so.
         {
             "player": ["last_place_name", "X", "Y", "Z"],
             "other": _other + ["game_time", "round_start_time"],
@@ -889,7 +889,7 @@ def load_demo_cached(path: str, progress=None) -> tuple["Demo", bool]:
 
     Only library demos are cached (their file name carries the content id);
     a demo parsed once opens again in a fraction of a second, also after the
-    app was restarted. Any problem with the cache just means parsing again.
+    app was restarted. Any problem with the cache means parsing again.
     """
     cached = store.read_parsed(path, PARSE_VERSION)
     if isinstance(cached, Demo):

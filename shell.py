@@ -30,9 +30,8 @@ def sidebar(ctx) -> None:
             format_func=lambda k: i18n.LANGS[k],
             key="lang",
         )
-        # thresholds are advanced tuning - one closed "Analysis settings"
-        # expander with a reset, instead of jargon sliders above the content;
-        # each slider's effect is one tooltip line (help=)
+        # advanced tuning: one closed expander with a reset; each
+        # slider's effect is a help= tooltip
         with st.expander(t("settings_box")):
             thr = st.slider(t("thr_label"), 0, 250, 40, help=t("thr_help"), key="thr")
             window_s = st.slider(
@@ -187,8 +186,8 @@ def open_demo(ctx) -> None:
         _last = state.get("last_demo")
         st.session_state["demo_id"] = _last if _last in by_id else lib[0]["id"]
 
-    # the picker is shown while nothing is loaded yet (also after a failed load,
-    # so another demo can be tried) and behind the "Change demo" button
+    # the picker is shown while nothing is loaded yet (also after a failed
+    # load) and behind the "Change demo" button
     if _loaded_id is None or _change_open or not lib:
         if lib:
             _ids = [e["id"] for e in lib]
@@ -225,9 +224,7 @@ def open_demo(ctx) -> None:
         st.toast(t("lib_added", name=st.session_state.pop("_added")))
 
     if not lib:
-        # the empty state is a 3-step card with the demo instructions
-        # inline (the same text the Guide shows), so a first-time player
-        # knows what they will get before any file is loaded
+        # the empty state: a 3-step card with the demo instructions inline
         st.info(t("no_file"))
         with st.container(border=True):
             st.subheader(t("start_title"))
@@ -338,8 +335,7 @@ def context_bar(ctx) -> None:
     def _close_change():
         st.session_state["demo_change"] = False
 
-    # the compact demo row replaces the upload block, the "Demo loaded"
-    # plate and the map caption: one line with what matters about the file
+    # the compact demo row: one line with what matters about the file
     info = [f"**{entry['name']}**"]
     if demo.header.get("map_name"):
         info.append(f"**{t('map')}:** {demo.header['map_name']}")
@@ -369,8 +365,7 @@ def context_bar(ctx) -> None:
                 width="content",
             )
 
-    # pre-match rounds that were dropped (knife round / warmup / restarts) -
-    # one honest line instead of silently "lost" rounds
+    # pre-match rounds that were dropped (knife round / warmup / restarts)
     _excl = getattr(demo, "excluded", {}) or {}
     _excl_parts = []
     if _excl.get("warmup"):
@@ -406,9 +401,9 @@ def context_bar(ctx) -> None:
             i = 0 if delta > 0 else len(me_opts) - 1
         st.session_state["me"] = me_opts[i]
 
-    # One compact row: [Player label] [prev] [selectbox] [next]. Up/Down are
-    # the player keys on purpose: step 2 takes Left/Right for duels and
-    # Shift+Left/Right for rounds, so the three steppers never collide.
+    # One compact row: [Player label] [prev] [selectbox] [next]. Up/Down
+    # are the player keys: the Duels page uses Left/Right and
+    # Shift+Left/Right, so the three steppers never collide.
     with st.container(horizontal=True, gap="small", vertical_alignment="center"):
         st.caption(t("player"))
         st.button(
