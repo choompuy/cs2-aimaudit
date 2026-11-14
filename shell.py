@@ -14,6 +14,7 @@ import streamlit as st
 import context
 import core
 import i18n
+import nativedialog
 import store
 from context import _status, get_demo, get_duels, get_shots
 
@@ -98,10 +99,11 @@ def open_demo(ctx) -> None:
     def _lib_label(e: dict) -> str:
         return "  ·  ".join(
             [
-                e["name"],
+                ("⚠ " if e["status"] == "missing" else "") + e["name"],
                 e.get("map") or "—",
                 store.human_size(e["size"]),
                 str(e.get("added", ""))[:10],
+                t("lib_badge_link") if e["mode"] == "link" else t("lib_badge_copy"),
             ]
         )
 
@@ -125,16 +127,78 @@ def open_demo(ctx) -> None:
     def _clear_cache() -> None:
         st.session_state["_freed"] = store.clear_cache()
 
+    def _after_pick(paths) -> None:
+        """Link the chosen files (a native dialog gave their real paths)."""
+        if paths is None:
+            st.session_state["_pick_err"] = t("lib_no_dialog")
+            return
+        added, errs = [], []
+        for p in paths:
+            try:
+                added.append(store.add_link(p))
+            except (ValueError, OSError) as e:
+                errs.append(str(e))
+        if added:
+            st.session_state["demo_id"] = added[-1]["id"]
+            st.session_state["_added"] = (
+                added[-1]["name"] if len(added) == 1 else t("lib_n_added", n=len(added))
+            )
+        if errs:
+            st.session_state["_pick_err"] = "  ".join(errs)
+
+    def _pick_file() -> None:
+        _after_pick(
+            nativedialog.pick_files(
+                t("lib_pick_file"), t("lib_dialog_demos"), t("lib_dialog_all")
+            )
+        )
+
+    def _pick_folder() -> None:
+        chosen = nativedialog.pick_folder(t("lib_pick_folder"))
+        if chosen is None:
+            st.session_state["_pick_err"] = t("lib_no_dialog")
+        elif chosen:
+            try:
+                found = store.add_folder(chosen[0])
+            except (ValueError, OSError) as e:
+                st.session_state["_pick_err"] = str(e)
+                return
+            if found:
+                st.session_state["demo_id"] = found[0]["id"]
+                st.session_state["_added"] = t("lib_n_added", n=len(found))
+            else:
+                st.session_state["_pick_err"] = t("lib_none_found")
+
+    def _locate(did: str) -> None:
+        """A linked demo was moved: ask where it is now and point the entry there."""
+        chosen = nativedialog.pick_files(
+            t("lib_locate"), t("lib_dialog_demos"), t("lib_dialog_all")
+        )
+        if chosen is None:
+            st.session_state["_pick_err"] = t("lib_no_dialog")
+        elif chosen:
+            try:
+                store.relink(did, chosen[0])
+            except (ValueError, OSError) as e:
+                st.session_state["_pick_err"] = str(e)
+                return
+            if st.session_state.get("demo_loaded") == did:
+                st.session_state.pop("demo_loaded")  # load it again from the new place
+
     def _library_panel(entries: list[dict]) -> None:
-        """Where the files are, how big, delete a demo, clear the cache."""
+        """Where the files are, how big, remove / delete a demo, clear the cache."""
         rep = store.storage_report()
         with st.expander(t("lib_manage")):
             st.caption(t("lib_folder"))
             st.code(rep["data"], language=None)
+            if rep["fallback"]:
+                st.warning(t("lib_fallback_warn", path=rep["data"]))
             st.caption(
                 t(
                     "lib_sizes",
                     demos=store.human_size(rep["demos"]),
+                    linked_n=rep["linked_count"],
+                    linked=store.human_size(rep["linked"]),
                     parsed=store.human_size(rep["parsed"]),
                     unpacked=store.human_size(rep["unpacked"]),
                     radars=store.human_size(rep["radars"]),
@@ -143,10 +207,30 @@ def open_demo(ctx) -> None:
             st.caption(t("lib_by_hand"))
             for e in entries:
                 c1, c2 = st.columns([5, 3], vertical_alignment="center")
+                warn = ":material/warning: " if e["status"] == "missing" else ""
+                kind = t("lib_badge_link") if e["mode"] == "link" else t("lib_badge_copy")
                 c1.markdown(
-                    f"**{e['name']}** · {e.get('map') or '—'} · {store.human_size(e['size'])}"
+                    f"{warn}**{e['name']}** · {e.get('map') or '—'} · "
+                    f"{store.human_size(e['size'])} · {kind}"
                 )
-                if st.session_state.get("del_pending") == e["id"]:
+                if e["mode"] == "link":
+                    # a linked demo: only the list entry goes, the user's file stays
+                    c1.caption(e["path"])
+                    if e["status"] == "missing":
+                        c2.button(
+                            t("lib_locate"),
+                            key=f"loc_{e['id']}",
+                            on_click=_locate,
+                            args=(e["id"],),
+                        )
+                    c2.button(
+                        t("lib_remove"),
+                        key=f"rm_{e['id']}",
+                        on_click=_confirm_delete,
+                        args=(e["id"],),
+                        help=t("lib_remove_help"),
+                    )
+                elif st.session_state.get("del_pending") == e["id"]:
                     c2.button(
                         t("lib_delete_yes"),
                         key=f"delyes_{e['id']}",
@@ -186,9 +270,13 @@ def open_demo(ctx) -> None:
         _last = state.get("last_demo")
         st.session_state["demo_id"] = _last if _last in by_id else lib[0]["id"]
 
+    _sel = by_id.get(st.session_state.get("demo_id"))
+    _sel_missing = bool(_sel and _sel["status"] == "missing")
+
     # the picker is shown while nothing is loaded yet (also after a failed
-    # load) and behind the "Change demo" button
-    if _loaded_id is None or _change_open or not lib:
+    # load), when the chosen demo's file is missing, and behind the
+    # "Change demo" button
+    if _loaded_id is None or _change_open or not lib or _sel_missing:
         if lib:
             _ids = [e["id"] for e in lib]
             st.selectbox(
@@ -200,11 +288,34 @@ def open_demo(ctx) -> None:
                 on_change=_pick_from_library,
                 help=t("lib_help"),
             )
-        up = st.file_uploader(
-            t("upload_label"),
-            type=["dem", "bz2", "gz", "zst", "zip"],
-            key=f"demo_upload_{st.session_state['up_n']}",
+        # the main way in: a native dialog gives the real path, the demo is
+        # LINKED (not copied) and stays where it is
+        b1, b2 = st.columns(2)
+        b1.button(
+            t("lib_pick_file"),
+            key="lib_pick_file",
+            on_click=_pick_file,
+            help=t("lib_pick_help"),
+            icon=":material/folder_open:",
+            width="stretch",
         )
+        b2.button(
+            t("lib_pick_folder"),
+            key="lib_pick_folder",
+            on_click=_pick_folder,
+            icon=":material/create_new_folder:",
+            width="stretch",
+        )
+        if "_pick_err" in st.session_state:
+            st.warning(st.session_state.pop("_pick_err"))
+        # an upload has to be copied (a browser hides the real path)
+        with st.expander(t("lib_upload_exp"), expanded=not lib):
+            st.caption(t("lib_upload_note"))
+            up = st.file_uploader(
+                t("upload_label"),
+                type=["dem", "bz2", "gz", "zst", "zip"],
+                key=f"demo_upload_{st.session_state['up_n']}",
+            )
         if up is not None:
             # an upload always wins over whatever was selected before: it is saved
             # to the library (a demo already there is recognised by content)
@@ -243,9 +354,22 @@ def open_demo(ctx) -> None:
                 st.markdown(t("demo_how"))
         st.stop()
     entry = by_id[st.session_state["demo_id"]]
+    if entry["status"] == "missing":
+        # a linked demo whose file is gone: say where it was supposed to be
+        st.error(t("lib_missing", path=entry["path"]))
+        m1, m2 = st.columns(2)
+        m1.button(t("lib_locate"), key="lib_locate", on_click=_locate, args=(entry["id"],))
+        m2.button(
+            t("lib_remove"),
+            key="lib_remove_missing",
+            on_click=_confirm_delete,
+            args=(entry["id"],),
+            help=t("lib_remove_help"),
+        )
+        st.stop()
     src = store.demo_path(entry)
     try:
-        path = core.decompressed_demo(src)
+        path = core.decompressed_demo(src, tag=entry["id"][:8])
     except ValueError as e:
         st.error(t("load_failed"))
         st.caption(str(e))

@@ -1069,6 +1069,109 @@ def scenario_knife_round():
     )
 
 
+def _plain_demo(dirname, fname):
+    """A real demo file somewhere on disk (a linked demo points at it)."""
+    _demo_n[0] += 1
+    d = os.path.join(DEMO_DIR, dirname)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, fname)
+    with open(p, "wb") as f:
+        f.write(f"smoke linked demo {fname} #{_demo_n[0]}".encode())
+    FakeParser.demos[os.path.realpath(p)] = make_match([1, 2])
+    return p
+
+
+def scenario_links():
+    """Choose file / add folder LINK demos (no copy); missing file; locate; remove."""
+    print("== linked demos ==")
+    import nativedialog
+
+    real_files, real_folder = nativedialog.pick_files, nativedialog.pick_folder
+    try:
+        base_id = register_demo(make_match([1, 2]), "links_base.dem")
+        at = fresh_at(demo_id=base_id)
+        check("links: base demo opens", not at.exception, err_of(at))
+        act(at, "links: open the change panel", lambda: at.button(key="demo_change_btn").click().run())
+        check(
+            "links: the panel offers Choose file and Add folder",
+            widget(at, "button", "lib_pick_file") is not None and widget(at, "button", "lib_pick_folder") is not None,
+        )
+
+        # --- choosing a file links it by its path; nothing is copied
+        p = _plain_demo("link_a", "my_link.dem")
+        copies_before = sorted(os.listdir(store.demos_dir()))
+        nativedialog.pick_files = lambda *a, **k: [p]
+        act(at, "links: choose a demo file", lambda: at.button(key="lib_pick_file").click().run())
+        lid = store.link_id(p)
+        e = store.get_demo(lid) or {}
+        check("links: choosing a file links it by its path", e.get("mode") == "link" and e.get("path") == os.path.abspath(p), e)
+        check("links: ... nothing was copied into demos/", sorted(os.listdir(store.demos_dir())) == copies_before)
+        check(
+            "links: ... and the app opened it",
+            at.session_state["demo_id"] == lid and at.session_state["demo_loaded"] == lid and not at.exception,
+            err_of(at),
+        )
+        check("links: ... the map was remembered in the library", (store.get_demo(lid) or {}).get("map") == "de_smoke")
+
+        # --- the file disappears: a clear message that names the path, not a crash
+        moved = os.path.join(os.path.dirname(p), "moved_here.dem")
+        os.rename(p, moved)
+        at = fresh_at(demo_id=lid)
+        check("links: a missing file does not crash", not at.exception, err_of(at))
+        check(
+            "links: ... the error names the file",
+            any(os.path.basename(p) in str(x.value) for x in at.error),
+            [str(x.value)[:80] for x in at.error],
+        )
+        check(
+            "links: ... Locate and Remove are offered",
+            widget(at, "button", "lib_locate") is not None and widget(at, "button", "lib_remove_missing") is not None,
+        )
+        check("links: ... the library lists it as missing", store.get_demo(lid)["status"] == "missing")
+        FakeParser.demos[os.path.realpath(moved)] = make_match([1, 2])
+        nativedialog.pick_files = lambda *a, **k: [moved]
+        act(at, "links: locate the file", lambda: at.button(key="lib_locate").click().run())
+        e = store.get_demo(lid) or {}
+        check(
+            "links: locate points the entry at the new file and it opens",
+            e.get("path") == os.path.abspath(moved) and e.get("status") == "ok" and not at.exception and not at.error,
+            (e, err_of(at)),
+        )
+
+        # --- removing a linked demo never deletes the user's file
+        act(at, "links: open the change panel again", lambda: at.button(key="demo_change_btn").click().run())
+        act(at, "links: remove from the list", lambda: at.button(key=f"rm_{lid}").click().run())
+        check(
+            "links: remove drops the entry, the user's file STAYS",
+            os.path.isfile(moved) and store.get_demo(lid) is None and not at.exception,
+            err_of(at),
+        )
+
+        # --- a whole folder
+        d = os.path.dirname(_plain_demo("link_folder", "f1.dem"))
+        _plain_demo("link_folder", "f2.dem")
+        with open(os.path.join(d, "notes.txt"), "w") as fh:
+            fh.write("not a demo")
+        nativedialog.pick_folder = lambda *a, **k: [d]
+        act(at, "links: open the change panel (folder)", lambda: at.button(key="demo_change_btn").click().run())
+        act(at, "links: add a folder", lambda: at.button(key="lib_pick_folder").click().run())
+        linked = {x["name"] for x in store.list_demos() if x["mode"] == "link" and os.path.dirname(x["path"]) == os.path.abspath(d)}
+        check("links: add folder links every demo in it and skips other files", linked == {"f1", "f2"}, linked)
+        check("links: ... and one of them is open", at.session_state["demo_loaded"] in {store.link_id(os.path.join(d, n)) for n in ("f1.dem", "f2.dem")} and not at.exception, err_of(at))
+
+        # --- no dialog available (no tkinter): a hint, never a crash
+        nativedialog.pick_files = lambda *a, **k: None
+        act(at, "links: open the change panel (no dialog)", lambda: at.button(key="demo_change_btn").click().run())
+        act(at, "links: choose a file without a dialog", lambda: at.button(key="lib_pick_file").click().run())
+        check(
+            "links: no dialog -> a hint about the upload, not a crash",
+            not at.exception and any("tkinter" in str(w.value) for w in at.warning),
+            [str(w.value)[:60] for w in at.warning],
+        )
+    finally:
+        nativedialog.pick_files, nativedialog.pick_folder = real_files, real_folder
+
+
 class _empty_library:
     """Run a block against an empty data folder (the first-start situation)."""
 
@@ -1917,6 +2020,7 @@ def main():
         scenario_knife_round()
         scenario_bad_input()
         scenario_library()
+        scenario_links()
         scenario_tables()
         scenario_context()
         scenario_first_shots()

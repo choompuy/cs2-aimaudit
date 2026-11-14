@@ -19,8 +19,7 @@ repository. The app itself never touches the network: only this script does.
     a day (the Map page still works on a plain grid in game units).
 
 Result: DIR/map_data.json and DIR/<map>.png (+ <map>_lower.png for two-level
-maps), flat in one folder. If awpy is installed and has already downloaded its
-data (~/.awpy), the app finds that too and does not need this script.
+maps), flat in one folder.
 """
 
 from __future__ import annotations

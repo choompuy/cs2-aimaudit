@@ -312,6 +312,44 @@ bad(
     and f"py -{_pin.group(1)}.{_pin.group(2)}".encode() in bat,
     "bump the Python pin in ci.yml, README, requirements.txt AND start.bat together",
 )
+# Portable mode: Python, pip and Streamlit would write to %TEMP%, the user
+# profile and %LOCALAPPDATA%; the launcher points them into data\ so that
+# deleting the app folder is a complete uninstall.
+for _var, _why in (
+    ('set "TEMP=', "Python / Streamlit temp files"),
+    ('set "TMP=', "Python / Streamlit temp files"),
+    ('set "USERPROFILE=', "Streamlit's ~/.streamlit (credentials, machine id)"),
+    ('set "PIP_CACHE_DIR=', "pip's download cache"),
+    ('set "PYTHONPYCACHEPREFIX=', "compiled .pyc files"),
+):
+    bad(
+        f"start.bat keeps {_var[5:-1]} inside the app folder",
+        _var.encode() in bat and b"AIMAUDIT_DATA_DIR" in bat,
+        f"{_why} would land outside the app folder",
+    )
+
+# No module may pick a folder outside the app folder by itself: temp dirs,
+# the profile, %APPDATA%. store.py is the one place that knows locations
+# (its documented read-only fallback); everything else asks store.
+_OUTSIDE = re.compile(
+    r"gettempdir|mkdtemp|TemporaryDirectory|NamedTemporaryFile|"
+    r"expanduser\(\s*[\"']~|Path\.home|LOCALAPPDATA|APPDATA|USERPROFILE"
+)
+_outside_hits = []
+for _py in sorted(ROOT.rglob("*.py")):
+    _rel = _py.relative_to(ROOT).as_posix()
+    if _rel.startswith(("tests/", ".venv/", "data/")) or _rel == "store.py":
+        continue
+    for _i, _line in enumerate(_py.read_text(encoding="utf-8").splitlines(), 1):
+        if _line.lstrip().startswith("#"):
+            continue
+        if _OUTSIDE.search(_line):
+            _outside_hits.append(f"{_rel}:{_i}: {_line.strip()[:70]}")
+bad(
+    "no module writes outside the app folder on its own (only store.py knows locations)",
+    not _outside_hits,
+    _outside_hits[:4],
+)
 bad(
     "no Linux / macOS launcher: the project is Windows-only",
     not (ROOT / "start.sh").exists(),

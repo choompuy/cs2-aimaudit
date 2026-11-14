@@ -1191,27 +1191,16 @@ except ImportError:
 
 # ------------------------------------------------------------- app state
 print("== app state (data folder) ==")
-_legacy_keep = store.LEGACY_DIR
-store.LEGACY_DIR = tempfile.mkdtemp(prefix="cs2aa_legacy_")  # no state of a real home
-try:
-    _sp = store.state_path()
-    if os.path.exists(_sp):
-        os.remove(_sp)
-    check("missing state file -> {}", core.load_state() == {})
-    core.save_state({"last_player": "p1", "last_demo": "d1"})
-    check("state round-trip", core.load_state() == {"last_player": "p1", "last_demo": "d1"})
-    with open(_sp, "w", encoding="utf-8") as f:
-        f.write("{ not json")
-    check("corrupt state -> {}", core.load_state() == {})
+_sp = store.state_path()
+if os.path.exists(_sp):
     os.remove(_sp)
-    with open(os.path.join(store.LEGACY_DIR, "state.json"), "w", encoding="utf-8") as f:
-        f.write('{"last_player": "old"}')
-    check("state of an older version is read once", core.load_state() == {"last_player": "old"})
-    core.save_state({"last_player": "new"})
-    check("... and superseded by the data folder", core.load_state() == {"last_player": "new"})
-    os.remove(_sp)
-finally:
-    store.LEGACY_DIR = _legacy_keep
+check("missing state file -> {}", core.load_state() == {})
+core.save_state({"last_player": "p1", "last_demo": "d1"})
+check("state round-trip", core.load_state() == {"last_player": "p1", "last_demo": "d1"})
+with open(_sp, "w", encoding="utf-8") as f:
+    f.write("{ not json")
+check("corrupt state -> {}", core.load_state() == {})
+os.remove(_sp)
 
 # -------------------------------------------------- tickrate from header
 print("== tickrate from header ==")
@@ -3371,10 +3360,10 @@ check(
         for d in (store.demos_dir(), store.unpacked_dir(), store.parsed_dir(), store.radars_dir())
     ),
 )
-_save = (store.APP_DIR, store.LEGACY_DIR, os.environ.pop("AIMAUDIT_DATA_DIR"))
+_save = (store.APP_DIR, store.FALLBACK_DIR, os.environ.pop("AIMAUDIT_DATA_DIR"))
 try:
     _app = tempfile.mkdtemp(prefix="cs2aa_app_")
-    store.APP_DIR, store.LEGACY_DIR = _app, tempfile.mkdtemp(prefix="cs2aa_home_")
+    store.APP_DIR, store.FALLBACK_DIR = _app, tempfile.mkdtemp(prefix="cs2aa_home_")
     store._resolve.cache_clear()
     check(
         "default data folder is <app folder>/data, next to the launcher",
@@ -3387,15 +3376,31 @@ try:
     store.APP_DIR = _ro
     store._resolve.cache_clear()
     check(
-        "app folder not writable -> falls back to the home folder",
-        store.data_dir() == store.LEGACY_DIR,
+        "app folder not writable -> falls back to the visible per-user folder",
+        store.data_dir() == store.FALLBACK_DIR and store.data_dir_is_fallback(),
         store.data_dir(),
     )
 finally:
-    store.APP_DIR, store.LEGACY_DIR = _save[0], _save[1]
+    store.APP_DIR, store.FALLBACK_DIR = _save[0], _save[1]
     os.environ["AIMAUDIT_DATA_DIR"] = _save[2]
     store._resolve.cache_clear()
-check("env folder is back after the test", store.data_dir() == _dd)
+check("env folder is back after the test", store.data_dir() == _dd and not store.data_dir_is_fallback())
+
+_had_frozen = hasattr(sys, "frozen")
+_old_exe = sys.executable
+try:
+    sys.frozen = True
+    sys.executable = os.path.join(tempfile.gettempdir(), "aimaudit_app", "CS2-AimAudit.exe")
+    check(
+        "frozen exe: the data folder is next to the .exe, not in the unpack folder",
+        store._app_dir() == os.path.dirname(sys.executable),
+        store._app_dir(),
+    )
+finally:
+    sys.executable = _old_exe
+    if not _had_frozen:
+        del sys.frozen
+check("not frozen: next to the sources", store._app_dir() == os.path.dirname(os.path.abspath(store.__file__)))
 
 print("== store: demo library ==")
 check("empty library lists nothing", store.list_demos() == [])
@@ -3550,11 +3555,12 @@ check(
     or os.path.dirname(core.decompressed_demo(_bzp)) == store.unpacked_dir(),
     core.decompressed_demo(_bzp),
 )
-FakeParser.demos["cached__deadbeef.dem"] = FakeParser.demos["impact.dem"]
-_d1, _hit1 = core.load_demo_cached("cached__deadbeef.dem")
+_cached_path = os.path.join(store.unpacked_dir(), "cached__deadbeef.dem")
+FakeParser.demos[_cached_path] = FakeParser.demos["impact.dem"]
+_d1, _hit1 = core.load_demo_cached(_cached_path)
 check("first open parses (not from cache)", _hit1 is False and len(_d1.players) > 0)
-FakeParser.demos.pop("cached__deadbeef.dem")  # the parser is gone: only the cache can answer
-_d2, _hit2 = core.load_demo_cached("cached__deadbeef.dem")
+FakeParser.demos.pop(_cached_path)  # the parser is gone: only the cache can answer
+_d2, _hit2 = core.load_demo_cached(_cached_path)
 check(
     "second open comes from the disk cache, identical",
     _hit2 is True and _d2.players.equals(_d1.players) and _d2.deaths.equals(_d1.deaths) and _d2.sides == _d1.sides,
@@ -3566,7 +3572,7 @@ try:
     # from its own module globals
     core.PARSE_VERSION = core.loader.PARSE_VERSION = "f1-other"
     try:
-        core.load_demo_cached("cached__deadbeef.dem")
+        core.load_demo_cached(_cached_path)
         check("changed parser/code version -> cache not used", False)
     except Exception:  # noqa: BLE001 - the fake parser is gone, so a miss raises
         check("changed parser/code version -> cache not used", True)
@@ -3671,6 +3677,180 @@ finally:
     os.environ.pop("AIMAUDIT_NO_RADARS", None)
     if _no_radars is not None:
         os.environ["AIMAUDIT_NO_RADARS"] = _no_radars
+
+# ---- linked demos: the library keeps the PATH, nothing is copied
+print("== store: linked demos ==")
+import types  # noqa: E402
+
+_ldir = tempfile.mkdtemp(prefix="cs2aa_link_")
+_lp = os.path.join(_ldir, "My Linked Match.dem")
+with open(_lp, "wb") as fh:
+    fh.write(b"PBDEMS2\0" + os.urandom(3000))
+_files_before = sorted(os.listdir(store.demos_dir()))
+_L1 = store.add_link(_lp)
+check(
+    "link: the entry points at the original file, nothing is copied",
+    _L1["mode"] == "link"
+    and _L1["status"] == "ok"
+    and store.demo_path(_L1) == os.path.abspath(_lp)
+    and _L1["name"] == "My Linked Match"
+    and sorted(os.listdir(store.demos_dir())) == _files_before,
+    _L1,
+)
+check(
+    "link: the same path again is the same entry (no duplicate)",
+    store.add_link(_lp)["id"] == _L1["id"]
+    and sum(1 for e in store.list_demos() if e["id"] == _L1["id"]) == 1,
+)
+check("link: a pasted path in quotes with spaces works", store.add_link('  "%s"  ' % _lp)["id"] == _L1["id"])
+_txt = os.path.join(_ldir, "notes.txt")
+open(_txt, "w").write("x")
+_empty = os.path.join(_ldir, "empty.dem")
+open(_empty, "wb").close()
+for _label, _bad in (("missing file", os.path.join(_ldir, "nope.dem")), ("not a demo", _txt), ("empty file", _empty)):
+    try:
+        store.add_link(_bad)
+        check(f"link: {_label} -> ValueError", False)
+    except ValueError:
+        check(f"link: {_label} -> ValueError", True)
+
+# the file is moved: the entry stays, says missing, and can be pointed at the new place
+_lp2 = os.path.join(_ldir, "renamed.dem")
+os.rename(_lp, _lp2)
+_miss = store.get_demo(_L1["id"])
+check(
+    "link: a moved file leaves the entry in the list as missing",
+    _miss is not None and _miss["status"] == "missing" and any(e["id"] == _L1["id"] for e in store.list_demos()),
+)
+_re = store.relink(_L1["id"], _lp2)
+check(
+    "link: relink keeps the entry (and its id) and finds the file again",
+    _re["id"] == _L1["id"] and _re["status"] == "ok" and _re["path"] == os.path.abspath(_lp2),
+)
+_other = os.path.join(_ldir, "other.dem")
+with open(_other, "wb") as fh:
+    fh.write(b"PBDEMS2\0" + os.urandom(500))
+_L2 = store.add_link(_other)
+try:
+    store.relink(_L1["id"], _other)
+    check("link: relink onto a file that is already listed -> ValueError", False)
+except ValueError:
+    check("link: relink onto a file that is already listed -> ValueError", True)
+try:
+    store.relink(_e1["id"], _lp2)
+    check("link: only a linked demo can be relinked", False)
+except ValueError:
+    check("link: only a linked demo can be relinked", True)
+
+# parse keys: location + size + mtime for a plain file, so a replaced file never gets a stale cache
+_k1 = store.parse_key(_lp2)
+with open(_lp2, "ab") as fh:
+    fh.write(b"more bytes")
+check("parse key follows the file (replaced on disk -> new key)", store.parse_key(_lp2) != _k1)
+check(
+    "list notices the changed file and updates the size",
+    store.get_demo(_L1["id"])["size"] == os.path.getsize(_lp2),
+)
+check("parse key of a copy = its content id", store.parse_key(store.demo_path(_e1)) == _e1["id"][:8])
+_unp = os.path.join(store.unpacked_dir(), f"cs2_aimaudit_m__{_e1['id'][:8]}.dem_5_5.dem")
+check("parse key of an unpacked archive = id + its own name", (store.parse_key(_unp) or "").startswith(_e1["id"][:8] + "-"))
+_fake_marker = os.path.join(_ldir, "x__deadbeef.dem")
+open(_fake_marker, "wb").write(b"PBDEMS2\0" + b"1" * 20)
+check(
+    "a marker-looking name OUTSIDE the library folders is just a plain file",
+    (store.parse_key(_fake_marker) or "").startswith(store.link_id(os.path.realpath(_fake_marker))[:8]),
+)
+
+# the user's file is never touched by removing a link
+check("write_parsed for a linked demo", store.write_parsed(_lp2, "v1", {"a": 1}) and store.read_parsed(_lp2, "v1") == {"a": 1})
+_freed = store.delete_demo(_L1["id"])
+check(
+    "remove a linked demo: entry and cache go, the user's file STAYS",
+    os.path.isfile(_lp2) and store.get_demo(_L1["id"]) is None and store.read_parsed(_lp2, "v1") is None and _freed > 0,
+    _freed,
+)
+
+# a linked ARCHIVE: its unpacked copy carries the id and goes with the entry
+_arc = os.path.join(_ldir, "arch.dem.bz2")
+with open(_arc, "wb") as fh:
+    fh.write(bz2.compress(b"PBDEMS2\0" + b"7" * 400))
+_L3 = store.add_link(_arc)
+_unpacked = core.decompressed_demo(store.demo_path(_L3), tag=_L3["id"][:8])
+check(
+    "linked archive: unpacked into cache/unpacked with the id in its name",
+    os.path.dirname(_unpacked) == os.path.realpath(store.unpacked_dir()) or os.path.dirname(_unpacked) == store.unpacked_dir(),
+)
+check("... and the tag is in the file name", f"__{_L3['id'][:8]}" in os.path.basename(_unpacked), _unpacked)
+store.write_parsed(_unpacked, "v1", {"x": 1})
+store.delete_demo(_L3["id"])
+check(
+    "removing the linked archive deletes its unpacked copy and parsed cache, not the archive",
+    os.path.isfile(_arc) and not os.path.exists(_unpacked) and store.read_parsed(_unpacked, "v1") is None,
+)
+
+# a whole folder at once
+_fdir = os.path.join(tempfile.mkdtemp(prefix="cs2aa_fold_"), "replays")
+os.makedirs(os.path.join(_fdir, "sub"))
+for _n in ("a.dem", "b.dem.bz2", ".hidden.dem", "notes.txt"):
+    open(os.path.join(_fdir, _n), "wb").write(b"PBDEMS2\0" + b"2" * 30)
+open(os.path.join(_fdir, "sub", "deep.dem"), "wb").write(b"PBDEMS2\0" + b"3" * 30)
+_found = store.add_folder(_fdir)
+check(
+    "add_folder links the demo files directly inside (not hidden, not other types, not subfolders)",
+    sorted(e["name"] for e in _found) == ["a", "b"] and all(e["mode"] == "link" for e in _found),
+    [e["name"] for e in _found],
+)
+check("add_folder twice adds nothing new", sorted(e["id"] for e in store.add_folder(_fdir)) == sorted(e["id"] for e in _found))
+try:
+    store.add_folder(os.path.join(_fdir, "nope"))
+    check("add_folder on a missing folder -> ValueError", False)
+except ValueError:
+    check("add_folder on a missing folder -> ValueError", True)
+_rep2 = store.storage_report()
+check(
+    "storage report counts linked demos separately (and the fallback flag)",
+    _rep2["linked_count"] >= 3 and _rep2["linked"] > 0 and _rep2["fallback"] is False,
+    _rep2,
+)
+# a file that already lies inside demos/ is never listed twice
+_inlib = os.path.join(store.demos_dir(), "linked in place.dem")
+open(_inlib, "wb").write(b"PBDEMS2\0" + os.urandom(900))
+_Lin = store.add_link(_inlib)
+_after = [e for e in store.list_demos() if e["name"].startswith("linked in place")]
+check(
+    "choosing a file that already lies in demos/ lists it once, as a copy",
+    len(_after) == 1 and _after[0]["mode"] == "copy" and os.path.isfile(store.demo_path(_after[0])) and _Lin["id"] == _after[0]["id"],
+    [(e["name"], e["mode"]) for e in _after],
+)
+
+print("== nativedialog ==")
+import nativedialog  # noqa: E402
+
+_real_run = nativedialog.subprocess.run
+
+
+def _fake_run(stdout=b"", rc=0, exc=None):
+    def run(*a, **k):
+        if exc:
+            raise exc
+        return types.SimpleNamespace(returncode=rc, stdout=stdout, stderr=b"")
+
+    return run
+
+
+try:
+    nativedialog.subprocess.run = _fake_run(b'banner\n["C:\\\\x\\\\a.dem", "D:\\\\b.dem"]\n')
+    check("dialog: chosen files come back as a list", nativedialog.pick_files() == ["C:\\x\\a.dem", "D:\\b.dem"], nativedialog.pick_files())
+    nativedialog.subprocess.run = _fake_run(b"[]\n")
+    check("dialog: cancel -> []", nativedialog.pick_files() == [] and nativedialog.pick_folder() == [])
+    nativedialog.subprocess.run = _fake_run(b"", rc=1)
+    check("dialog: no tkinter / headless (exit code 1) -> None", nativedialog.pick_files() is None)
+    nativedialog.subprocess.run = _fake_run(b"not json at all")
+    check("dialog: garbage output -> None", nativedialog.pick_folder() is None)
+    nativedialog.subprocess.run = _fake_run(exc=OSError("no python"))
+    check("dialog: cannot start the child -> None", nativedialog.pick_files() is None)
+finally:
+    nativedialog.subprocess.run = _real_run
 
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":

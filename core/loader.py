@@ -13,7 +13,6 @@ import json
 import os
 import re
 import shutil
-import tempfile
 import zipfile
 
 import numpy as np
@@ -270,7 +269,7 @@ def _unpack(ext: str, p: str, tmp: str) -> None:
         ) from e
 
 
-def decompressed_demo(path: str) -> str:
+def decompressed_demo(path: str, tag: str | None = None) -> str:
     """
     Path to a plain .dem for `path`, decompressing transparently.
 
@@ -278,15 +277,17 @@ def decompressed_demo(path: str) -> str:
     .dem.gz, tournaments .zip. Supported: .bz2 / .gz / .zip (stdlib) and
     .zst (needs the `zstandard` package). Inside a .zip the first *.dem
     member (alphabetically) is used. The decompressed copy is cached in
-    the system temp dir under a name derived from source path + size +
-    mtime, so re-opening the same archive does not decompress again.
-    Anything else is returned unchanged.
+    cache/unpacked of the data folder (never the system temp dir) under a
+    name derived from the source name + size + mtime, so re-opening the same
+    archive does not decompress again. `tag` (the library id) is put into
+    that name so deleting a demo from the library also removes its unpacked
+    copy. Anything else is returned unchanged.
 
     A truncated or corrupt archive raises ValueError (whatever the
     decompressor throws - EOFError, BadZipFile, ZstdError, OSError...):
     the UI only catches ValueError, and a raw traceback is not a friendly
     message. A half-written .part is never left behind either - it can be
-    as large as the unpacked demo and nothing prunes the temp dir.
+    as large as the unpacked demo.
     """
 
     p = os.path.realpath(path)
@@ -300,6 +301,8 @@ def decompressed_demo(path: str) -> str:
     except OSError as e:
         raise ValueError(f"Cannot read demo file: {p}") from e
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in stem)[:80]
+    if tag and f"__{tag}" not in safe:
+        safe = f"{safe}__{tag}"
     target = os.path.join(
         _unpack_dir(),
         f"cs2_aimaudit_{safe}_{st.st_size}_{int(st.st_mtime)}.dem",
@@ -337,26 +340,22 @@ def decompressed_demo(path: str) -> str:
 
 
 def _unpack_dir() -> str:
-    """cache/unpacked in the data folder; the system temp dir when it is read-only."""
-    d = store.unpacked_dir()
-    return d if os.path.isdir(d) and os.access(d, os.W_OK) else tempfile.gettempdir()
+    """cache/unpacked in the data folder: the app never writes to the system temp dir."""
+    return store.unpacked_dir()
 
 
 # ------------------------------------------------------------ app state
 # Small local state next to the demo library (store.state_path): the last
 # selected demo and player. Everything stays in the data folder; if it is not
-# writable the app does not remember anything. A state file left by an
-# older version in ~/.cs2-aimaudit is read once and then superseded.
+# writable the app does not remember anything.
 def load_state() -> dict:
     """Load the local state file; {} when missing or unreadable."""
-    for path in (store.state_path(), os.path.join(store.LEGACY_DIR, "state.json")):
-        try:
-            with open(path, encoding="utf-8") as f:
-                d = json.load(f)
-            return d if isinstance(d, dict) else {}
-        except (OSError, ValueError):
-            continue
-    return {}
+    try:
+        with open(store.state_path(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def save_state(d: dict) -> None:

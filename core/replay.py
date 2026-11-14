@@ -67,27 +67,16 @@ RADAR_SIZE = 1024  # awpy-data radars are square; calibration is for this size
 def radar_roots() -> list[str]:
     """
     Folders that may hold radar data (a map_data.json plus the images, in
-    `<root>/radars/` or `<root>` itself), best first: $AIMAUDIT_RADAR_DIR,
-    <data folder>/radars (written by tools/fetch_radars.py), a radars folder
-    of an older version in ~/.cs2-aimaudit and the newest awpy cache ($AWPY_DATA_DIR or ~/.awpy, one folder per version).
-    The app itself never downloads anything.
+    `<root>/radars/` or `<root>` itself), best first: $AIMAUDIT_RADAR_DIR, then
+    <data folder>/radars (written by start.bat / tools/fetch_radars.py). Nothing
+    outside the app folder is searched, so deleting the folder leaves no
+    radars (or anything else) behind. The app itself never downloads anything.
     """
     roots: list[str] = []
     env = os.environ.get("AIMAUDIT_RADAR_DIR")
     if env:
-        roots.append(os.path.expanduser(env))
+        roots.append(os.path.abspath(os.path.expanduser(env)))
     roots.append(store.radars_dir())
-    roots.append(os.path.join(store.LEGACY_DIR, "radars"))
-    awpy = os.environ.get("AWPY_DATA_DIR") or os.path.join(
-        os.path.expanduser("~"), ".awpy"
-    )
-    try:
-        vers = sorted(
-            (d for d in os.listdir(awpy) if d.isdigit()), key=int, reverse=True
-        )
-    except OSError:
-        vers = []
-    roots += [os.path.join(awpy, v) for v in vers]
     return roots
 
 

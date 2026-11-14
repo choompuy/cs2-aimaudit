@@ -1,8 +1,25 @@
 @echo off
-rem CS2-AimAudit launcher (Windows): creates the venv, installs packages,
-rem downloads the radar images once, starts the app.
+rem CS2-AimAudit launcher (Windows): keeps everything inside this folder,
+rem creates the venv, installs packages, downloads the radar images once and
+rem starts the app.
 setlocal
 cd /d "%~dp0"
+
+rem ---- Portable mode: nothing may be written outside this folder.
+rem Python, pip and Streamlit would put files into %TEMP%, %USERPROFILE% and
+rem %LOCALAPPDATA%; they are pointed into data\ instead, so deleting this
+rem folder is a complete uninstall (only the Python installation itself and
+rem your browser's own data stay on the machine). setlocal above keeps these
+rem variables private to this window.
+set "AIMAUDIT_DATA_DIR=%~dp0data"
+for %%D in ("tmp" "home" "cache\pip" "cache\pycache") do if not exist "%AIMAUDIT_DATA_DIR%\%%~D" mkdir "%AIMAUDIT_DATA_DIR%\%%~D"
+set "TEMP=%AIMAUDIT_DATA_DIR%\tmp"
+set "TMP=%AIMAUDIT_DATA_DIR%\tmp"
+set "USERPROFILE=%AIMAUDIT_DATA_DIR%\home"
+set "HOME=%AIMAUDIT_DATA_DIR%\home"
+set "PIP_CACHE_DIR=%AIMAUDIT_DATA_DIR%\cache\pip"
+set "PIP_DISABLE_PIP_VERSION_CHECK=1"
+set "PYTHONPYCACHEPREFIX=%AIMAUDIT_DATA_DIR%\cache\pycache"
 
 echo [1/4] Checking Python 3.13 (the version this project is tested with)...
 rem The Python pin (3, 13) / py -3.13 must match ci.yml, README and requirements.txt
@@ -61,6 +78,7 @@ if not defined AIMAUDIT_NO_RADARS python tools\fetch_radars.py --if-missing
 
 rem Streamlit asks for an email on its very first run and waits for Enter,
 rem the window then looks frozen. An empty credentials file skips that prompt.
+rem (USERPROFILE points into data\home here, so it is created inside this folder.)
 if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
     if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit"
     > "%USERPROFILE%\.streamlit\credentials.toml" echo [general]

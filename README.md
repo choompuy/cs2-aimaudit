@@ -77,24 +77,35 @@ Everything lives inside the app's `data` folder: `accounts.json` (folders and St
 
 ## Demo library and where files are stored
 
-There is one way to open a demo: add a file (drag it into the upload box; `.dem`, `.bz2`, `.gz`, `.zst` and `.zip` work) or pick one of your saved demos from the list. Every demo you add is saved to the library, so next time you just pick it, and the last one you used opens by itself. A demo that is already in the library (same file, any name) is not saved twice.
+There is one way to open a demo: **Choose demo file…** (or **Add a folder…**) or pick one of your saved demos from the list. The last one you used opens by itself.
 
-Everything the app stores lives in one folder next to `start.bat`:
+- **Choose demo file / Add a folder** adds the demo **by its path**: nothing is copied, the file stays where it is, no duplicate. If it is moved, renamed or its drive is not connected, the app says so and offers **Locate the file…** or **Remove from list**. Removing a linked demo only removes the list entry and its cache, never your file.
+- **Upload** (inside *Upload instead*) copies the file into `data/demos`, because a browser never reveals where a file really is. Use it only when the file dialog is not available.
+- Compressed demos (`.bz2`, `.gz`, `.zst`, `.zip`) are unpacked into the cache automatically.
+
+**Everything the app stores lives in one folder next to `start.bat`, and `start.bat` keeps Python, pip and Streamlit from writing anywhere else:**
 
 ```
 data/
-  demos/        your demo library (plain files; you can also copy .dem files in by hand)
+  demos/        demos you uploaded (copies; you can also copy .dem files in by hand)
   cache/
     parsed/     parsed demos, so opening one again is instant
     unpacked/   demos unpacked from .bz2 / .gz / .zst / .zip
-  radars/       radar images (tools/fetch_radars.py)
+    pip/        pip's download cache
+    pycache/    compiled .pyc files
+    tmp/        the temp folder (TEMP / TMP point here)
+  home/         Streamlit's own ~/.streamlit (USERPROFILE points here)
+  radars/       radar images (downloaded by start.bat)
   tools/        the Steam helper (boiler-writter, installed from the Matches tab)
   accounts.json match-import accounts (nickname, folders - no secrets)
   matches.json  the cached match lists
-  library.json  the list of demos        state.json  last demo and player
+  library.json  the list of demos (copies and links)      state.json  last demo and player
+.venv/          the Python environment (next to data/)
 ```
 
-Open *Library and storage* in the app to see the folder, the sizes, delete a demo or clear the cache. You can also delete `data/cache/` by hand at any time: it is rebuilt when needed; only `demos/` holds something that cannot be rebuilt. Move the folder with the `AIMAUDIT_DATA_DIR` environment variable. `data/` is git-ignored.
+**To uninstall, delete the folder.** `start.bat` points `TEMP`, `USERPROFILE`, pip's cache and Python's `.pyc` folder into `data/`, so nothing is left in `%TEMP%`, your user profile or `%LOCALAPPDATA%`. What stays on the machine: the Python installation itself, your browser's own data for `localhost`, and the demos you linked (they are your files, in your folders).
+
+Open *Library and storage* in the app to see the folder, the sizes, remove or delete a demo, or clear the cache. You can also delete `data/cache/` by hand at any time: it is rebuilt when needed. Only `data/demos` (uploaded copies) holds something that cannot be rebuilt. Move the folder with the `AIMAUDIT_DATA_DIR` environment variable. If the app folder is read-only (for example under Program Files), data goes to `%LOCALAPPDATA%\CS2-AimAudit` and the app tells you; put the app in a writable folder to keep everything in one place. `data/` is git-ignored.
 
 ## Radar images for the Map page
 

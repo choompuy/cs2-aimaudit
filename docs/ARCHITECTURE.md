@@ -40,6 +40,8 @@ written here, so the doc and the guardrails stay honest.
 | `sources/__init__.py`             |       116 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package.                               |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `i18n.py`                         |    1 077 | English/Russian strings; every UI text goes through `t("key")` literals.                                                                     |
+| `store.py`                        |       671 | The ONE place that knows where files live: the `data/` folder next to `start.bat`, the demo library (copies + linked demos), caches, parse keys. |
+| `nativedialog.py`                 |        78 | Native Windows file / folder dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
 
 Support: `tests/test_core.py` (synthetic-match unit tests),
 `tests/test_sources.py` (match import: transport, providers, protobuf,
@@ -47,6 +49,18 @@ share codes, inbox, privacy), `tests/smoke_app.py` (AppTest end-to-end
 scenarios), `tests/check_ui.py` (static guardrails), `tools/`
 (`dump_payloads.py` golden grid payloads, `api_snapshot.py` core API
 snapshot, `fetch_radars.py`, `inspect_rounds.py`, `sync_theme.py`).
+
+## Where files may live
+
+Nothing may be written outside the app folder: `start.bat` points `TEMP`,
+`USERPROFILE`, pip's cache and Python's `.pyc` folder into `data/`, and
+`store.py` is the only module that decides locations. Everything else asks
+`store` (`demos_dir`, `unpacked_dir`, `parsed_dir`, `radars_dir`, `state_path`)
+and never calls `tempfile.gettempdir`, `mkdtemp`, `Path.home` or reads
+`APPDATA` / `LOCALAPPDATA` / `USERPROFILE` itself (`tests/check_ui.py`
+enforces it). Demos are added **by path** (a linked entry, nothing copied);
+only a browser upload is copied into `data/demos`. Removing a linked demo
+never touches the user's file.
 
 ## Dependency direction
 
