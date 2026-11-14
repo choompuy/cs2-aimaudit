@@ -140,7 +140,7 @@ def sync() -> None:
     print(f"  primaryColor   {cfg['primaryColor']}")
     print(f"  background     {cfg['backgroundColor']}")
     print(f"  font           {cfg['font']} ({len(faces)} local fontFaces)")
-    print("restart the app (start.sh / start.bat) to see the change")
+    print("restart the app (start.bat) to see the change")
 
 
 if __name__ == "__main__":

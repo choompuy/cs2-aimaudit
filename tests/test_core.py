@@ -3417,6 +3417,102 @@ check("state file lives in the data folder", os.path.dirname(store.state_path())
 core.save_state({"last_demo": "abc"})
 check("state round trip", core.load_state() == {"last_demo": "abc"})
 
+# ---- tools/fetch_radars.py: the launcher step that installs the radars
+print("== tools/fetch_radars.py ==")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import contextlib  # noqa: E402
+import time  # noqa: E402
+
+import fetch_radars  # noqa: E402
+
+
+def _radar_zip():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("radars/de_a.png", b"png-a")
+        zf.writestr("radars/de_a_lower.png", b"png-a-low")
+        zf.writestr("radars/../evil.png", b"x")  # path trick: must be ignored
+        zf.writestr("radars/BAD NAME.png", b"x")
+        zf.writestr("readme.txt", b"x")
+    return buf.getvalue()
+
+
+_calls = []
+
+
+def _fake_get(url, timeout=60):
+    _calls.append((url, timeout))
+    if url.endswith("map_data.json"):
+        return b'{"de_a": {"pos_x": 0, "pos_y": 0, "scale": 1}}'
+    return _radar_zip()
+
+
+def _quiet_main(args):
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        return fetch_radars.main(args)
+
+
+_real_get = fetch_radars._get
+_no_radars = os.environ.pop("AIMAUDIT_NO_RADARS", None)
+try:
+    fetch_radars._get = _fake_get
+    _d1 = os.path.join(tempfile.mkdtemp(prefix="cs2aa_fr_"), "radars")
+    check("radars: nothing installed yet", not fetch_radars.present(_d1))
+    check("radars: launcher mode downloads when missing", _quiet_main(["--if-missing", "--dest", _d1]) == 0 and fetch_radars.present(_d1))
+    check(
+        "radars: flat files, unsafe archive members ignored",
+        sorted(os.listdir(_d1)) == ["de_a.png", "de_a_lower.png", "map_data.json"],
+        sorted(os.listdir(_d1)),
+    )
+    _n = len(_calls)
+    check("radars: already installed -> no download at all", _quiet_main(["--if-missing", "--dest", _d1]) == 0 and len(_calls) == _n)
+    # the calibration is written last, so an interrupted run never looks complete
+    _order = []
+    _real_write = fetch_radars._write
+    fetch_radars._write = lambda path, data: (_order.append(os.path.basename(path)), _real_write(path, data))[1]
+    try:
+        fetch_radars.download(os.path.join(tempfile.mkdtemp(prefix="cs2aa_fr_"), "r"), "t", 5)
+    finally:
+        fetch_radars._write = _real_write
+    check("radars: map_data.json is written last", _order[-1] == "map_data.json" and len(_order) == 3, _order)
+    # opt-out
+    os.environ["AIMAUDIT_NO_RADARS"] = "1"
+    _d2 = os.path.join(tempfile.mkdtemp(prefix="cs2aa_fr_"), "radars")
+    _n = len(_calls)
+    check("radars: AIMAUDIT_NO_RADARS=1 -> no download", _quiet_main(["--if-missing", "--dest", _d2]) == 0 and len(_calls) == _n and not fetch_radars.present(_d2))
+    del os.environ["AIMAUDIT_NO_RADARS"]
+
+    # no internet: never blocks the launcher, retries only after a day
+    def _offline(url, timeout=60):
+        _calls.append((url, timeout))
+        raise OSError("no route to host")
+
+    fetch_radars._get = _offline
+    _d3 = os.path.join(tempfile.mkdtemp(prefix="cs2aa_fr_"), "radars")
+    _n = len(_calls)
+    check("radars: offline in launcher mode -> exit 0", _quiet_main(["--if-missing", "--dest", _d3]) == 0 and len(_calls) > _n and not fetch_radars.present(_d3))
+    check("radars: ... with a short timeout and a failure mark", _calls[-1][1] <= 20 and os.path.isfile(os.path.join(_d3, fetch_radars.FAILED_MARK)))
+    _n = len(_calls)
+    check("radars: no retry within a day", _quiet_main(["--if-missing", "--dest", _d3]) == 0 and len(_calls) == _n)
+    _old = time.time() - 25 * 3600
+    os.utime(os.path.join(_d3, fetch_radars.FAILED_MARK), (_old, _old))
+    check("radars: retries after a day", _quiet_main(["--if-missing", "--dest", _d3]) == 0 and len(_calls) > _n)
+    check("radars: manual run offline -> exit 1 (told to the user)", _quiet_main(["--dest", _d3]) == 1)
+    fetch_radars._get = _fake_get
+    check(
+        "radars: manual run ignores the failure mark and clears it",
+        _quiet_main(["--dest", _d3]) == 0 and fetch_radars.present(_d3) and not os.path.exists(os.path.join(_d3, fetch_radars.FAILED_MARK)),
+    )
+    # an HTML error page instead of map_data.json must not install anything
+    fetch_radars._get = lambda url, timeout=60: b"<html>rate limited</html>"
+    _d4 = os.path.join(tempfile.mkdtemp(prefix="cs2aa_fr_"), "radars")
+    check("radars: garbage answer -> nothing installed, launcher not blocked", _quiet_main(["--if-missing", "--dest", _d4]) == 0 and not fetch_radars.present(_d4))
+finally:
+    fetch_radars._get = _real_get
+    os.environ.pop("AIMAUDIT_NO_RADARS", None)
+    if _no_radars is not None:
+        os.environ["AIMAUDIT_NO_RADARS"] = _no_radars
+
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":
     sys.exit(1 if FAIL else 0)

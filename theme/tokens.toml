@@ -21,7 +21,7 @@
 # How to switch theme (the env var must be set for BOTH steps — native
 # widgets read config.toml, charts and chips read the tokens directly):
 #     AIMAUDIT_THEME=green python tools/sync_theme.py
-#     AIMAUDIT_THEME=green ./start.sh          # or start.bat
+#     set AIMAUDIT_THEME=green   (then start.bat)
 #
 # Contrast: tests/check_ui.py verifies WCAG AA (>= 4.5:1) for text-primary /
 # text-secondary on every surface and text-inverse on accent, in every theme.

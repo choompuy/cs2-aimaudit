@@ -26,23 +26,28 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 
 ## Quick start
 
-Easiest:
+CS2-AimAudit is **Windows-only** (Windows 10/11): the launcher and the tests target Windows, Linux and macOS are not supported.
 
-- **Windows:** double-click `start.bat` — it prints what it is doing (`[1/3] creating venv…`, `[2/3] installing packages, first run takes 1–3 min…`, `[3/3] starting`) and pauses on any error.
-- **macOS / Linux:** `./start.sh` in a terminal.
+Double-click `start.bat`. It prints what it is doing and pauses on any error:
 
-Or manually:
+1. checks for Python 3.13 (it also finds it through the `py` launcher),
+2. creates `.venv` and installs the packages (the first run takes 1–3 min),
+3. downloads the radar images for the Map page, once (about 3 MB, see [below](#radar-images-for-the-map-page)),
+4. starts the app and opens a browser tab.
 
-```bash
+Or manually, in a terminal in the project folder:
+
+```bat
 git clone https://github.com/choompuy/cs2-aimaudit.git
 cd cs2-aimaudit
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+.venv\Scripts\activate
 pip install -r requirements.txt
+python tools\fetch_radars.py
 streamlit run app.py
 ```
 
-Requires Python 3.13 (the exact version CI tests, matching the pinned dependencies in `requirements.txt`) and a CS2 match demo (`.dem`).
+Requires Windows and Python 3.13 (the exact version CI tests, matching the pinned dependencies in `requirements.txt`) and a CS2 match demo (`.dem`).
 
 ### Where to get a demo
 
@@ -55,7 +60,7 @@ Then pick the file in the app.
 
 There is one way to open a demo: add a file (drag it into the upload box; `.dem`, `.bz2`, `.gz`, `.zst` and `.zip` work) or pick one of your saved demos from the list. Every demo you add is saved to the library, so next time you just pick it, and the last one you used opens by itself. A demo that is already in the library (same file, any name) is not saved twice.
 
-Everything the app stores lives in one folder next to `start.bat` / `start.sh`:
+Everything the app stores lives in one folder next to `start.bat`:
 
 ```
 data/
@@ -71,17 +76,15 @@ Open *Library and storage* in the app to see the folder, the sizes, delete a dem
 
 ## Radar images for the Map page
 
-The Map page draws points on the real radar. The radar images are Valve's artwork and are not part of this repository, so fetch them once, on your own machine:
+The Map page draws points on the real radar. The radar images are Valve's artwork and are not part of this repository, so **`start.bat` downloads them for you the first time** (about 3 MB from the public [awpy-data](https://github.com/pnxenopoulos/awpy-data) release into `data\radars` next to `start.bat`). After that nothing is downloaded again. Without internet the app still works: points are drawn on a plain grid in game units, and `start.bat` tries again the next day.
 
-```bash
-python tools/fetch_radars.py
-```
-
-This downloads the images and their calibration from the public [awpy-data](https://github.com/pnxenopoulos/awpy-data) release into the `data/radars` folder next to `start.bat` (about 3 MB). The app finds them there, or in an existing awpy cache (`~/.awpy`), or in the folder set by `AIMAUDIT_RADAR_DIR`. Without radar images the Map page still works: points are drawn on a plain grid in game units.
+- Skip the download for good: set the environment variable `AIMAUDIT_NO_RADARS=1` (for example `setx AIMAUDIT_NO_RADARS 1`).
+- Download or update by hand: `python tools\fetch_radars.py`.
+- The app finds the radars in `data\radars`, in an existing awpy cache (`~\.awpy`) or in the folder set by `AIMAUDIT_RADAR_DIR`.
 
 ## Privacy
 
-All parsing and analysis happen inside the app on your machine. CS2-AimAudit makes no network requests (the only exception is `tools/fetch_radars.py`, which you run yourself once to get radar images), collects no telemetry and does not upload your demos anywhere. The bundled `.streamlit/config.toml` also disables Streamlit's own anonymous usage statistics (`gatherUsageStats = false`) — if you copy or replace that file, keep the setting.
+All parsing and analysis happen inside the app on your machine. CS2-AimAudit makes no network requests (the only exception is the one-time radar download of `start.bat` / `tools\fetch_radars.py`, which you can switch off with `AIMAUDIT_NO_RADARS=1`), collects no telemetry and does not upload your demos anywhere. The bundled `.streamlit/config.toml` also disables Streamlit's own anonymous usage statistics (`gatherUsageStats = false`) — if you copy or replace that file, keep the setting.
 
 ## Reading the numbers
 
@@ -102,7 +105,7 @@ Open the **Data report / debug** expander at the bottom of the page. The built-i
 
 ## Development
 
-```bash
+```bat
 python tests/test_core.py        # synthetic match, no .dem file needed
 python tests/check_ui.py         # i18n / schema / layering guardrails
 python tests/smoke_app.py --fast # AppTest end-to-end (fake parser)

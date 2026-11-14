@@ -276,16 +276,16 @@ bad(
     "Streamlit telemetry is NOT disabled in .streamlit/config.toml",
 )
 
-# ---- 8. launchers: no first-run "Email:" prompt
+# ---- 8. launcher: Windows only, no first-run "Email:" prompt, radars step
 # Even with gatherUsageStats=false, Streamlit asks for an email on the very
 # first launch and waits for Enter - the launcher window then looks frozen.
-# An empty ~/.streamlit/credentials.toml skips the prompt, so both launchers
+# An empty ~/.streamlit/credentials.toml skips the prompt, so the launcher
 # must create it before starting the app (and start.bat must stay CRLF,
-# see .gitattributes).
+# see .gitattributes). The project is Windows-only: there is no start.sh.
 bat = (ROOT / "start.bat").read_bytes()
 bad(
     "start.bat creates credentials.toml",
-    b"credentials.toml" in bat and b"type nul" in bat,
+    b"credentials.toml" in bat and b"email = " in bat,
     "start.bat does not pre-create ~/.streamlit/credentials.toml",
 )
 bad(
@@ -293,11 +293,29 @@ bad(
     b"\r\n" in bat and bat.replace(b"\r\n", b"").find(b"\n") == -1,
     "cmd.exe may mis-parse a .bat with mixed/LF endings",
 )
-sh = (ROOT / "start.sh").read_text(encoding="utf-8")
 bad(
-    "start.sh creates credentials.toml",
-    "credentials.toml" in sh and "$HOME/.streamlit" in sh,
-    "start.sh does not pre-create ~/.streamlit/credentials.toml",
+    "start.bat fetches the radars once and honours AIMAUDIT_NO_RADARS",
+    b"fetch_radars.py --if-missing" in bat and b"AIMAUDIT_NO_RADARS" in bat,
+    "the Map page needs the radar step in the launcher (opt-out: AIMAUDIT_NO_RADARS)",
+)
+bad(
+    "start.bat finds Python through the py launcher as well",
+    b"py -3" in bat and b":no_python" in bat,
+    "a Python installed without PATH (only the py launcher) would not start",
+)
+_ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+_pin = re.search(r'python-version:\s*"(\d+)\.(\d+)"', _ci)
+bad(
+    "start.bat requires the same Python as CI (requirements.txt pins are tested on it)",
+    bool(_pin)
+    and f"== ({_pin.group(1)}, {_pin.group(2)})".encode() in bat
+    and f"py -{_pin.group(1)}.{_pin.group(2)}".encode() in bat,
+    "bump the Python pin in ci.yml, README, requirements.txt AND start.bat together",
+)
+bad(
+    "no Linux / macOS launcher: the project is Windows-only",
+    not (ROOT / "start.sh").exists(),
+    "start.sh is back; CS2-AimAudit supports Windows only",
 )
 
 # ---- 9. design system: .streamlit/config.toml [theme] matches the tokens

@@ -24,15 +24,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # demoparser2 publishes CPython wheels for Linux and Windows
-        # only: no macOS wheels and no sdist since 0.42.1, so a macOS
-        # job cannot even install it. Re-add macOS when upstream ships
-        # wheels again. The matrix is about OSes only: Python is pinned
-        # to a single version, matching the exact dependency pins in
-        # requirements.txt - the suite is only guaranteed on this
-        # interpreter. Bump the pin (here + README + requirements)
-        # deliberately, like any other dependency.
-        os: [ubuntu-latest, windows-latest]
+        # CS2-AimAudit supports Windows only (the launcher is start.bat),
+        # so the tests run on Windows only. The matrix is about OSes only:
+        # Python is pinned to a single version, matching the exact
+        # dependency pins in requirements.txt - the suite is only
+        # guaranteed on this interpreter. Bump the pin (here + README +
+        # requirements + start.bat) deliberately, like any other dependency.
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -52,7 +50,7 @@ jobs:
 
   smoke-all:
     # One full run (every page and locale) per commit is enough.
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

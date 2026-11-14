@@ -289,7 +289,7 @@ STR = {
         "map_count": "In view: {k} kills · {d} deaths",
         "map_none": "No kills or deaths of this player in the current view. Loosen the Side, Rounds, weapon or distance filters.",
         "map_no_pos": "The kill events of this demo carry no positions (an older demoparser2 does not provide them), so the map cannot be drawn. Update demoparser2 (pip install -U demoparser2) and reload the demo.",
-        "map_no_radar": "No radar image for {map} was found, so the points are drawn on a plain grid in game units. For the real map run python tools/fetch_radars.py once (it downloads the radars to your computer; the rest of the app never uses the network) and reload the page.",
+        "map_no_radar": "No radar image for {map} was found, so the points are drawn on a plain grid in game units. start.bat downloads the radars the first time you run it; if that did not work (no internet?), run python tools/fetch_radars.py and reload the page.",
         "map_howto": "Circle = where you stood, open diamond = where the opponent stood, the line shows who shot whom. Blue = your kill, red = your death. All filters apply; hover a point for the round, weapon and distance.",
         "du_click_hint": "Click a duel's row to open that duel in the Timeline.",
         # shot/duel context
@@ -735,7 +735,7 @@ STR = {
         "map_count": "В выборке: {k} килов · {d} смертей",
         "map_none": "В текущей выборке у этого игрока нет киллов и смертей. Ослабь фильтры стороны, раундов, оружия или дистанции.",
         "map_no_pos": "В событиях убийств этой демки нет позиций (старый demoparser2 их не отдаёт), поэтому карту не нарисовать. Обнови demoparser2 (pip install -U demoparser2) и перезагрузи демку.",
-        "map_no_radar": "Радар для {map} не найден, поэтому точки нарисованы на пустой сетке в игровых юнитах. Для настоящей карты один раз запусти python tools/fetch_radars.py (он скачает радары на твой компьютер; остальное приложение сеть не использует) и обнови страницу.",
+        "map_no_radar": "Радар для {map} не найден, поэтому точки нарисованы на пустой сетке в игровых юнитах. start.bat скачивает радары при первом запуске; если не получилось (нет интернета?), запусти python tools/fetch_radars.py и обнови страницу.",
         "map_howto": "Круг — где стоял ты, пустой ромб — где стоял противник, линия показывает, кто в кого стрелял. Синий — твой килл, красный — твоя смерть. Работают все фильтры; наведи на точку, чтобы увидеть раунд, оружие и дистанцию.",
         "du_click_hint": "Нажми на строку дуэли — она сразу откроется на «Таймлайне».",
         # контекст выстрелов/дуэлей

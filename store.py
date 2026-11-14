@@ -1,7 +1,7 @@
 """
 Where CS2-AimAudit keeps its own files: ONE folder next to the launcher.
 
-    <app folder>/data/            (next to start.bat / start.sh)
+    <app folder>/data/            (next to start.bat)
         demos/         the demo library: every demo you added, as a plain file
         cache/
             unpacked/  .dem files unpacked from .bz2 / .gz / .zst / .zip
