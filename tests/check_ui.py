@@ -657,6 +657,7 @@ def _local_modules() -> dict[str, Path]:
         (ROOT.glob("ui/*.py"), "ui"),
         (ROOT.glob("theme/*.py"), "theme"),
         (ROOT.glob("views/*.py"), "views"),
+        (ROOT.glob("sources/*.py"), "sources"),
     ):
         for path in pattern:
             name = path.stem
@@ -708,23 +709,36 @@ for _m in sorted(_mods):
             break
 bad("import graph: no cycles", not _cycle, _cycle)
 
-# ---- 14. layering: core/ui/theme never import app-level code. The
+# ---- 14. layering: core/ui/theme/sources never import app-level code. The
 # dependency chain is one-way (ui, theme, i18n <- core <- context <-
 # filters_ui, shell, views <- app); a violation here would mean a leaf
 # module grew UI/navigation logic again. Beyond app/views/shell this also
-# bans filters_ui/context for the same reason.
+# bans filters_ui/context for the same reason. sources/ additionally must
+# not import Streamlit at all: it is a pure logic layer.
 _APP_LEVEL = {"app", "views", "shell", "filters_ui", "context"}
 _layer_bad = sorted(
     f"{_name} -> {_t}"
     for _name in _mods
-    if _name.split(".")[0] in {"core", "ui", "theme"}
+    if _name.split(".")[0] in {"core", "ui", "theme", "sources"}
     for _t in _edges[_name]
     if _t.split(".")[0] in _APP_LEVEL
 )
 bad(
-    "layering: core/ui/theme free of app-level imports",
+    "layering: core/ui/theme/sources free of app-level imports",
     not _layer_bad,
     _layer_bad[:4],
+)
+_st_imports = sorted(
+    f"{_name} -> {_t}"
+    for _name in _mods
+    if _name.split(".")[0] == "sources"
+    for _t in _edges[_name]
+    if _t == "streamlit" or _t.startswith("streamlit.")
+)
+bad(
+    "layering: sources/ has no Streamlit imports",
+    not _st_imports,
+    _st_imports[:4],
 )
 
 # ---- 15. module size guardrails: warn past 1300 lines, fail past 1500,

@@ -40,9 +40,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources
-        run: python -m compileall -q app.py core i18n.py mapview.py store.py context.py filters_ui.py shell.py ui views theme tools
+        run: python -m compileall -q app.py core i18n.py mapview.py store.py context.py filters_ui.py shell.py sources ui views theme tools
       - name: Core tests (synthetic demo, no .dem needed)
         run: python tests/test_core.py
+      - name: Match import tests (fake transports, no network)
+        run: python tests/test_sources.py
       - name: UI consistency checks
         run: python tests/check_ui.py
       - name: UI smoke test (real app.py on synthetic demos)
@@ -59,6 +61,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources
-        run: python -m compileall -q app.py core i18n.py mapview.py store.py context.py filters_ui.py shell.py ui views theme tools
+        run: python -m compileall -q app.py core i18n.py mapview.py store.py context.py filters_ui.py shell.py sources ui views theme tools
       - name: Full UI smoke test
         run: python tests/smoke_app.py --all

@@ -17,6 +17,7 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 - **Shooting** — hit zones, speed at each shot, a speed-vs-distance scatter with the acceptable-speed curve, per-weapon stats.
 - **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded. Below: your duels by map zone and how every round started (opening duels, both teams).
 - **Impact** — per player: opening duels won/lost, trade kills, traded deaths, 2k–5k rounds, assists and flash assists.
+- **Matches** — your recent Steam games with a download button that puts the demo straight into the library (see [Importing matches](#importing-matches)).
 - **Map** — where the selected player killed and died, on the radar: your position (circle), the opponent's (open diamond) and a line between them; blue = kill, red = death; works with every filter, and two-level maps (Nuke, Vertigo) get an Upper / Lower switch. Needs the radar images once, see [Radar images](#radar-images-for-the-map-page).
 - **Timeline** — speed (with the moving threshold), yaw turn, pitch and held keys as coloured bars with a legend, around any duel, with the first shot and the death marked, cut at the moment of death. Switch the view to **round replay** — the whole round on the radar, like the spectator mini-map: every player of both teams, HP in the circle, a view-direction arrow and the weapon in hands; lines are shots, stars are hits, crosses are deaths and the side feed lists every kill of the round, so both where you were shooting and who traded you are visible. The panel on the left lists the players (the weapon in hands, the HP; hideable with a button), the right column holds a card per duel of yours in the round: duels that have not happened yet are semi-transparent, past ones are solid, the selected one gets an outline. Clicking a card locks the playhead to that duel's segment and shows the keys both duelists pressed; release it with another click, the ✕ button or by picking another duel. The timeline carries kill marks (blue for CT kills, yellow for T kills), and below it sits the match's round chips, coloured by the winning side (the winner is inferred from a full side elimination - CS2 demos expose no round_end/winner event); a click replays that round. The wheel zooms the radar, an LMB drag pans it, a double click resets the view. Play / 0.5x / 0.25x; two-level maps (Nuke, Vertigo) get the upper and lower level side by side (input recorded after death is a demo-parser artifact, not real play).
 - **Risk model** — a shot is _risky_ when your speed exceeded what is acceptable at that distance to the nearest living enemy: any speed point-blank, near-stationary at long range. Both distances are configurable.
@@ -53,8 +54,25 @@ Requires Windows and Python 3.13 (the exact version CI tests, matching the pinne
 
 - **Premier / Competitive:** CS2 → Play → _Your Matches_ → download the demo. Demos are kept only for a limited time, so grab them soon after the match.
 - **FACEIT / ESEA:** the demo link on the match page. Compressed files (`.dem.bz2`, `.dem.gz`, `.zip`, `.dem.zst`) are unpacked by the app automatically.
+- Or import your recent Valve Matchmaking games straight from Steam — see [Importing matches](#importing-matches).
 
 Then pick the file in the app.
+
+## Importing matches
+
+The **Matches** tab lists your recent **Steam / Valve Matchmaking** games and downloads the demo you pick into the same library. Nothing happens in the background: a network request is only made when you press **Refresh**, **Download** or **Install Steam helper** — opening the page only reads the local cache. No account, key or password is needed: the helper talks to the Steam client you are already logged into.
+
+Valve only exposes recent matches through the running Steam client, so the app uses [boiler-writter](https://github.com/akiver/boiler-writter) — a small MIT-licensed console tool. Press **Install Steam helper**: a pinned release is downloaded from GitHub, checked against a SHA-256 hash pinned in the code, and unpacked into `data\tools`. Your Steam password is never asked, stored or sent; for a couple of seconds your Steam status may show CS2 running — that is how the match list is fetched. The Game Coordinator returns roughly your last 8 matches, each with a direct demo link (`replay*.valve.net`, valid for about a month).
+
+- Demos you downloaded yourself in CS2 (Watch → Your Matches) are found in the `replays` folder and shown with the state *on disk*.
+- For an older match, paste its **share code** (`CSGO-…`) in the settings and press **Add by code**.
+- Set your **SteamID64** to get win/loss on the cards (the helper usually detects the logged-in account on its own).
+
+The list is ordered by date, so downloading a demo does not move its card. The **filter** above the cards shows all matches, only the ones already in the library, or only the not-downloaded ones. Every downloaded card has **Delete** (removes that demo and its caches, with a confirm step), and **Delete all demos** clears the whole library in one confirmed click.
+
+### What is stored, and how to remove it
+
+Everything lives inside the app's `data` folder: `accounts.json` (folders and SteamID64, no secrets), `matches.json` (the cached match lists), `tools\` (the Steam helper), plus the downloaded demos in `demos\`. Deleting `accounts.json` and `matches.json` resets the feature completely; delete `data\tools` to remove the helper. To block every network feature, set `AIMAUDIT_OFFLINE=1`.
 
 ## Demo library and where files are stored
 
@@ -69,6 +87,9 @@ data/
     parsed/     parsed demos, so opening one again is instant
     unpacked/   demos unpacked from .bz2 / .gz / .zst / .zip
   radars/       radar images (tools/fetch_radars.py)
+  tools/        the Steam helper (boiler-writter, installed from the Matches tab)
+  accounts.json match-import accounts (nickname, folders - no secrets)
+  matches.json  the cached match lists
   library.json  the list of demos        state.json  last demo and player
 ```
 
@@ -84,7 +105,12 @@ The Map page draws points on the real radar. The radar images are Valve's artwor
 
 ## Privacy
 
-All parsing and analysis happen inside the app on your machine. CS2-AimAudit makes no network requests (the only exception is the one-time radar download of `start.bat` / `tools\fetch_radars.py`, which you can switch off with `AIMAUDIT_NO_RADARS=1`), collects no telemetry and does not upload your demos anywhere. The bundled `.streamlit/config.toml` also disables Streamlit's own anonymous usage statistics (`gatherUsageStats = false`) — if you copy or replace that file, keep the setting.
+All parsing and analysis happen inside the app on your machine, and the app itself makes no requests on its own. The only network activity is explicit and listed here:
+
+- the one-time radar download of `start.bat` / `tools\fetch_radars.py` (switch it off with `AIMAUDIT_NO_RADARS=1`);
+- the **Matches** tab, and only on a button press: `replay*.valve.net` (Valve demo files) and `github.com` (only while installing the Steam helper, after a SHA-256 check). Set `AIMAUDIT_OFFLINE=1` to disable all of it.
+
+No telemetry is collected and your demos are not uploaded anywhere; the match import needs no accounts, keys or passwords. The bundled `.streamlit/config.toml` also disables Streamlit's own anonymous usage statistics (`gatherUsageStats = false`) — if you copy or replace that file, keep the setting.
 
 ## Reading the numbers
 
@@ -107,11 +133,14 @@ Open the **Data report / debug** expander at the bottom of the page. The built-i
 
 ```bat
 python tests/test_core.py        # synthetic match, no .dem file needed
+python tests/test_sources.py     # match import (Steam), no network
 python tests/check_ui.py         # i18n / schema / layering guardrails
 python tests/smoke_app.py --fast # AppTest end-to-end (fake parser)
 ```
 
 - `core/` — parsing and all metrics (demoparser2), no UI code.
+- `sources/` — match import from Steam: the provider, the HTTP
+  transport, the protobuf reader and the inbox (also no UI code).
 - `app.py` — Streamlit entry point (dispatcher); the pages live in `views/`,
   the shell in `shell.py`, the filter panel in `filters_ui.py`.
 - `ui/tables.toml` — the table schema: formats, sorting, grading and bars

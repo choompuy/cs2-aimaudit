@@ -73,6 +73,25 @@ def load_url_state() -> None:
                 st.session_state["flt_open"] = True
 
 
+def preserve_filters() -> None:
+    """Re-assign the filter keys while a page without the panel runs (the
+    Matches page), so Streamlit does not drop the widget states."""
+    for k, d in (
+        ("flt_weapons", []),
+        ("flt_classes", []),
+        ("flt_side", "all"),
+        ("flt_preset", "all"),
+        ("flt_dist", "all"),
+        ("flt_res", "both"),
+    ):
+        if k in st.session_state:
+            st.session_state[k] = st.session_state[k]
+        else:
+            st.session_state[k] = d
+    if "flt_rounds" in st.session_state:
+        st.session_state["flt_rounds"] = st.session_state["flt_rounds"]
+
+
 def render(ctx) -> None:
     """The filter bar: resolve, render, sync the shareable URL."""
     t = ctx.t

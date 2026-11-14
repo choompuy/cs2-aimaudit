@@ -31,6 +31,34 @@
 .aa-chip-info {
   color: var(--info);
 } /* INFO: good / no action  */
+.aa-chip-positive {
+  color: var(--positive);
+} /* win / ready             */
+.aa-chip-warning {
+  color: var(--warning);
+} /* needs attention         */
+.aa-chip-context {
+  color: var(--context);
+} /* neutral context         */
+
+/* Match cards (Matches page): result / source / demo-state badges. Same
+   visual language as the table component's badges: text colour plus a
+   tinted background, never colour alone. */
+.aa-badge {
+  display: inline-block;
+  padding: 1px 10px;
+  margin-right: 0.35rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+.aa-badge-positive { color: var(--positive); background: color-mix(in srgb, var(--positive) 16%, transparent); }
+.aa-badge-negative { color: var(--negative); background: color-mix(in srgb, var(--negative) 16%, transparent); }
+.aa-badge-warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
+.aa-badge-info { color: var(--info); background: color-mix(in srgb, var(--info) 16%, transparent); }
+.aa-badge-accent { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.aa-badge-context { color: var(--context); background: color-mix(in srgb, var(--context) 16%, transparent); }
 
 /* ---- 2. font application --------------------------------------------------
    Inter is wired through [theme] font + [[theme.fontFaces]] in

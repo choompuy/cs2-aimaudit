@@ -224,7 +224,10 @@ def open_demo(ctx) -> None:
         st.toast(t("lib_added", name=st.session_state.pop("_added")))
 
     if not lib:
-        # the empty state: a 3-step card with the demo instructions inline
+        # the empty state: the nav must stay reachable (the Matches tab works
+        # without a demo), then the 3-step card with the demo instructions
+        ctx.hdr = st.container(key="hdr_sticky", gap="xsmall")
+        nav(ctx)
         st.info(t("no_file"))
         with st.container(border=True):
             st.subheader(t("start_title"))
@@ -235,6 +238,7 @@ def open_demo(ctx) -> None:
             s2.caption(t("start_2_t"))
             s3.markdown(f"**3 · {t('start_3')}**")
             s3.caption(t("start_3_t"))
+            st.caption(t("start_matches_hint"))
             with st.expander(t("demo_how_title")):
                 st.markdown(t("demo_how"))
         st.stop()
@@ -286,6 +290,7 @@ def open_demo(ctx) -> None:
     # it as the latest opened and make it the one that opens next time
     if fresh_load:
         store.touch(entry["id"])
+        store.mark_analyzed(entry["id"])
     store.update_meta(
         entry["id"],
         map=demo.header.get("map_name") or None,
@@ -441,6 +446,12 @@ def context_bar(ctx) -> None:
     ctx.name_of = name_of
 
 
+def matches_shell(ctx) -> None:
+    """The Matches page shell: the sticky header + nav, no demo needed."""
+    ctx.hdr = st.container(key="hdr_sticky", gap="xsmall")
+    nav(ctx)
+
+
 def nav(ctx) -> None:
     """The page segmented control inside the sticky header row."""
     t = ctx.t
@@ -450,8 +461,8 @@ def nav(ctx) -> None:
     # switched from code. A segmented control bound to session_state["page"]
     # renders only the active page: widget changes on one page stop
     # recomputing the others, and code can switch pages (a Duels row click
-    # opens that duel in the Timeline).
-    PAGES = ("overview", "shooting", "duels", "map", "timeline", "guide")
+    # opens that duel in the Timeline, a downloaded match opens analysis).
+    PAGES = ("matches", "overview", "shooting", "duels", "map", "timeline", "guide")
     if st.session_state.get("page") not in PAGES:
         st.session_state["page"] = "overview"
     with _hdr:

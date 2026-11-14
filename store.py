@@ -7,8 +7,11 @@ Where CS2-AimAudit keeps its own files: ONE folder next to the launcher.
             unpacked/  .dem files unpacked from .bz2 / .gz / .zst / .zip
             parsed/    the parsed demo, so re-opening a demo is instant
         radars/        radar images + map_data.json (tools/fetch_radars.py)
-        library.json   the index of the demos (name, map, size, dates)
+        tools/         the Steam helper (boiler-writter, from the Matches tab)
+        library.json   the index of the demos (name, map, size, dates, match)
         state.json     the last selected demo and player
+        accounts.json  match-import settings (folders, SteamID64 - no secrets)
+        matches.json   the cached match lists of the Matches tab
 
 Everything except demos/ is rebuilt on demand, so the cache can be deleted at
 any time (also from the app: Library and storage -> Clear cache). Demos can
@@ -19,7 +22,7 @@ the app folder is not writable (installed system-wide) the data goes to
 ~/.cs2-aimaudit instead. Nothing here touches the network.
 
 This module is plain Python (no Streamlit, no demo parsing) so it can be
-tested on its own; the core/ package and app.py build on it.
+tested on its own; the core/ package, sources/ and app.py build on it.
 """
 
 from __future__ import annotations
@@ -118,6 +121,18 @@ def library_path() -> str:
 
 def state_path() -> str:
     return os.path.join(data_dir(), "state.json")
+
+
+def accounts_path() -> str:
+    return os.path.join(data_dir(), "accounts.json")
+
+
+def matches_cache_path() -> str:
+    return os.path.join(data_dir(), "matches.json")
+
+
+def tools_dir() -> str:
+    return _sub("tools")
 
 
 def human_size(n: float) -> str:
@@ -383,6 +398,14 @@ def delete_demo(demo_id: str) -> int:
     return freed
 
 
+def delete_all_demos() -> int:
+    """Remove every demo of the library (files + caches); returns the bytes freed."""
+    freed = 0
+    for e in _read_library():
+        freed += delete_demo(e["id"])
+    return freed
+
+
 # ---------------------------------------------------------- parsed cache
 def _parsed_file(path: str, code_ver: str) -> str | None:
     key = demo_key(path)
@@ -488,3 +511,57 @@ def clear_cache() -> int:
         except OSError:
             pass
     return freed
+
+
+# ------------------------------------------------------- match import data
+# accounts.json (no secrets - the Steam import needs none) and matches.json
+# (the cached match lists) follow the same rules as library.json: atomic
+# writes, a corrupt file counts as empty and is recreated.
+def _read_json_file(path: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _write_json_file(path: str, d: dict) -> bool:
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+def read_accounts() -> dict:
+    return _read_json_file(accounts_path())
+
+
+def write_accounts(d: dict) -> bool:
+    return _write_json_file(accounts_path(), d)
+
+
+def read_matches_cache() -> dict:
+    return _read_json_file(matches_cache_path())
+
+
+def write_matches_cache(d: dict) -> bool:
+    return _write_json_file(matches_cache_path(), d)
+
+
+def find_by_match(provider: str, match_id: str) -> dict | None:
+    """The library entry a downloaded match is bound to, if any."""
+    for e in _read_library():
+        m = e.get("match") or {}
+        if m.get("provider") == provider and m.get("match_id") == match_id:
+            return e
+    return None
+
+
+def mark_analyzed(demo_id: str) -> None:
+    """Note when a demo was last parsed (for future cross-match aggregates)."""
+    _update(demo_id, analyzed_at=_now())

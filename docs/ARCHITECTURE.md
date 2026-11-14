@@ -32,11 +32,20 @@ written here, so the doc and the guardrails stay honest.
 | `ui/format.py`                    |        51 | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`.                                                                                       |
 | `ui/strip.py`                     |       352 | The duel navigation strip (Timeline).                                                                                                        |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
-| `i18n.py`                         |       853 | English/Russian strings; every UI text goes through `t("key")` literals.                                                                     |
+| `sources/model.py`                |       162 | The match-import model: `MatchRecord`, `DemoState`, the Steam config and the localized `ProviderError` family.                               |
+| `sources/http.py`                 |       214 | Shared urllib transport: timeouts, 429/Retry-After and 5xx retries, streaming downloads to `.part`, https-only, `AIMAUDIT_OFFLINE`.           |
+| `sources/steam_gc.py`             |       266 | Dependency-free protobuf wire reader for `CMsgGCCStrike15_v2_MatchList` (field numbers from SteamDatabase/Protobufs).                        |
+| `sources/steam.py`                |       380 | boiler-writter runner + hash-pinned install, the share-code codec, Valve demo downloads, optional Web API share-code chaining.               |
+| `sources/inbox.py`                |       162 | The CS2 replays folder (Watch -> Your Matches) as a match source (registry + libraryfolders.vdf).                                            |
+| `sources/__init__.py`             |       116 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package.                               |
+| `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
+| `i18n.py`                         |    1 077 | English/Russian strings; every UI text goes through `t("key")` literals.                                                                     |
 
-Support: `tests/test_core.py` (synthetic-match unit tests), `tests/smoke_app.py`
-(AppTest end-to-end scenarios), `tests/check_ui.py` (static guardrails),
-`tools/` (`dump_payloads.py` golden grid payloads, `api_snapshot.py` core API
+Support: `tests/test_core.py` (synthetic-match unit tests),
+`tests/test_sources.py` (match import: transport, providers, protobuf,
+share codes, inbox, privacy), `tests/smoke_app.py` (AppTest end-to-end
+scenarios), `tests/check_ui.py` (static guardrails), `tools/`
+(`dump_payloads.py` golden grid payloads, `api_snapshot.py` core API
 snapshot, `fetch_radars.py`, `inspect_rounds.py`, `sync_theme.py`).
 
 ## Dependency direction
@@ -51,14 +60,20 @@ ui/  theme/  i18n.py          leaf libraries: no Streamlit runs, no app knowledg
 filters_ui.py  shell.py  views/   Streamlit pages and panels
         ↑
       app.py                  entry point, ~90 lines, no logic
+
+sources/                    match import (Steam): a leaf like core/ -
+                            no Streamlit at all, no views/shell knowledge; may
+                            import store.py for paths (store itself is a
+                            stdlib-only leaf under everything).
 ```
 
 `tests/check_ui.py` enforces:
 
 1. **No import cycles** anywhere in the graph (DFS over `core`, `ui`,
-   `theme`, `views` and the root modules).
-2. **Layering**: `core`, `ui` and `theme` never import `app`, `views`,
-   `shell`, `filters_ui` or `context`.
+   `theme`, `views`, `sources` and the root modules).
+2. **Layering**: `core`, `ui`, `theme` and `sources` never import `app`,
+   `views`, `shell`, `filters_ui` or `context`; `sources/` additionally
+   never imports Streamlit.
 3. **Module size**: every app-code module fails the check past 1500 lines
    (warning past 1300). `tests/` are out of scope — splitting them is a
    separate task.
@@ -152,6 +167,51 @@ A **column** is the recipe above. A **table**:
 4. Add a smoke scenario in `tests/smoke_app.py` if the page carries
    logic worth locking.
 
+## How to add a match source (a provider)
+
+The import pipeline is `sources/`: a leaf package with no Streamlit and no
+app knowledge (enforced by `tests/check_ui.py`). A new provider is four
+small pieces plus one dispatch line:
+
+1. **Model**: reuse `sources/model.py` - build `MatchRecord`s (win/loss from
+   the player's own perspective, `demo` = a `DemoState` the UI can act on).
+   Failures raise the localized `ProviderError` subclasses, never raw
+   exceptions.
+2. **Client**: a small class taking `(cfg, *, transport)` - the transport is
+   always injected, so tests fake `get_json` / `post_json` / `download` and
+   never touch the network. Use `sources/http.py` for anything HTTP: it
+   owns the offline gate, https enforcement, retries and `.part` handling.
+3. **Dispatch**: extend `sources/__init__.py::list_matches` / `fetch_demo`
+   with the provider id; downloads end in `store.add_demo(...)` so hashing,
+   dedup and the library stay in one place, then `_bind` writes the `match`
+   field onto the entry.
+4. **UI**: `views/matches.py` renders whatever lands in `matches.json`
+   (`store.read_matches_cache`); usually only the per-provider section
+   (settings card, empty/error states) is new. All texts go into `i18n.py`
+   in both locales, badges ride the `aa-badge-*` classes from
+   `theme/overrides.css`.
+5. **Tests**: fixtures in the documented response shapes, a fake transport
+   and (for helpers) a fake runner - see `tests/test_sources.py`; add the
+   refresh/error path to the smoke scenario in `tests/smoke_app.py`.
+
+Rules that are easy to break: the network runs only on explicit button
+presses (opening the page reads the cache only); secrets live in
+`data/secrets.json` or environment variables, never in accounts, caches,
+logs or URLs; anything downloaded from the network is hash- or
+shape-verified before it runs (`boiler-writter.exe` is the precedent).
+
+## Where cross-match aggregates will live (future tabs)
+
+Dashboard / Match / duel-map tabs will need aggregates over many demos.
+They will live in a separate module *on top of* `core/` (say
+`core/aggregate.py` or `aggregates/`), fed by the same `load_demo_cached`
+pipeline, with per-demo results cached under `data/cache/` keyed like the
+parsed cache (demo id + code version). The library entries already carry
+`match` (provider, match id, map, score) and `analyzed_at`, so an
+aggregate can skip demos that have not been parsed yet; `MatchRecord.extra`
+and the versioned `matches.json` are the extension points - no schema
+change needed to start.
+
 ## How to add a filter
 
 1. Pick the `session_state` key (`flt_<name>`) and, if the filter should
@@ -170,9 +230,10 @@ A **column** is the recipe above. A **table**:
 ## Tests and tools
 
 ```bash
-python tests/test_core.py        # 417 checks, synthetic match, no .dem needed
+python tests/test_core.py        # 444 checks, synthetic match, no .dem needed
+python tests/test_sources.py     # 135 checks, match import, no network
 python tests/check_ui.py         # guardrails: i18n, schema, layering, sizes
-python tests/smoke_app.py --fast # 248 AppTest checks against a fake parser
+python tests/smoke_app.py --fast # 285 AppTest checks against a fake parser
 python tests/smoke_app.py --all  # full matrix, longer
 ```
 

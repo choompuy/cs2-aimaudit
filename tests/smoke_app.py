@@ -1775,6 +1775,140 @@ def scenario_map():
             os.environ["AIMAUDIT_RADAR_DIR"] = old
 
 
+def scenario_matches():
+    """The Matches page: empty library, errors, cached list, download -> Open."""
+    print("== matches page (Steam import) ==")
+    import sources
+    from sources import model as sm
+
+    def _rec(mid, result="win", score=(13, 5), demo=sm.DemoState.READY):
+        from datetime import datetime, timezone
+
+        return sm.MatchRecord(
+            provider="steam",
+            match_id=mid,
+            played_at=datetime.now(timezone.utc),
+            map_name="de_mirage",
+            mode="Competitive",
+            score=score,
+            result=result,
+            demo=demo,
+        )
+
+    # 1) empty library, nothing set up: the page must open and stay friendly
+    with _empty_library():
+        at = fresh_at(page="matches")
+        check("matches: renders on an empty library", not at.exception, err_of(at))
+        check("matches: refresh button offered", widget(at, "button", "mt_refresh") is not None)
+        check(
+            "matches: the Steam helper card with the install button",
+            widget(at, "button", "mt_helper_install") is not None
+            and any("boiler-writter" in str(s.value) for s in at.subheader),
+        )
+        check("matches: no error without any interaction", not at.error)
+
+        # 2) a failing refresh keeps the page usable
+        def _boom(provider, cfg, n, **kw):
+            raise sm.NetworkError("down")
+
+        _orig_list, _orig_fetch = sources.list_matches, sources.fetch_demo
+        sources.list_matches = _boom
+        try:
+            act(at, "refresh fails", lambda: at.button(key="mt_refresh").click().run())
+            check("matches: network error is shown", len(at.error) >= 1, [str(e.value)[:60] for e in at.error])
+        finally:
+            sources.list_matches = _orig_list
+
+        # 3) the real flow with a fake provider: refresh -> cards -> download -> open
+        store.write_accounts({"version": 1, "match_count": 5})
+
+        def _fake_list(provider, cfg, n, **kw):
+            if provider != "steam":
+                return []
+            return [
+                _rec("m1"),
+                _rec("m2", result="loss", score=(9, 13)),
+                _rec("m3", result="tie", score=(12, 12)),
+            ]
+
+        def _fake_fetch(rec, cfg, *, progress=None, cancel=None, **kw):
+            src = os.path.join(DEMO_DIR, f"steam_{rec.match_id}.dem")
+            with open(src, "wb") as fh:
+                fh.write(f"fake steam demo {rec.match_id}".encode())
+            if progress:
+                progress(24, 24)
+            return sources.import_local(rec, src)
+
+        sources.list_matches = _fake_list
+        sources.fetch_demo = _fake_fetch
+        try:
+            act(at, "refresh loads the list", lambda: at.button(key="mt_refresh").click().run())
+            md = "\n".join(m.value for m in at.markdown)
+            check("matches: cards list the games", md.count("de_mirage") >= 3, md[:200])
+            check("matches: win/loss/tie badges rendered",
+                  "Win" in md and "Loss" in md and "Tie" in md, md[:300])
+            check("matches: cached to matches.json",
+                  len(store.read_matches_cache().get("providers", {}).get("steam", {}).get("records", [])) == 3)
+            check("matches: download buttons offered",
+                  widget(at, "button", "mt_dl_steam_m1") is not None)
+
+            act(at, "download the demo", lambda: at.button(key="mt_dl_steam_m1").click().run())
+            entry = store.find_by_match("steam", "m1")
+            check("matches: demo bound in the library", entry is not None, entry)
+            if entry:
+                check("matches: file named after the match", "steam_m1" in entry["file"], entry["file"])
+                FakeParser.demos[os.path.realpath(store.demo_path(entry))] = make_match([1, 2])
+                act(at, "open the downloaded demo", lambda: at.button(key="mt_open_steam_m1").click().run())
+                check("matches: open switches to the analysis", ss_get(at, "page") == "overview" and not at.exception, (ss_get(at, "page"), err_of(at)))
+                check("matches: the demo is the loaded one", ss_get(at, "demo_id") == entry["id"], ss_get(at, "demo_id"))
+                check("matches: back to the matches page still works", goto(at, "matches") or True)
+
+            # 3b) the downloaded/not-downloaded filter
+            act(at, "filter not downloaded", lambda: ctl(at, "segmented_control", "mt_filter").select("todo").run())
+            check("matches: todo filter hides the downloaded",
+                  widget(at, "button", "mt_open_steam_m1") is None
+                  and widget(at, "button", "mt_dl_steam_m2") is not None)
+            act(at, "filter in library", lambda: ctl(at, "segmented_control", "mt_filter").select("down").run())
+            check("matches: down filter keeps only the downloaded",
+                  widget(at, "button", "mt_dl_steam_m2") is None
+                  and widget(at, "button", "mt_open_steam_m1") is not None)
+            act(at, "filter all", lambda: ctl(at, "segmented_control", "mt_filter").select("all").run())
+
+            # 3c) delete the demo from its card (with a confirm step)
+            if entry:
+                check("matches: card offers delete", widget(at, "button", f"mt_del_{entry['id']}") is not None)
+                act(at, "ask delete", lambda: at.button(key=f"mt_del_{entry['id']}").click().run())
+                check("matches: delete asks to confirm", widget(at, "button", f"mt_delyes_{entry['id']}") is not None)
+                act(at, "confirm delete", lambda: at.button(key=f"mt_delyes_{entry['id']}").click().run())
+                check("matches: demo gone from the library",
+                      store.find_by_match("steam", "m1") is None and store.get_demo(entry["id"]) is None)
+                check("matches: freed size reported", any("Freed" in str(s.value) for s in at.success))
+
+            # 3d) clear the whole library at once
+            act(at, "download m2", lambda: at.button(key="mt_dl_steam_m2").click().run())
+            entry2 = store.find_by_match("steam", "m2")
+            check("matches: second demo bound", entry2 is not None)
+            act(at, "ask clear", lambda: at.button(key="mt_clear").click().run())
+            check("matches: clear asks to confirm", widget(at, "button", "mt_clear_yes") is not None)
+            act(at, "confirm clear", lambda: at.button(key="mt_clear_yes").click().run())
+            check("matches: library empty after clear", store.list_demos() == [])
+            check("matches: cards survive clearing", not at.exception, err_of(at))
+
+            # 4) refresh error after a successful load: the cached list stays
+            def _boom2(provider, cfg, n, **kw):
+                raise sm.RateLimitError(retry_after=42)
+
+            sources.list_matches = _boom2
+            act(at, "refresh hits the rate limit", lambda: at.button(key="mt_refresh").click().run())
+            check("matches: rate limit message shown",
+                  any("42" in str(e.value) for e in at.error), [str(e.value)[:70] for e in at.error])
+            md = "\n".join(m.value for m in at.markdown)
+            check("matches: cached cards survive the error", md.count("de_mirage") >= 2, md[:200])
+        finally:
+            sources.list_matches = _orig_list
+            sources.fetch_demo = _orig_fetch
+
+
 def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if arg and arg not in ("--all", "--fast"):
@@ -1803,6 +1937,7 @@ def main():
         scenario_impact()
         scenario_scoreboard()
         scenario_map()
+        scenario_matches()
         if arg == "--all":
             scenario_matrix()
     print(f"\n{PASS} passed, {FAIL} failed")

@@ -55,6 +55,14 @@ def main() -> None:
     filters_ui.load_url_state()
     ctx = context.Ctx()
     shell.sidebar(ctx)
+    if st.session_state.get("page") == "matches":
+        # the Matches page needs no loaded demo: it must open on an empty
+        # library, so it runs its own reduced pipeline (nav + the page)
+        filters_ui.preserve_filters()
+        shell.matches_shell(ctx)
+        views.matches.render(ctx)
+        _footer(ctx.t)
+        return
     shell.open_demo(ctx)
     shell.context_bar(ctx)
     # the fmt helpers (ui/format.py) read the run's translator and names
@@ -77,8 +85,10 @@ def main() -> None:
     if page == "guide":
         views.extras.guide(ctx)
     views.extras.debug(ctx)
+    _footer(ctx.t)
 
-    t = ctx.t
+
+def _footer(t) -> None:
     st.divider()
     st.caption(
         f"CS2-AimAudit · {_app_version()} · {t('footer_privacy')} · "
