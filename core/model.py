@@ -521,6 +521,10 @@ class Demo:
     #                      usercmd mouse deltas (|dx|+|dy| per tick) around
     #                      first-shot windows, None when the demo/parser
     #                      does not provide them - input of flick_move
+    round_windows: dict = field(default_factory=dict)
+    #                      {round: (t0, t1)} tick windows of the played
+    #                      rounds (build_round_windows) - input of the
+    #                      2D replay and the duels' round column
 
     def side_at(self, round_no: int, sid: str) -> str:
         """Player's side in a given round (falls back to the static team)."""
@@ -549,6 +553,85 @@ class Demo:
     @cached_property
     def teams(self) -> dict[str, str]:
         return dict(zip(self.players["sid"], self.players["team"]))
+
+
+def build_round_windows(
+    freeze_ends,
+    officially_ended,
+    events,
+    tickrate: int = TICKRATE,
+    max_s: float = 180.0,
+) -> dict[int, tuple[int, int]]:
+    """
+    {round: (t0, t1)} tick windows of the played rounds, for the 2D replay.
+
+    ``freeze_ends`` are the sorted live round_freeze_end ticks (round i
+    starts at freeze_ends[i]); ``officially_ended`` the round_officially_ended
+    ticks - the win panel belongs to the round, so the one falling inside
+    a window is its end when present. ``events`` is a frame with ``tick``
+    and ``round`` (1-based, from total_rounds_played + 1).
+
+    A window without events is not a played round and is skipped. The round
+    NUMBER comes from the events inside the window, not the freeze index:
+    a demo starting mid-match keeps its numbers, and a kill after the round
+    ended (already counted in the next round) stays inside the window its
+    tick belongs to. Two windows claiming one number -> the later one gets
+    the next free number. End = officially_ended | last event + 5 s,
+    capped by the next freeze end - 1 and start + max_s.
+    """
+    fe = sorted(int(x) for x in (freeze_ends or []))
+    if not fe or events is None or not len(events):
+        return {}
+    off = sorted(int(x) for x in (officially_ended or []))
+    cap = int(max_s * tickrate)
+    five_s = 5 * tickrate
+    ev = events
+    if "tick" not in ev.columns:
+        return {}
+    ev = ev.assign(
+        _t=pd.to_numeric(ev["tick"], errors="coerce"),
+        _r=(
+            pd.to_numeric(ev["round"], errors="coerce").fillna(0).astype(int)
+            if "round" in ev.columns
+            else 0
+        ),
+    ).dropna(subset=["_t"])
+    out: dict[int, tuple[int, int]] = {}
+    used: set[int] = set()
+    for i, start in enumerate(fe):
+        hard = fe[i + 1] - 1 if i + 1 < len(fe) else start + cap
+        hard = min(hard, start + cap)
+        inside = ev[(ev["_t"] >= start) & (ev["_t"] <= hard)]
+        named = inside[inside["_r"] >= 1]
+        if not len(named):
+            continue
+        n0 = int(named.sort_values("_t")["_r"].iloc[0])
+        # this round's own officially_ended tick: pairing the two lists by
+        # position breaks whenever warmup/restart rounds shift one of them,
+        # so the tick is looked up inside the window itself
+        cands = [o for o in off if start < o <= hard]
+        if cands:
+            end = min(cands)
+        else:
+            end = min(hard, int(inside["_t"].max()) + five_s)
+        n = n0
+        while n in used:
+            n += 1
+        used.add(n)
+        out[n] = (start, end)
+    return out
+
+
+def round_of_tick(windows, tick) -> int | None:
+    """Round number whose window contains ``tick``; None outside all."""
+    try:
+        t = int(tick)
+    except (TypeError, ValueError):
+        return None
+    for n, (t0, t1) in sorted((windows or {}).items()):
+        if t0 <= t <= t1:
+            return n
+    return None
 
 
 def _first_shot_arr(ticks, sids) -> np.ndarray:

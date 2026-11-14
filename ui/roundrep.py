@@ -1,52 +1,55 @@
 """
-Round replay: a canvas mini-map of the WHOLE round, not just two duelists.
+2D replay: a canvas mini-map of the WHOLE round - every player, every duel.
 
-    round_replay(payload, *, key)          # render (ui/roundrep.py)
-    round_payload(data, ...)               # pure JSON model, unit-tested
+    round_replay(payload, *, key, on_round)   # render (this module)
+    round_payload(data, ...)                  # pure JSON model, unit-tested
 
+There is no "selected player" here: a replay shows everyone the same way.
 Layout (everything client-side, like the in-game spectator HUD):
 
-- LEFT: every player of both teams - the weapon in hands, the HP number -
-  as a hideable panel (the toggle sits in the control row);
+- LEFT: the players of both teams in ONE list sorted by nickname, so every
+  player keeps his place from round to round (sides swap at halftime, the
+  colour dot follows them). The weapon in hands, the HP, and an eye button
+  that hides a player from the map (the choice survives round switches);
 - CENTER: the radar canvas (wheel = zoom, LMB drag = pan, double click or
-  the button = reset) with every player drawn - a team-coloured circle
-  with the HP inside, an ARROW for the view direction, the name above and
-  the current weapon below; dead players become grey crosses, flashed
-  ones get a white halo; shots are fading tracers, hits stars, kills
-  crosses + a kill feed on the side, so trades are readable;
-- the TIMELINE under the map: kill marks coloured by the KILLER'S side
-  (CT blue, T yellow), the selected duel's segment highlighted, the
-  playhead draggable. While a duel is selected the playhead is LOCKED to
-  its segment - exit first (re-click the card / the exit button) or pick
-  another duel;
-- the key panels of BOTH duelists appear only inside a duel segment;
-- RIGHT: one card per duel of yours in this round - future duels are
-  semi-transparent, past ones are solid, the selected one gets the
-  outline; a click locks the timeline to that duel's segment;
-- BELOW the timeline: the rounds of the whole match, their background
-  coloured by the winning side (core.round_winners) - a click switches
-  the replay to that round (a Streamlit trigger, one fragment rerun).
+  the button = reset): a small team-coloured dot per player (CT / T), a
+  view-direction arrow, the name, an HP bar and the weapon; dead players
+  become grey crosses, flashed ones get a white halo; shots are fading
+  tracers, hits stars, kills crosses + a kill feed on the side;
+- the TIMELINE under the map: kill marks coloured by the KILLER'S side,
+  the selected duel's segment highlighted, a draggable playhead. While a
+  duel is selected the playhead is LOCKED to its segment;
+- the key panels of BOTH duelists of the selected duel;
+- RIGHT: one card per duel of the round - EVERY duel of every player, not
+  only one player's: future duels are semi-transparent, past ones solid, the
+  selected one gets the outline; a click locks the timeline to its segment;
+- BELOW the timeline: the rounds of the whole match, coloured by the winning
+  side (core.round_winners) - a click switches the replay to that round.
 
 Python builds the whole payload (round_payload is pure and unit-tested);
-the JS only interpolates, draws and animates - playback runs entirely in
-the browser on requestAnimationFrame, no Streamlit reruns while playing.
-Colours come from theme tokens through the payload, CSS vars only for the
-chrome, like ui/table.py and ui/strip.py.
+the JS (ui/roundrep.js) only interpolates, draws and animates - playback
+runs entirely in the browser on requestAnimationFrame, no Streamlit reruns
+while playing. Colours come from theme tokens through the payload, CSS
+variables only for the chrome (ui/roundrep.css), like ui/table.py.
 """
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from ui.roundrep_assets import _CSS, _JS
+_HERE = Path(__file__).resolve().parent
+# the front end lives in real files (syntax-checkable, no escaping games)
+_CSS = (_HERE / "roundrep.css").read_text(encoding="utf-8")
+_JS = (_HERE / "roundrep.js").read_text(encoding="utf-8")
 
 
-def _r1(v) -> float:
+def _r1(v) -> float | None:
     """Round to 1 decimal (JSON size); NaN -> None so JSON stays valid."""
     try:
         f = float(v)
@@ -55,16 +58,24 @@ def _r1(v) -> float:
     return None if not math.isfinite(f) else round(f, 1)
 
 
+def _ri(a) -> list[int | None]:
+    """Whole numbers (world units need no decimals); NaN -> None."""
+    return [None if not math.isfinite(v) else int(round(v)) for v in a]
+
+
 def _wshort(v) -> str:
     """active_weapon_name -> the short form ('weapon_ak47' -> 'ak47')."""
     s = str(v or "")
     return s[7:] if s.startswith("weapon_") else s
 
 
+def _ffilled(g: pd.DataFrame, col: str) -> np.ndarray:
+    return pd.to_numeric(g[col], errors="coerce").ffill().bfill().to_numpy(float)
+
+
 def round_payload(
     data: Mapping[str, Any],
     *,
-    me: str,
     names: Mapping[str, str],
     side_of: Callable[[str], str],
     radar: Mapping[str, Any] | None = None,
@@ -72,159 +83,129 @@ def round_payload(
     rounds: Sequence[Mapping[str, Any]] = (),
     at: int | None = None,
     sel: int | None = None,
-    key_players: Sequence[tuple[str, str]] = (),
     labels: Mapping[str, str] | None = None,
     colors: Mapping[str, str] | None = None,
-    max_samples: int = 3200,
 ) -> dict:
     """
-    JSON-ready model of the round replay (pure function: unit-testable).
+    JSON-ready model of the 2D replay (pure function: unit-testable).
 
-    ``data`` is core.round_replay_data's dict; ``names``/``side_of``
-    resolve players; ``radar`` is core.load_radar's dict (or None: a plain
-    unit grid is drawn); ``duels`` are the selected player's duels in this
-    round - {"a", "b"} bracket the segment the timeline locks to, "tick"
-    is the resolution, "result"/"opp"/"opp_sid"/"weapon"/"hs"/"dur" feed
-    the card; ``rounds`` is the whole match [{"n", "win"}] for the round
-    bar (win 'CT'/'T'/'' from core.round_winners); ``at`` is the tick to
-    start at; ``sel`` preselects that duel (locks the timeline);
-    ``key_players`` are (sid, caption) pairs whose held keys get a panel
-    inside a duel segment.
+    ``data`` is core.round_replay_data's dict; ``names``/``side_of`` resolve
+    players (``side_of(sid)`` is the side in THIS round); ``radar`` is
+    core.load_radar's dict (or None: a plain unit grid is drawn). ``duels``
+    are core.round_duels' entries - every duel of the round, {"a", "b"}
+    bracket the segment the timeline locks to, "tick" is the kill,
+    "killer"/"victim" are SteamIDs. ``rounds`` is the whole match
+    [{"n", "win"}] for the round bar (win 'CT'/'T'/'' from
+    core.round_winners); ``at`` is the tick to start at; ``sel``
+    preselects a duel (locks the timeline).
+
+    Players come out sorted by nickname (stable order across rounds);
+    positions and view angles are whole numbers; held keys are ONE bitmask per sample
+    (bit i = ``keys[i]``), so every player's keys cost a single array.
     """
     t0, t1 = int(data["t0"]), int(data["t1"])
-    step, tr = int(data["step"]), int(data["tickrate"])
+    step, tr = max(int(data["step"]), 1), int(data["tickrate"])
     grid = np.arange(t0, t1 + 1, step)
     keys = list(data.get("keys") or ())
-    key_sids = {str(s) for s, _ in key_players}
     two_level = bool(radar and radar.get("lower"))
-    my_side = side_of(me)
+
+    def _name(sid: str) -> str:
+        return str(names.get(sid, sid))
 
     players: list[dict] = []
-    xall, yall = [], []
-    for sid, f in data["frames"].items():
-        sid = str(sid)
-        g = (
-            f.drop_duplicates("tick")
-            .set_index("tick")
-            .reindex(grid)
-        )
-        wx = pd.to_numeric(g["X"], errors="coerce").ffill().bfill()
-        wy = pd.to_numeric(g["Y"], errors="coerce").ffill().bfill()
-        if not len(wx) or wx.isna().all():
+    xall: list[float] = []
+    yall: list[float] = []
+    for sid, f in sorted(
+        ((str(s), fr) for s, fr in data["frames"].items()),
+        key=lambda kv: (_name(kv[0]).casefold(), kv[0]),
+    ):
+        g = f.drop_duplicates("tick").set_index("tick").reindex(grid)
+        wx, wy = _ffilled(g, "X"), _ffilled(g, "Y")
+        if not len(wx) or np.isnan(wx).all():
             continue
         side = side_of(sid)
-        role = "me" if sid == me else ("tm" if side == my_side else "en")
         p: dict = {
             "sid": sid,
-            "name": str(names.get(sid, sid)),
-            "role": role,
+            "name": _name(sid),
             "side": side if side in ("CT", "T") else "?",
-            "x": [_r1(v) for v in wx.to_numpy()],
-            "y": [_r1(v) for v in wy.to_numpy()],
-            "yaw": [
-                _r1(v)
-                for v in pd.to_numeric(g["yaw"], errors="coerce")
-                .ffill()
-                .bfill()
-                .to_numpy()
-            ],
+            "x": _ri(wx),
+            "y": _ri(wy),
+            "yaw": _ri(_ffilled(g, "yaw")),
         }
         if "Z" in g.columns and two_level:
             import core as _core
 
-            z = pd.to_numeric(g["Z"], errors="coerce").ffill().bfill().to_numpy()
-            p["lvl"] = (
-                _core.on_lower_level(z, dict(radar)).astype(int).tolist()
-            )
+            p["lvl"] = _core.on_lower_level(_ffilled(g, "Z"), dict(radar)).astype(int).tolist()
         if "health" in g.columns:
-            hp = (
-                pd.to_numeric(g["health"], errors="coerce")
-                .ffill()
-                .bfill()
-                .fillna(-1)
-                .clip(-1, 100)
-                .astype(int)
-                .to_numpy()
-            )
-            p["hp"] = hp.tolist()
+            hp = pd.to_numeric(g["health"], errors="coerce").ffill().bfill().fillna(-1)
+            p["hp"] = hp.clip(-1, 100).astype(int).tolist()
+        alive = None
         if "is_alive" in g.columns:
-            p["al"] = (
-                g["is_alive"].astype(float).ffill().fillna(1.0).astype(bool)
-                .astype(int)
-                .tolist()
-            )
+            alive = g["is_alive"].astype(float).ffill().fillna(1.0).astype(bool).to_numpy()
+            p["al"] = alive.astype(int).tolist()
         if "flash_duration" in g.columns:
-            p["fl"] = [
-                _r1(v)
-                for v in pd.to_numeric(g["flash_duration"], errors="coerce")
-                .fillna(0.0)
-                .to_numpy()
-            ]
+            fl = pd.to_numeric(g["flash_duration"], errors="coerce").fillna(0.0).to_numpy()
+            if (fl > 0.2).any():  # most players are never flashed: no array
+                p["fl"] = [_r1(v) for v in fl]
         if "active_weapon_name" in g.columns:
-            w = g["active_weapon_name"].ffill().bfill()
             changes: list[list[Any]] = []
-            last = None
-            for tick, val in zip(grid, w.to_numpy()):
+            last: Any = object()
+            for tick, val in zip(grid, g["active_weapon_name"].ffill().bfill().to_numpy()):
                 cur = None if val is None or (isinstance(val, float) and math.isnan(val)) else str(val)
                 if cur != last:
                     changes.append([int(tick), _wshort(cur)])
                     last = cur
             p["w"] = changes
-        if sid in key_sids:
-            p["keys"] = {
-                k: (
-                    pd.to_numeric(g[k], errors="coerce").fillna(0).to_numpy() != 0
-                ).astype(int).tolist()
-                for k in keys
-                if k in g.columns
-            }
+        kb = np.zeros(len(grid), dtype=np.int64)
+        for bit, k in enumerate(keys):
+            if k in g.columns:
+                kb |= (pd.to_numeric(g[k], errors="coerce").fillna(0).to_numpy() != 0).astype(np.int64) << bit
+        if kb.any():
+            if alive is not None:
+                kb[~alive] = 0  # input recorded after death is a parser artifact
+            p["kb"] = kb.tolist()
         players.append(p)
-        xall += [v for v in wx.dropna().tolist()]
-        yall += [v for v in wy.dropna().tolist()]
+        xall += wx[~np.isnan(wx)].tolist()
+        yall += wy[~np.isnan(wy)].tolist()
 
     idx = {p["sid"]: i for i, p in enumerate(players)}
 
     def _pi(sid: Any) -> int:
         return idx.get(str(sid), -1)
 
-    shots = [
-        [int(t), _pi(s), str(w)] for t, s, w in (data.get("shots") or [])
-    ]
+    shots = [[int(t), _pi(s), str(w)] for t, s, w in (data.get("shots") or [])]
     kills = [
         [int(t), _pi(a), _pi(v), str(w), bool(hs)]
         for t, a, v, w, hs in (data.get("kills") or [])
     ]
     hits = [[int(t), _pi(a), _pi(v)] for t, a, v in (data.get("hits") or [])]
 
-    # my duels of this round: cards on the right + timeline segments
     du: list[dict] = []
     for x in duels:
-        a = int(x.get("a", t0) or t0)
-        b = int(x.get("b", t1) or t1)
-        a = max(t0, min(a, t1))
-        b = max(a, min(b, t1))
+        a = max(t0, min(int(x.get("a", t0)), t1))
+        b = max(a, min(int(x.get("b", t1)), t1))
+        k, v = str(x.get("killer") or ""), str(x.get("victim") or "")
         du.append(
             {
                 "a": a,
                 "b": b,
-                "tk": max(a, min(int(x.get("tick", a) or a), b)),
-                "res": "kill" if str(x.get("result")) == "kill" else "death",
-                "opp": str(x.get("opp") or ""),
-                "oi": _pi(x.get("opp_sid")),
+                "tk": max(a, min(int(x.get("tick", a)), b)),
+                "ki": _pi(k),
+                "vi": _pi(v),
+                "kn": _name(k),
+                "vn": _name(v),
                 "w": str(x.get("weapon") or ""),
                 "hs": bool(x.get("hs")),
                 "dur": _r1(x.get("dur")),
             }
         )
     du.sort(key=lambda z: z["tk"])
-    marks = [[z["tk"], z["res"]] for z in du]
 
-    n_du = len(du)
     try:
         sel_i = int(sel) if sel is not None else -1
     except (TypeError, ValueError):
         sel_i = -1
-    if not (0 <= sel_i < n_du):
+    if not (0 <= sel_i < len(du)):
         sel_i = -1
     at_t = t0 if at is None else int(at)
     if sel_i >= 0 and at is None:
@@ -238,9 +219,6 @@ def round_payload(
         ]
         for r in rounds
     ]
-
-    lab = {k: str(v or "") for k, v in (labels or {}).items()}
-    col = {k: str(v or "") for k, v in (colors or {}).items()}
 
     rp: dict | None = None
     if radar:
@@ -258,14 +236,12 @@ def round_payload(
     if rp is None and xall:
         import core as _core
 
-        x0, x1 = min(xall), max(xall)
-        y0, y1 = min(yall), max(yall)
         m = _core.SAFE_DIST / 2.0
         gb = {
-            "minx": round(x0 - m, 1),
-            "miny": round(y0 - m, 1),
-            "maxx": round(x1 + m, 1),
-            "maxy": round(y1 + m, 1),
+            "minx": round(min(xall) - m, 1),
+            "miny": round(min(yall) - m, 1),
+            "maxx": round(max(xall) + m, 1),
+            "maxy": round(max(yall) + m, 1),
         }
 
     return {
@@ -278,18 +254,15 @@ def round_payload(
         "shots": shots,
         "kills": kills,
         "hits": hits,
-        "marks": marks,
         "duels": du,
         "rounds": rd,
         "sel": sel_i,
         "at": at_t,
-        "myIdx": _pi(me),
         "radar": rp,
         "gridb": gb,
         "keys": keys,
-        "kp": [[str(s), str(c)] for s, c in key_players],
-        "lab": lab,
-        "col": col,
+        "lab": {k: str(v or "") for k, v in (labels or {}).items()},
+        "col": {k: str(v or "") for k, v in (colors or {}).items()},
     }
 
 
@@ -297,7 +270,7 @@ def _renderer():
     # registered on every run: the registry lives in the Streamlit
     # runtime (AppTest and server restarts start with an empty one), and
     # re-registering an identical definition is cheap and idempotent
-    return st.components.v2.component("aimaudit_roundrep", css=_CSS, js=_JS)
+    return st.components.v2.component("aimaudit_roundrep2", css=_CSS, js=_JS)
 
 
 def round_replay(
@@ -307,7 +280,7 @@ def round_replay(
     on_round: Callable[[int], None] | None = None,
 ) -> None:
     """
-    Render the round replay player (client-side playback, no reruns).
+    Render the 2D replay player (client-side playback, no reruns).
     A round-bar chip click calls ``on_round(n)`` - the ONE Streamlit
     trigger the component has (switching rounds needs a new payload).
     """

@@ -1,5 +1,5 @@
 """
-Duel strip: fast duel / round navigation for the Timeline page.
+Duel strip: fast duel / round navigation (the duel dialog).
 
     duel_strip(items, selected, *, key, on_select, round_label, labels)
 

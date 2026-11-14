@@ -80,10 +80,13 @@ def main() -> None:
         views.duels.render(ctx)
     if page == "map":
         views.map.render(ctx)
-    if page == "timeline":
-        views.timeline.render(ctx)
+    if page == "replay":
+        views.replay.render(ctx)
     if page == "guide":
         views.extras.guide(ctx)
+    # a Duels row click asks for the duel window: it is a modal over the page
+    if page == "duels" and st.session_state.pop("du_open", False):
+        views.replay.open_duel_dialog(ctx)
     views.extras.debug(ctx)
     _footer(ctx.t)
 

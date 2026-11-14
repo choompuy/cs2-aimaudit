@@ -461,8 +461,8 @@ def nav(ctx) -> None:
     # switched from code. A segmented control bound to session_state["page"]
     # renders only the active page: widget changes on one page stop
     # recomputing the others, and code can switch pages (a Duels row click
-    # opens that duel in the Timeline, a downloaded match opens analysis).
-    PAGES = ("matches", "overview", "shooting", "duels", "map", "timeline", "guide")
+    # opens that duel's chart window, a downloaded match opens analysis).
+    PAGES = ("matches", "overview", "shooting", "duels", "map", "replay", "guide")
     if st.session_state.get("page") not in PAGES:
         st.session_state["page"] = "overview"
     with _hdr:

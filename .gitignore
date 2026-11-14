@@ -39,3 +39,7 @@ tools/_payload_*/
 Thumbs.db
 .idea/
 .vscode/
+
+# optional JS test deps (tests/check_roundrep_js.py)
+tests/js/node_modules/
+tests/js/package-lock.json

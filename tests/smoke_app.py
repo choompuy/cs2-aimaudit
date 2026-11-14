@@ -179,7 +179,7 @@ def make_match(rounds, weapons=("ak47",)):
     team_num in the tick rows follows the MR12 halves (S1/S2: T in rounds
     1-12 and 25+, CT in 13-24), so demo.sides is populated and the side
     filter shows up in the UI. Tick rows are contiguous from t0-64 to
-    t0+16 so the timeline tab has real data to plot.
+    t0+16 so the duel chart has real data to plot.
     """
     fire_t, hurt_t, death_t = [], [], []
     for i, r in enumerate(rounds):
@@ -413,6 +413,18 @@ def goto(at, page):
     check(f"page {page} renders", not at.exception, err_of(at))
 
 
+def open_duel(at, i, name=None):
+    """A Duels row click: the duel window (st.dialog) opens over the page."""
+    goto(at, "duels")
+    act(
+        at,
+        name or f"duel window #{i}",
+        lambda: at.session_state.__setitem__("tl_duel", i)
+        or at.session_state.__setitem__("du_open", True)
+        or at.run(),
+    )
+
+
 def act(at, name, fn):
     """Apply one UI interaction, re-run, and demand a clean run."""
     try:
@@ -495,26 +507,27 @@ def scenario_one_round():
     )
     act(at, "language ru", lambda: at.selectbox(key="lang").select("ru").run())
     act(at, "thr slider 200", lambda: at.slider(key="thr").set_value(200).run())
-    goto(at, "timeline")
-    act(
-        at,
-        "timeline duel renders",
-        lambda: at.session_state.__setitem__("tl_duel", 0) or at.run(),
-    )
-    act(
-        at,
-        "timeline: round replay view",
-        lambda: at.session_state.__setitem__("tl_view", "replay") or at.run(),
+    open_duel(at, 0, "duel window renders")
+    check(
+        "duel window: the speed/aim/keys chart now lives in Duels (one plotly chart)",
+        len(at.get("plotly_chart")) == 1,
+        len(at.get("plotly_chart") or []),
     )
     check(
-        "replay: the old two-duellist plotly chart is gone",
+        "duel window: 'show in 2D replay' button",
+        widget(at, "button", "du_to_replay") is not None,
+    )
+    check("the row click flag is consumed", not ss_get(at, "du_open"), ss_get(at, "du_open"))
+    goto(at, "replay")
+    check(
+        "2D replay: the canvas component draws it, no plotly chart",
         not at.get("plotly_chart"),
         len(at.get("plotly_chart") or []),
     )
-    act(
-        at,
-        "timeline: back to charts",
-        lambda: at.session_state.__setitem__("tl_view", "charts") or at.run(),
+    check(
+        "2D replay: the filter panel is hidden (the replay is the whole round)",
+        widget(at, "segmented_control", "flt_preset") is None
+        and widget(at, "button", "flt_edit") is None,
     )
     # the payload behind the canvas: the whole round, every player, with
     # HP / weapon / keys - checked straight against the fake demo so the
@@ -523,15 +536,12 @@ def scenario_one_round():
         store.demo_path(store.get_demo(at.session_state["demo_id"]))
     )
     _m = core.load_demo(_demo_path)
-    _rr = core.round_replay_data(
-        _demo_path,
-        1,
-        S1,
-        key_sids=[S3],
-        fires=_m.fires,
-        deaths=_m.deaths,
-        hurts=_m.hurts,
+    check(
+        "replay: the demo has a window for round 1",
+        1 in _m.round_windows,
+        _m.round_windows,
     )
+    _rr = core.round_replay_data(_m, 1)
     check(
         "replay data: every player of the round + hp/weapon/keys parsed",
         set(_rr["frames"]) == set(IDS)
@@ -547,74 +557,49 @@ def scenario_one_round():
     )
     from ui.roundrep import round_payload as _rp
 
+    _all_duels = core.round_duels(
+        core.build_duels(_m, 1.0), _m.round_windows[1], _m.tickrate
+    )
     _pl = _rp(
         _rr,
-        me=S1,
         names=NAMES,
         side_of=lambda s: _m.side_at(1, s),
         radar=None,
-        duels=[
-            {
-                "a": 950,
-                "b": 1100,
-                "tick": 1010,
-                "result": "kill",
-                "opp": "Charlie",
-                "opp_sid": S3,
-                "weapon": "ak47",
-                "hs": True,
-                "dur": 0.16,
-            }
-        ],
+        duels=_all_duels,
         rounds=[{"n": 1, "win": "T"}],
         sel=0,
-        key_players=[(S1, NAMES[S1]), (S3, NAMES[S3])],
     )
-    _p0 = _pl["players"][0]
-    _i_at = int(_pl["at"]) - _pl["t0"]  # the replay starts at the duel
+    _names_sorted = [p["name"] for p in _pl["players"]]
+    _p0 = next(p for p in _pl["players"] if p["sid"] == S1)
+    _i_at = int(_pl["at"]) - _pl["t0"]
     check(
-        "replay payload: roles, hp, weapon change, key panel",
-        [p["role"] for p in sorted(_pl["players"], key=lambda p: p["sid"])]
-        == ["me", "tm", "en", "en"]
+        "replay payload: sorted by nickname, hp, weapon change, held keys for everyone",
+        _names_sorted == sorted(_names_sorted, key=str.casefold)
         and _p0["hp"][0] == 100
         and _p0["w"][0][1] == "ak47"
-        # before the first parsed tick the keys are 0 (not pressed)
-        and _p0["keys"]["FORWARD"][_i_at] == 1,
-        ([p["role"] for p in _pl["players"]], _pl["keys"]),
+        and all("kb" in p for p in _pl["players"] if p["sid"] == S1),
+        (_names_sorted, _pl["keys"]),
     )
     check(
-        "replay payload: duel card + locked segment + rounds bar",
-        _pl["duels"][0]["a"] == 950
-        and _pl["duels"][0]["b"] == 1100
-        and _pl["duels"][0]["oi"] >= 0
-        and _pl["duels"][0]["opp"] == "Charlie"
+        "replay payload: every duel of the round as a card + locked segment + rounds bar",
+        len(_pl["duels"]) == len(_all_duels) >= 1
+        and _pl["duels"][0]["kn"] == NAMES[S1]
+        and _pl["duels"][0]["vn"] == NAMES[S3]
+        and _pl["duels"][0]["ki"] >= 0
         and _pl["rounds"] == [[1, "T"]]
         and _pl["sel"] == 0
-        and _pl["at"] == 950,
+        and _pl["at"] == _pl["duels"][0]["a"],
         (_pl["duels"], _pl["rounds"], _pl["sel"], _pl["at"]),
     )
 
 
 def scenario_round_replay():
-    """The replay's rounds bar: switching rounds, reset on duel change."""
+    """The 2D replay: rounds bar, the hand-over from the duel window."""
+    print("== 2D replay (rounds bar, duel hand-over) ==")
     at = open_demo(make_match([1, 2]), "rr_switch.dem")
     check("runs without exception", not at.exception, err_of(at))
-    goto(at, "timeline")
-    act(
-        at,
-        "timeline duel renders",
-        lambda: at.session_state.__setitem__("tl_duel", 0) or at.run(),
-    )
-    act(
-        at,
-        "timeline: round replay view",
-        lambda: at.session_state.__setitem__("tl_view", "replay") or at.run(),
-    )
-    check(
-        "replay: the old two-duellist plotly chart is gone",
-        not at.get("plotly_chart"),
-        len(at.get("plotly_chart") or []),
-    )
+    goto(at, "replay")
+    check("starts at the first round", ss_get(at, "rr_round") == 1, ss_get(at, "rr_round"))
     # a round-bar chip click lands as rr_round in the session (the
     # component trigger calls the same setter); the replay follows it
     act(
@@ -622,23 +607,33 @@ def scenario_round_replay():
         "rounds bar switches the replay to round 2",
         lambda: at.session_state.__setitem__("rr_round", 2) or at.run(),
     )
-    # picking another duel in the strip returns the replay to that duel's
-    # own round: the stale rr_round must be dropped
     act(
         at,
-        "switch to the round-2 duel",
-        lambda: at.session_state.__setitem__("tl_duel", 1) or at.run(),
+        "a round that does not exist falls back to the first one",
+        lambda: at.session_state.__setitem__("rr_round", 77) or at.run(),
     )
+    check("fell back to round 1", ss_get(at, "rr_round") == 1, ss_get(at, "rr_round"))
+    # an old link / saved state that still says "timeline" lands on Duels
+    # (a fresh session: AppTest keeps the live widget value mid-session)
+    old_link = fresh_at(demo_id=at.session_state["demo_id"], page="timeline")
+    check("old 'timeline' link renders", not old_link.exception, err_of(old_link))
+    check("old 'timeline' page is migrated to duels", ss_get(old_link, "page") == "duels", ss_get(old_link, "page"))
+    # the duel window's button hands the duel over: page, round, selection
+    open_duel(at, 1, "open the round-2 duel")
+    act(at, "show it in the 2D replay", lambda: at.button(key="du_to_replay").click().run())
+    check("switched to the replay page", ss_get(at, "page") == "replay", ss_get(at, "page"))
+    check("on the duel's own round", ss_get(at, "rr_round") == 2, ss_get(at, "rr_round"))
+    sel = ss_get(at, "rr_sel")
     check(
-        "rr_round is dropped when the duel changes",
-        ss_get(at, "rr_round") is None,
-        ss_get(at, "rr_round"),
+        "the duel is handed over (round, tick, victim)",
+        sel is not None and sel[0] == 2 and sel[2] == S3,
+        sel,
     )
     act(
         at,
-        "rounds bar switches again, then back to charts",
+        "rounds bar switch drops the hand-over",
         lambda: at.session_state.__setitem__("rr_round", 1)
-        or at.session_state.__setitem__("tl_view", "charts")
+        or at.session_state.__delitem__("rr_sel")
         or at.run(),
     )
 
@@ -707,11 +702,11 @@ def scenario_player_stepper():
 
 
 def scenario_duel_strip():
-    """Fast duel/round navigation: the strip owns the timeline selection."""
-    print("== duel strip (fast duel/round navigation) ==")
+    """Fast duel/round navigation: the strip (in the duel window) owns the selection."""
+    print("== duel window strip (fast duel/round navigation) ==")
     at = open_demo(make_match([1, 2, 13]), "strip.dem")
     check("runs without exception", not at.exception, err_of(at))
-    goto(at, "timeline")
+    open_duel(at, 0, "open the duel window")
     # the old long "pick a duel" selectbox and the round selectbox are
     # gone: the strip chips, its hotkeys and the Duels row click move the
     # selection now, and they all write the plain tl_duel session key
@@ -728,13 +723,10 @@ def scenario_duel_strip():
         lambda: at.session_state.__setitem__("tl_duel", 1) or at.run(),
     )
     check("moved to duel 1", ss_get(at, "tl_duel") == 1, ss_get(at, "tl_duel"))
-    act(
-        at,
-        "stale pick beyond the duel list clamps",
-        lambda: at.session_state.__setitem__("tl_duel", 99) or at.run(),
-    )
+    open_duel(at, 99, "stale pick beyond the duel list clamps")
     check("clamped back to duel 0", ss_get(at, "tl_duel") == 0, ss_get(at, "tl_duel"))
     act(at, "language ru", lambda: at.selectbox(key="lang").select("ru").run())
+    open_duel(at, 0, "ru: reopen the duel window")
     check(
         "ru: hotkey hint rendered",
         any("Shift+←" in str(c.value) for c in at.caption),
@@ -831,12 +823,7 @@ def scenario_long25():
         "side filter CT (round 13 only)",
         lambda: ctl(at, "segmented_control", "flt_side").select("CT").run(),
     )
-    goto(at, "timeline")
-    act(
-        at,
-        "timeline duel 1 of 3",
-        lambda: at.session_state.__setitem__("tl_duel", 1) or at.run(),
-    )
+    open_duel(at, 1, "duel window 1 of 3")
 
 
 def scenario_filter_panel():
@@ -1259,14 +1246,9 @@ def scenario_matrix():
                         f"{tk} off",
                         lambda tk=tk: at.toggle(key=tk).set_value(False).run(),
                     )
-            goto(at, "timeline")
             for i in range(3):
-                act(
-                    at,
-                    f"timeline duel #{i}",
-                    lambda i=i: at.session_state.__setitem__("tl_duel", i)
-                    or at.run(),
-                )
+                open_duel(at, i, f"duel window #{i}")
+            goto(at, "replay")
 
 
 def scenario_tables():
@@ -1839,8 +1821,11 @@ def scenario_matches():
                 progress(24, 24)
             return sources.import_local(rec, src)
 
+        _orig_replays = sources.inbox.replays_records
         sources.list_matches = _fake_list
         sources.fetch_demo = _fake_fetch
+        # no real CS2 replays on the test machine may leak into the cache
+        sources.inbox.replays_records = lambda *a, **k: []
         try:
             act(at, "refresh loads the list", lambda: at.button(key="mt_refresh").click().run())
             md = "\n".join(m.value for m in at.markdown)
@@ -1907,6 +1892,7 @@ def scenario_matches():
         finally:
             sources.list_matches = _orig_list
             sources.fetch_demo = _orig_fetch
+            sources.inbox.replays_records = _orig_replays
 
 
 def main():

@@ -70,29 +70,14 @@ def get_replay(
 
 
 @st.cache_data(show_spinner=False)
-def get_round_replay(
-    path: str,
-    mtime: float,
-    round_no: int,
-    me: str,
-    opps: tuple[str, ...],
-    tickrate: int,
-):
-    """Tick data of the whole round for the round replay (ui/roundrep.py).
+def get_round_replay(path: str, mtime: float, round_no: int):
+    """Tick data of the WHOLE round for the 2D replay (ui/roundrep.py)."""
+    return core.round_replay_data(get_demo(path, mtime), round_no)
 
-    ``opps`` are ALL duel opponents of the round: their held keys get a
-    panel while their duel segment is selected."""
-    demo = get_demo(path, mtime)
-    return core.round_replay_data(
-        path,
-        round_no,
-        me,
-        key_sids=[s for s in (me, *opps) if s],
-        tickrate=tickrate,
-        fires=demo.fires,
-        deaths=demo.deaths,
-        hurts=demo.hurts,
-    )
+
+@st.cache_data(show_spinner=False)
+def get_round_winners(path: str, mtime: float) -> dict:
+    return core.round_winners(get_demo(path, mtime))
 
 
 # The heavy frames behind st.cache_data, keyed on the demo file and

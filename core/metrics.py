@@ -33,6 +33,7 @@ from core.model import (
     head_ang,
     is_gun,
     norm_weapon,
+    round_of_tick,
     weapon_class,
 )
 
@@ -374,6 +375,12 @@ def build_duels(
         k, v, t = r.attacker_steamid, r.user_steamid, int(r.tick)
         if teams.get(k) == teams.get(v):
             continue
+        # the round follows the demo's round windows (a post-round kill
+        # already counted in the next round still belongs to this one),
+        # total_rounds_played is the fallback when there are no windows
+        rd = round_of_tick(getattr(demo, "round_windows", None) or {}, t)
+        if rd is None:
+            rd = _safe_int(getattr(r, "total_rounds_played", 0)) + 1
 
         def in_win(s):
             a = fires_by.get(s, np.array([], dtype=int))
@@ -427,16 +434,12 @@ def build_duels(
         )
         out.append(
             {
-                "round": _safe_int(getattr(r, "total_rounds_played", 0)) + 1,
+                "round": rd,
                 "tick": t,
                 "killer": k,
                 "victim": v,
-                "killer_side": demo.side_at(
-                    _safe_int(getattr(r, "total_rounds_played", 0)) + 1, k
-                ),
-                "victim_side": demo.side_at(
-                    _safe_int(getattr(r, "total_rounds_played", 0)) + 1, v
-                ),
+                "killer_side": demo.side_at(rd, k),
+                "victim_side": demo.side_at(rd, v),
                 "weapon": norm_weapon(r.weapon),
                 "weapon_class": weapon_class(r.weapon),
                 "headshot": bool(getattr(r, "headshot", False)),

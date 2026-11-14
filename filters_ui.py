@@ -116,8 +116,11 @@ def render(ctx) -> None:
     # page is already known from session_state (the nav widget only
     # re-binds it on the next run)
     page_now = st.session_state.get("page") or "overview"
-    show_result = page_now in ("duels", "timeline")
-    show_panel = page_now != "guide"
+    if page_now == "timeline":  # the old Timeline page: its chart lives in Duels now
+        page_now = st.session_state["page"] = "duels"
+    show_result = page_now == "duels"
+    # the replay shows the whole round, so none of the analysis filters apply
+    show_panel = page_now not in ("guide", "replay")
     # distance bands reuse the stop-quality thresholds: close is inside
     # SAFE_DIST, long is beyond STRICT_DIST
     DIST_KEYS = ("all", "close", "mid", "long")

@@ -1,0 +1,10 @@
+{
+  "name": "cs2-aimaudit-js-tests",
+  "private": true,
+  "type": "module",
+  "description": "Optional: headless check of ui/roundrep.js (run `npm install` here once, then `python tests/check_roundrep_js.py`)",
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.1.1",
+    "jsdom": "^31.0.1"
+  }
+}

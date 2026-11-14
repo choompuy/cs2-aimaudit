@@ -37,6 +37,7 @@ from core.model import (
     _round_col,
     _safe_int,
     _speed_from_positions,
+    build_round_windows,
     hg_key,
     is_gun,
     norm_weapon,
@@ -846,6 +847,59 @@ def load_demo(path: str, progress=None) -> Demo:
                     .rename(columns={"kills_total": "kills", "deaths_total": "deaths"})
                     .reset_index(drop=True)
                 )
+    # round windows for the 2D replay: live freeze ends bound the rounds,
+    # round_officially_ended ends them (the win panel is part of the round),
+    # the events' own round numbers name them. round_officially_ended is a
+    # separate parse: an old parser without the event must not take the
+    # whole events parse down with it.
+    try:
+        _roe = dict(p.parse_events(["round_officially_ended"]))
+        _rod = _roe.get("round_officially_ended", pd.DataFrame())
+    except Exception:  # noqa: BLE001 - old parser / no such event
+        _rod = pd.DataFrame()
+    fe_live = sorted(
+        t for t, w in fe_rows if not w and (live_start is None or t >= live_start)
+    )
+    off_ticks: list[int] = []
+    if len(_rod) and "tick" in _rod.columns:
+        _omask = pd.Series(True, index=_rod.index)
+        if "is_warmup_period" in _rod.columns:
+            _omask &= ~_rod["is_warmup_period"].fillna(False).astype(bool)
+        if live_start is not None:
+            _omask &= (
+                pd.to_numeric(_rod["tick"], errors="coerce") >= live_start
+            ).fillna(False)
+        off_ticks = sorted(
+            int(x)
+            for x in pd.to_numeric(_rod.loc[_omask, "tick"], errors="coerce").dropna()
+        )
+    _win_parts = []
+    for _df in (deaths, fires, hurts):
+        if len(_df) and "tick" in _df.columns:
+            _win_parts.append(
+                pd.DataFrame({"tick": _df["tick"], "round": _round_col(_df) + 1})
+            )
+    _win_ev = (
+        pd.concat(_win_parts, ignore_index=True)
+        if _win_parts
+        else pd.DataFrame(columns=["tick", "round"])
+    )
+    if not fe_live:
+        # no round_freeze_end at all: synthesize the boundaries BETWEEN the
+        # rounds the events name - a boundary inside one round's events
+        # would split it into two windows claiming the same number
+        _named_ev = _win_ev[_win_ev["round"] >= 1]
+        _bounds: list[int] = []
+        _prev_last: int | None = None
+        for _rn, _g in _named_ev.groupby("round"):
+            _lo, _hi = int(_g["tick"].min()), int(_g["tick"].max())
+            if _prev_last is None:
+                _bounds.append(_lo - int(3.0 * tickrate))
+            else:
+                _bounds.append(min((_prev_last + _lo) // 2, _lo - 1))
+            _prev_last = _hi
+        fe_live = sorted(_bounds)
+    round_windows = build_round_windows(fe_live, off_ticks, _win_ev, tickrate)
     return Demo(
         path,
         header,
@@ -859,6 +913,7 @@ def load_demo(path: str, progress=None) -> Demo:
         sides,
         totals=totals,
         mouse=mouse,
+        round_windows=round_windows,
     )
 
 
@@ -869,8 +924,16 @@ def _parse_version() -> str:
     parsing code changed (no version number to forget to bump).
     """
     try:
-        with open(__file__, "rb") as fh:
-            code = hashlib.sha1(fh.read()).hexdigest()[:8]
+        # every core module shapes what load_demo produces (model.py holds
+        # Demo and the round-window builder), so the hash covers the package
+        h = hashlib.sha1()
+        import glob as _glob
+
+        for _f in sorted(_glob.glob(os.path.join(os.path.dirname(__file__), "*.py"))):
+            with open(_f, "rb") as fh:
+                h.update(os.path.basename(_f).encode())
+                h.update(fh.read())
+        code = h.hexdigest()[:8]
     except OSError:
         code = "nocode"
     try:

@@ -397,87 +397,42 @@ def _live_freeze_ends(parser) -> list[int]:
 
 
 def round_replay_data(
-    path: str,
+    demo: Demo,
     round_no: int,
-    me: str,
     *,
-    key_sids: Sequence[str] = (),
-    tickrate: int | None = None,
-    fires: pd.DataFrame | None = None,
-    deaths: pd.DataFrame | None = None,
-    hurts: pd.DataFrame | None = None,
     max_samples: int = 3200,
     max_s: float = 180.0,
 ):
     """
-    Tick-level data of the WHOLE round for the round replay: every player
+    Tick-level data of the WHOLE round for the 2D replay: every player
     of both teams, their positions / view / HP / weapon / keys, plus the
-    round's shots, kills and hits around the selected player.
+    round's shots, kills and hits.
 
-    Unlike replay_data (the old two-duellist replay) this reads everyone,
-    so trades by teammates and "where was I shooting" are visible. The
-    round boundaries come from the round's own events (deaths/fires with
-    that round number) bracketed by live round_freeze_end ticks; without
-    freeze ends the window is the events +/- a margin, without events at
-    all the freeze-end index of the round is used. Frames are sampled on
-    a uniform grid (<= max_samples points, event ticks snap to the grid
-    neighbourhood, the UI interpolates) and ffilled per player like the
-    timeline. Returns a dict for ui.roundrep.round_payload:
+    The span is the demo's own round window (demo.round_windows, built by
+    build_round_windows); a round that cannot be placed raises
+    ValueError("no_round_data"). Frames are sampled on a uniform grid
+    (<= max_samples points, the UI interpolates) and ffilled per player
+    like the timeline. Returns a dict for ui.roundrep.round_payload:
 
     {"t0", "t1", "step", "tickrate", "round", "frames": {sid: df},
-     "keys": [available key names], "shots": [(tick, sid, weapon)],  # from fires
+     "keys": [available key names], "shots": [(tick, sid, weapon)],
      "kills": [(tick, attacker, victim, weapon, hs)],
      "hits": [(tick, attacker, victim)]}
     (hits cover EVERY pair of the round - the replay shows the whole
-    round, teammate trades included). Raises ValueError("no_round_data")
-    when neither events nor freeze ends can place the round.
+    round, teammate trades included).
     """
-    parser = DemoParser(path)
-    if tickrate is None:
-        try:
-            tickrate = tickrate_from_header(parser.parse_header())
-        except Exception:  # noqa: BLE001 - header is optional here
-            tickrate = TICKRATE
+    windows = getattr(demo, "round_windows", None) or {}
     round_no = int(round_no)
-
-    # ---- round boundaries -------------------------------------------------
-    ev_ticks: list[int] = []
-    for df in (deaths, fires):
-        if df is None or not len(df):
-            continue
-        r = _round_col(df)
-        d = df[(r + 1) == round_no]
-        if len(d) and "tick" in d.columns:
-            ev_ticks += [
-                int(x) for x in pd.to_numeric(d["tick"], errors="coerce").dropna()
-            ]
-    fe = _live_freeze_ends(parser)
-
-    def _ev_span() -> tuple[int, int] | None:
-        if not ev_ticks:
-            return None
-        lo, hi = min(ev_ticks), max(ev_ticks)
-        lo = max(lo - int(3.0 * tickrate), 0)
-        hi = hi + int(5.0 * tickrate)
-        return lo, hi
-
-    span = _ev_span()
-    if span is not None:
-        lo, hi = span
-        prev_fe = [x for x in fe if x <= lo + int(3.0 * tickrate)]
-        if prev_fe:
-            lo = min(prev_fe[-1], lo)  # round starts at its freeze end
-        nxt_fe = [x for x in fe if x > lo]
-        if nxt_fe:
-            hi = min(hi, nxt_fe[0] - 1)
-    elif fe and 1 <= round_no <= len(fe):
-        lo = fe[round_no - 1]
-        hi = (fe[round_no] - 1) if round_no < len(fe) else lo + int(max_s * tickrate)
-    else:
+    if round_no not in windows:
         raise ValueError("no_round_data")
+    lo, hi = int(windows[round_no][0]), int(windows[round_no][1])
+    tickrate = int(getattr(demo, "tickrate", None) or TICKRATE)
     hi = min(hi, lo + int(max_s * tickrate))
     if hi <= lo:
         raise ValueError("no_round_data")
+
+    parser = DemoParser(demo.path)
+    fires, deaths, hurts = demo.fires, demo.deaths, demo.hurts
 
     # ---- uniform grid (<= max_samples points, the UI interpolates) -------
     step = max(1, -(-(hi - lo + 1) // max_samples))
@@ -577,3 +532,46 @@ def round_replay_data(
         "kills": out_kills,
         "hits": out_hits,
     }
+
+
+def round_duels(df, window, tickrate: int = TICKRATE) -> list[dict]:
+    """
+    Every duel of EVERY player inside the replay ``window`` (t0, t1), as
+    cards for ui.roundrep: {"a", "b", "tick", "killer", "victim",
+    "weapon", "hs", "dur"}. The segment runs from the FIRST shot of
+    either duelist (-0.75 s pre-roll) to 1.5 s after the kill, clamped
+    into the window - the same window the replay plays decides the round,
+    so a duel can never show up under another round. Input is a
+    build_duels frame; empty/None input -> [].
+    """
+    if df is None or not len(df) or "tick" not in df.columns:
+        return []
+    t0, t1 = int(window[0]), int(window[1])
+    tr = int(tickrate or TICKRATE)
+    pre, post = int(0.75 * tr), int(1.5 * tr)
+    out = []
+    for r in df[df["tick"].between(t0, t1)].itertuples():
+        firsts = [
+            x
+            for x in (
+                getattr(r, "killer_first_tick", None),
+                getattr(r, "victim_first_tick", None),
+            )
+            if pd.notna(x)
+        ]
+        tk = int(r.tick)
+        start = int(min(firsts)) if firsts else tk - tr
+        out.append(
+            {
+                "a": max(t0, start - pre),
+                "b": min(t1, tk + post),
+                "tick": tk,
+                "killer": str(r.killer),
+                "victim": str(r.victim),
+                "weapon": str(getattr(r, "weapon", "") or ""),
+                "hs": bool(getattr(r, "headshot", False)),
+                "dur": getattr(r, "duration_s", None),
+            }
+        )
+    out.sort(key=lambda z: z["tick"])
+    return out

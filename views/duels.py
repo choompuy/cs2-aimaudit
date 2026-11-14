@@ -65,10 +65,12 @@ def render(ctx) -> None:
         }
 
         def _duel_click_row(i):
-            """Grid row click -> open that duel in the Timeline."""
+            """Grid row click -> open that duel's chart window (see
+            views/replay.open_duel_dialog; it is called at the bottom of
+            the run)."""
             if 0 <= i < len(my_duels):
                 st.session_state["tl_duel"] = int(i)
-                st.session_state["page"] = "timeline"
+                st.session_state["du_open"] = True
 
         schema.table(
             "duels",
