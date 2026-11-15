@@ -566,7 +566,8 @@ def scenario_one_round():
         side_of=lambda s: _m.side_at(1, s),
         radar=None,
         duels=_all_duels,
-        rounds=[{"n": 1, "win": "T"}],
+        rounds=[{"n": 1, "win": "T", "why": "bomb"}],
+        thr=34.0,
         sel=0,
     )
     _names_sorted = [p["name"] for p in _pl["players"]]
@@ -586,9 +587,11 @@ def scenario_one_round():
         and _pl["duels"][0]["kn"] == NAMES[S1]
         and _pl["duels"][0]["vn"] == NAMES[S3]
         and _pl["duels"][0]["ki"] >= 0
-        and _pl["rounds"] == [[1, "T"]]
+        and _pl["rounds"] == [[1, "T", "bomb"]]
         and _pl["sel"] == 0
-        and _pl["at"] == _pl["duels"][0]["a"],
+        and _pl["at"] == _pl["duels"][0]["a"]
+        and _pl["thr"] == 34.0
+        and "tel" in _pl["duels"][0],
         (_pl["duels"], _pl["rounds"], _pl["sel"], _pl["at"]),
     )
 

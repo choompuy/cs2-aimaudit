@@ -615,23 +615,76 @@ def _round_side_keep(demo: Demo, f: "Filters | None"):
     return keep
 
 
+def round_outcomes(demo: Demo) -> dict[int, dict]:
+    """
+    How every round of the replay ended: {"winner": 'CT'/'T'/'', "reason":
+    one of core.ROUND_REASONS or '', "end": tick | None, "inferred": bool}.
+
+    The demo's own ``round_end`` event is the source whenever it is there
+    (Demo.round_info). Many demos do not carry it, so a round without one is
+    INFERRED from what the demo does tell, in this order:
+
+    1. the bomb exploded -> T won by the bomb (even if every T died after the
+       plant: the explosion decides the round);
+    2. the bomb was defused -> CT won by the defuse;
+    3. a side lost every player -> the other side won by elimination;
+    4. the demo reports bomb events but this round had no plant and nobody
+       was eliminated -> CT won on time.
+
+    Anything else stays blank (winner '') and the UI shows no result for it.
+    ``inferred`` marks 1-4 so the UI can say it is a reading of the events.
+    """
+    guessed = _guess_round_winners(demo)
+    out: dict[int, dict] = {}
+    for n in sorted(demo.round_windows or {}):
+        info = (demo.round_info or {}).get(n) or {}
+        if info.get("winner") in ("CT", "T"):
+            out[int(n)] = {
+                "winner": info["winner"],
+                "reason": info.get("reason") or "",
+                "end": info.get("end"),
+                "inferred": False,
+            }
+            continue
+        bombs = info.get("bomb") or []
+        kinds = {b[1]: b[0] for b in bombs}
+        if "boom" in kinds:
+            res = ("T", "bomb", kinds["boom"])
+        elif "defuse" in kinds:
+            res = ("CT", "defuse", kinds["defuse"])
+        elif n in guessed:
+            res = (guessed[n], "elim", None)
+        elif info.get("bomb_known") and "plant" not in kinds:
+            res = ("CT", "time", None)
+        else:
+            res = ("", "", None)
+        out[int(n)] = {
+            "winner": res[0],
+            "reason": res[1],
+            "end": res[2],
+            "inferred": bool(res[0]),
+        }
+    return out
+
+
 def round_winners(demo: Demo) -> dict[int, str]:
     """
-    Round winners ('CT'/'T') for the replay's round bar, inferred from
-    eliminations: CS2 demos expose no round_end/winner event, so the
-    only signal is "a side lost every player in
-    that round" - then the other side won it. Every death counts towards
-    the VICTIM's side loss count (kills, teamkills, suicides/world, the
-    bomb), because the team did lose that player either way.
+    Round winners ('CT'/'T') for the replay's round bar (see round_outcomes:
+    the demo's own round_end first, then the bomb events and the kills).
+    A round whose result cannot be told stays absent from the dict.
+    """
+    return {n: o["winner"] for n, o in round_outcomes(demo).items() if o["winner"]}
 
-    Rounds that ended with both sides fielding survivors (bomb/timeout/
-    save wins) are NOT guessed: they stay absent from the dict and the
-    UI renders them winner-neutral. Halftime swaps are per round
-    (demo.sides), a missing side for a round skips that round.
 
-    Known wrong edge case, accepted: T eliminated post-plant and the
-    bomb still explodes - the dead-T side shows no survivors so CT is
-    inferred. Without a winner event this cannot be told apart.
+def _guess_round_winners(demo: Demo) -> dict[int, str]:
+    """
+    The elimination-based guess behind round_outcomes: "a side lost every
+    player in that round" - then the other side won it. Every death counts
+    towards the VICTIM's side loss count (kills, teamkills, suicides/world,
+    the bomb), because the team did lose that player either way. Halftime
+    swaps are per round (demo.sides), a missing side for a round skips it.
+    Known wrong edge case, accepted: T eliminated post-plant while the bomb
+    still explodes - round_outcomes decides that one by the explosion first.
     """
     d = demo.deaths
     if d is None or not len(d) or "user_steamid" not in d.columns:
@@ -654,7 +707,13 @@ def round_winners(demo: Demo) -> dict[int, str]:
                 fielded[s] += 1
         if fielded["T"] < 1 or fielded["CT"] < 1:
             continue  # sides unknown for this round -> nothing to compare
-        rows = d[(dr == r - 1) & ~warm]
+        win = (demo.round_windows or {}).get(r)
+        if win is not None:
+            # the round's own tick window: a death after the round ended
+            # carries the NEXT round's number but belongs to this one
+            rows = d[d["tick"].between(win[0], win[1]) & ~warm]
+        else:
+            rows = d[(dr == r - 1) & ~warm]
         if not len(rows):
             continue  # nobody died at all: timeout/quick save, not guessable
         lost = {"T": 0, "CT": 0}

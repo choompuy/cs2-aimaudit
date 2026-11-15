@@ -36,6 +36,11 @@ export default function (component) {
   const lab = d.lab || {};
   const C = d.col || {};
   const P = d.players || [];
+  const THR = typeof d.thr === "number" ? d.thr : null;
+  // glyphs of how a round ended / what the bomb did (icons never stand alone:
+  // every use also carries a title / text label)
+  const WHY_GLYPH = { bomb: "\u{1F4A5}", defuse: "\u2702", elim: "\u2620", time: "\u23F1", surrender: "\u2691" };
+  const BOMB_GLYPH = { plant: "\u{1F4A3}", defuse: "\u2702", boom: "\u{1F4A5}" };
 
   let host = root.querySelector(".rr-host");
   if (!host) { host = el("div", "rr-host"); root.appendChild(host); }
@@ -43,7 +48,7 @@ export default function (component) {
   const box = el("div", "rr");
   host.appendChild(box);
   // team colours + round-chip backgrounds as custom properties for the DOM
-  for (const [ck, v] of [["ct", C.ct], ["t", C.t], ["ctb", C.ctb], ["tb", C.ttb], ["acc", C.acc]]) {
+  for (const [ck, v] of [["ct", C.ct], ["t", C.t], ["ctb", C.ctb], ["tb", C.ttb], ["acc", C.acc], ["warn", C.warn]]) {
     if (v) box.style.setProperty("--rr-" + ck, v);
   }
   const FF = (root.isConnected && window.getComputedStyle
@@ -55,6 +60,7 @@ export default function (component) {
   const right = el("div", "rr-right");
   grid.append(left, main, right);
   box.appendChild(grid);
+  const outEl = el("div", "rr-out");
   const wrap = el("div", "rr-wrap");
   const cvs = document.createElement("canvas");
   const feed = el("div", "rr-feed");
@@ -62,12 +68,12 @@ export default function (component) {
   const ctl = el("div", "rr-ctl");
   const tl = el("div", "rr-tl");
   const roundsEl = el("div", "rr-rounds");
-  main.append(wrap, ctl, tl, roundsEl);
-  const keyWrap = el("div", "rr-keys hid");
-  box.appendChild(keyWrap);
+  main.append(outEl, wrap, ctl, tl, roundsEl);
+  const duelWrap = el("div", "rr-duelp hid");
+  box.appendChild(duelWrap);
 
   // ---------- state ---------------------------------------------------------
-  const SPEEDS = [2, 1, 0.5, 0.25];
+  const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4];
   let playing = false;
   let speed = SPEEDS.indexOf(S.speed) >= 0 ? S.speed : 1;
   let sel = (typeof d.sel === "number") ? d.sel : -1;
@@ -81,8 +87,45 @@ export default function (component) {
   const sideCol = (side) => (side === "CT" ? C.ct : side === "T" ? C.t : C.text2);
   const sideCls = (side) => (side === "CT" ? "ct" : side === "T" ? "t" : "");
   const visible = (p) => !!p && !S.hidden[p.sid];
+  const spdTxt = (s) => s + "x";
 
-  // ---------- controls --------------------------------------------------------
+  // ---------- round result: who won and HOW -----------------------------------------------
+  function buildOutcome() {
+    outEl.replaceChildren();
+    const o = d.out || {};
+    outEl.className = "rr-out" + (o.win === "CT" ? " wct" : o.win === "T" ? " wt" : " unk");
+    const head = el("div", "rr-out1");
+    head.appendChild(el("span", "rr-badge", (lab.round || "R") + " " + d.round));
+    if (o.win) {
+      head.appendChild(el("b", "rr-owin", o.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")));
+      if (o.why) {
+        const w = el("span", "rr-why");
+        w.append(el("i", "rr-wg", WHY_GLYPH[o.why] || "\u00B7"), " " + (lab["why_" + o.why] || o.why));
+        head.appendChild(w);
+      }
+    } else {
+      head.appendChild(el("span", "rr-owin dim", lab.out_unknown || ""));
+    }
+    if (o.win && o.inferred) {
+      const inf = el("span", "rr-inf", lab.out_inferred || "");
+      inf.title = lab.out_inferred || "";
+      head.appendChild(inf);
+    }
+    if (o.end != null) head.appendChild(el("span", "rr-outt", "\u23F1 " + fmtT((o.end - d.t0) / d.tr)));
+    outEl.appendChild(head);
+    // the bomb story of the round (plant / defuse / explosion with the time and the player)
+    const parts = [];
+    for (const b of d.bomb || []) {
+      const key = b[1];
+      if (!BOMB_GLYPH[key]) continue;
+      // the explosion's player is only the planter: not worth repeating
+      const who = key !== "boom" && b[2] >= 0 && P[b[2]] ? P[b[2]].name : "";
+      parts.push(BOMB_GLYPH[key] + " " + (lab["b_" + key] || key) + " " + fmtT((b[0] - d.t0) / d.tr) + (who ? " \u00B7 " + who : ""));
+    }
+    if (parts.length) outEl.appendChild(el("div", "rr-out2", parts.join("   ")));
+  }
+
+  // ---------- controls --------------------------------------------------------------------
   const btn = (cls, ch, title, fn) => {
     const b = el("button", "rr-sbtn " + (cls || ""), ch);
     b.type = "button";
@@ -131,13 +174,62 @@ export default function (component) {
   const dPrev = btn("", "\u2039", lab.duel_prev || "previous duel", () => jumpDuel(-1));
   const dNext = btn("", "\u203A", lab.duel_next || "next duel", () => jumpDuel(1));
   const exitBtn = btn("exit", "\u2715", lab.exit || "exit duel", () => exitDuel());
-  const spdBtns = SPEEDS.map((s) => {
-    const b = btn("spd", s + "x", (lab.speed || "speed") + " " + s + "x", () => {
-      speed = s; S.speed = s; sync();
-    });
-    b.dataset.spd = String(s);
+
+  // speed: ONE button showing the current speed; a menu with 0.1x..4x opens on
+  // hover (mouse) or on click / tap / Enter (touch, keyboard), Escape closes it
+  const spdWrap = el("div", "rr-spd");
+  const spdBtn = el("button", "rr-sbtn spd");
+  spdBtn.type = "button";
+  spdBtn.setAttribute("aria-haspopup", "menu");
+  spdBtn.setAttribute("aria-expanded", "false");
+  const spdMenu = el("div", "rr-spdmenu");
+  spdMenu.setAttribute("role", "menu");
+  spdMenu.hidden = true;
+  const spdItems = SPEEDS.map((s) => {
+    const b = el("button", "rr-spdi", spdTxt(s));
+    b.type = "button";
+    b.setAttribute("role", "menuitemradio");
+    b.addEventListener("click", () => { setSpeed(s); openMenu(false); spdBtn.focus(); });
+    spdMenu.appendChild(b);
     return b;
   });
+  spdWrap.append(spdBtn, spdMenu);
+  let menuOpen = false, menuTimer = null;
+  function openMenu(on) {
+    if (menuTimer) { clearTimeout(menuTimer); menuTimer = null; }
+    menuOpen = on;
+    spdMenu.hidden = !on;
+    spdBtn.setAttribute("aria-expanded", on ? "true" : "false");
+  }
+  function setSpeed(s) {
+    speed = s; S.speed = s;
+    sync();
+  }
+  const stepSpeed = (dir) => {
+    const i = SPEEDS.indexOf(speed);
+    const j = Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? SPEEDS.indexOf(1) : i) + dir));
+    setSpeed(SPEEDS[j]);
+  };
+  spdBtn.addEventListener("click", () => openMenu(!menuOpen));
+  spdWrap.addEventListener("mouseenter", () => openMenu(true));
+  spdWrap.addEventListener("mouseleave", () => {
+    if (menuTimer) clearTimeout(menuTimer);
+    menuTimer = setTimeout(() => openMenu(false), 250);
+  });
+  spdWrap.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { openMenu(false); spdBtn.focus(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      openMenu(true);
+      const k = spdItems.indexOf(document.activeElement);
+      const nx = e.key === "ArrowDown" ? k + 1 : k - 1;
+      spdItems[(nx + spdItems.length) % spdItems.length].focus();
+    }
+  });
+  const outside = (e) => { if (menuOpen && !spdWrap.contains(e.target)) openMenu(false); };
+  document.addEventListener("pointerdown", outside);
+  disposers.push(() => { document.removeEventListener("pointerdown", outside); if (menuTimer) clearTimeout(menuTimer); });
+
   const plBtn = btn("", lab.players || "players", lab.players_hide || "hide", () => {
     S.panel = !S.panel; applyPanel(); layout(); draw();
   });
@@ -147,9 +239,9 @@ export default function (component) {
   ctl.append(
     playBtn,
     btn("", "\u23EE", lab.restart || "restart", () => { setPlaying(false); t = winStart(); sync(); draw(); }),
+    spdWrap,
     el("i", "rr-sep"), dPrev, dNext, exitBtn,
     el("i", "rr-sep"), rPrev, rNext,
-    el("i", "rr-sep"), ...spdBtns,
     el("i", "rr-sep"), plBtn, resetBtn,
     timeLab, lockChip,
   );
@@ -174,15 +266,33 @@ export default function (component) {
   function exitDuel() { sel = -1; sync(); draw(); }
   const toggleDuel = (i) => { if (sel === i) exitDuel(); else selectDuel(i); };
 
-  // ---------- timeline --------------------------------------------------------
+  // ---------- timeline ---------------------------------------------------------------------
+  const span = Math.max(1, d.t1 - d.t0);
+  const pct = (tick) => (tick - d.t0) / span;
+  const sideOf = (i) => (i >= 0 && P[i] ? P[i].side : "?");
+  // a row above the track: bomb plant / defuse / explosion and the end of the round
+  const bm = el("div", "rr-bm");
+  const addBm = (tick, glyph, title) => {
+    if (tick == null || tick < d.t0 || tick > d.t1) return;
+    const m = el("span", "rr-bmk", glyph);
+    m.style.left = (pct(tick) * 100) + "%";
+    m.title = title;
+    bm.appendChild(m);
+  };
+  for (const b of d.bomb || []) {
+    if (!BOMB_GLYPH[b[1]]) continue;
+    const who = b[1] !== "boom" && b[2] >= 0 && P[b[2]] ? " \u00B7 " + P[b[2]].name : "";
+    addBm(b[0], BOMB_GLYPH[b[1]], (lab["b_" + b[1]] || b[1]) + " " + fmtT((b[0] - d.t0) / d.tr) + who);
+  }
+  if (d.out && d.out.end != null && d.out.win) {
+    addBm(d.out.end, WHY_GLYPH[d.out.why] || "\u2691",
+      (d.out.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")) + (d.out.why ? " \u00B7 " + (lab["why_" + d.out.why] || "") : ""));
+  }
   const track = el("div", "rr-track");
   track.tabIndex = 0;
   track.setAttribute("role", "slider");
   track.setAttribute("aria-label", lab.time || "time");
-  tl.appendChild(track);
-  const span = Math.max(1, d.t1 - d.t0);
-  const pct = (tick) => (tick - d.t0) / span;
-  const sideOf = (i) => (i >= 0 && P[i] ? P[i].side : "?");
+  tl.append(bm, track);
   const killTitle = (k) => {
     const a = k[1] >= 0 ? P[k[1]] : null, v = k[2] >= 0 ? P[k[2]] : null;
     let s = (a ? a.name : "?") + " > " + (v ? v.name : "?");
@@ -222,30 +332,37 @@ export default function (component) {
   track.addEventListener("pointermove", (e) => { if (scrubbing) seek(tickAt(e)); });
   track.addEventListener("pointerup", () => { scrubbing = false; });
   track.addEventListener("pointercancel", () => { scrubbing = false; });
+  // keys on the focused timeline: <- / -> = ONE sample (a few ticks, for
+  // frame-by-frame aim study), Shift = 1 s, Home / End, Space = play, [ ] = speed
   track.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const k = e.key;
+    if (k === " " || k === "Spacebar") { e.preventDefault(); playBtn.click(); return; }
+    if (k === "[" || k === "]") { e.preventDefault(); stepSpeed(k === "[" ? -1 : 1); return; }
     if (k !== "ArrowLeft" && k !== "ArrowRight" && k !== "Home" && k !== "End") return;
     e.preventDefault();
-    const st = (e.shiftKey ? 5 : 1) * d.tr;
+    if (playing) setPlaying(false);
+    const st = e.shiftKey ? d.tr : d.step;
     if (k === "Home") seek(winStart());
     else if (k === "End") seek(winEnd());
     else seek(t + (k === "ArrowLeft" ? -st : st));
   });
   function seek(x) { t = clampT(x); draw(); }
 
-  // ---------- rounds row (below the timeline) -----------------------------------
+  // ---------- rounds row (below the timeline): winner colour + how it ended ------------------
   function buildRounds() {
     roundsEl.replaceChildren();
     if (lab.rounds) roundsEl.setAttribute("aria-label", lab.rounds);
-    for (const [n, w] of d.rounds) {
+    for (const [n, w, why] of d.rounds) {
       const b = el("button",
-        "rr-rd" + (w === "CT" ? " wct" : w === "T" ? " wt" : "") + (n === d.round ? " cur" : ""),
-        String(n));
+        "rr-rd" + (w === "CT" ? " wct" : w === "T" ? " wt" : "") + (n === d.round ? " cur" : ""));
       b.type = "button";
+      b.appendChild(document.createTextNode(String(n)));
+      if (why && WHY_GLYPH[why]) b.appendChild(el("i", "rr-rg", WHY_GLYPH[why]));
       let tip = (lab.round || "R") + " " + n;
       if (w === "CT") tip += " \u00B7 " + (lab.won_ct || "");
       else if (w === "T") tip += " \u00B7 " + (lab.won_t || "");
+      if (why) tip += " \u00B7 " + (lab["why_" + why] || "");
       b.title = tip;
       b.setAttribute("aria-label", tip);
       b.addEventListener("click", () => { if (n !== d.round) setTriggerValue("rnd", n); });
@@ -257,7 +374,7 @@ export default function (component) {
     }
   }
 
-  // ---------- right: EVERY duel of the round --------------------------------------
+  // ---------- right: EVERY duel of the round ---------------------------------------------------
   const cardEls = [];
   function buildCards() {
     right.replaceChildren();
@@ -278,6 +395,7 @@ export default function (component) {
       top.append(kn, el("span", "rr-ar", "\u25B8"), vn, el("span", "rr-ctm2", fmtT((z.tk - d.t0) / d.tr)));
       const bits = [z.w];
       if (z.hs) bits.push(lab.hs || "HS");
+      if (z.dist != null) bits.push(z.dist + "u");
       if (z.dur != null) bits.push(z.dur + "s");
       const meta = el("div", "rr-cmeta", bits.filter(Boolean).join(" \u00B7 "));
       c.title = z.kn + " > " + z.vn + " \u00B7 " + bits.filter(Boolean).join(" \u00B7 ");
@@ -289,7 +407,7 @@ export default function (component) {
     });
   }
 
-  // ---------- left: players, one list sorted by nickname, an eye each ---------------
+  // ---------- left: players, one list sorted by nickname, an eye each -----------------------------
   const EYE_ON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
   const EYE_OFF = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 5c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
   const lrows = [];
@@ -322,13 +440,18 @@ export default function (component) {
         applyHidden(); draw();
       });
       const dot = el("i", "rr-sdot " + sideCls(p.side));
+      const body = el("div", "rr-pbody");
       const nm = el("span", "rr-pname", p.name);
       nm.title = p.name;
+      const sub = el("span", "rr-psub");
       const wp = el("span", "rr-pw", "");
+      const sp = el("span", "rr-psp", "");
+      sub.append(wp, sp);
+      body.append(nm, sub);
       const hp = el("span", "rr-php", "");
-      row.append(eye, dot, nm, wp, hp);
+      row.append(eye, dot, body, hp);
       left.appendChild(row);
-      lrows.push({ p: p, row: row, eye: eye, wp: wp, hp: hp });
+      lrows.push({ p: p, row: row, eye: eye, wp: wp, sp: sp, hp: hp });
     }
     applyHidden();
   }
@@ -359,6 +482,9 @@ export default function (component) {
       const w = weaponAt(lr.p, t);
       lr.wp.textContent = alive ? w : "";
       lr.wp.title = w;
+      const v = alive ? speedAt(lr.p, t) : null;
+      lr.sp.textContent = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
+      lr.sp.classList.toggle("mv", v != null && THR != null && v > THR);
     }
   }
   function applyPanel() {
@@ -368,32 +494,219 @@ export default function (component) {
     plBtn.setAttribute("aria-label", plBtn.title);
   }
 
-  // ---------- key panels: both duelists, only inside a duel segment ---------------------
-  const keyPanels = {};  // player index -> { el, boxes }
+  // ---------- key panels (one per player; moved into the duel panel) ----------------------------------
+  const keyPanels = {};  // player index -> { el, boxes, p }
   if (d.keys && d.keys.length) {
     P.forEach((p, pi) => {
       if (!p.kb) return;
       const kp = el("div", "rr-kp");
-      const nm = el("span", "rr-kname", p.name);
-      nm.style.color = sideCol(p.side);
-      kp.appendChild(nm);
       const boxes = d.keys.map((k) => {
         const b = el("span", "rr-k", lab["k_" + k] || k);
         b.title = k;
         kp.appendChild(b);
         return b;
       });
-      keyWrap.appendChild(kp);
       keyPanels[pi] = { el: kp, boxes: boxes, p: p };
     });
   }
-  function activePanels() {
+
+  // ---------- the duel panel: live aim numbers + chart + keys of BOTH duelists ----------------------------
+  let dp = null;  // { sel, cols: [...] } of the selected duel
+  const sampleIdx = (tick) => Math.round((tick - d.t0) / d.step);
+  function telAt(tel, who, key, tick) {
+    if (!tel) return null;
+    const arr = tel[who] && tel[who][key];
+    if (!arr) return null;
+    const j = sampleIdx(tick) - tel.i0;
+    return (j >= 0 && j < arr.length) ? arr[j] : null;
+  }
+  const fmt1 = (v) => (v == null ? "\u2014" : String(v));
+  function buildDuelPanel() {
+    duelWrap.replaceChildren();
+    dp = null;
     const z = duelAt(sel);
-    if (!z) return [];
-    return [z.ki, z.vi].filter((i, k, a) => i >= 0 && a.indexOf(i) === k && keyPanels[i]).map((i) => keyPanels[i]);
+    if (!z) { duelWrap.classList.add("hid"); return; }
+    dp = { sel: sel, cols: [] };
+    const tel = z.tel || null;
+    const sides = [
+      { who: "k", pi: z.ki, name: z.kn, role: lab.role_killer || "killer", sp: z.ksp, er: z.ker, sh: z.ksh, ft: z.kft },
+      { who: "v", pi: z.vi, name: z.vn, role: lab.role_victim || "victim", sp: z.vsp, er: z.ver, sh: z.vsh, ft: z.vft },
+    ];
+    // one speed scale for both charts, so the two duelists are comparable
+    let vmax = Math.max(250, THR != null ? THR * 3 : 0);
+    if (tel) for (const w of ["k", "v"]) for (const v of tel[w].sp) if (v != null && v > vmax) vmax = v;
+    vmax = Math.ceil(vmax / 50) * 50;
+    const head = el("div", "rr-dph");
+    head.appendChild(el("span", "rr-dpt", lab.duel_panel || "Duel aim"));
+    if (z.first) {
+      const fl = { killer: lab.first_killer, victim: lab.first_victim, simultaneous: lab.first_sim };
+      if (fl[z.first]) head.appendChild(el("span", "rr-dpf", fl[z.first]));
+    }
+    if (z.dist != null) head.appendChild(el("span", "rr-dpf", (lab.tel_dist || "distance") + " " + z.dist + " u"));
+    duelWrap.appendChild(head);
+    const cols = el("div", "rr-dpc");
+    duelWrap.appendChild(cols);
+    for (const sd of sides) {
+      const p = sd.pi >= 0 ? P[sd.pi] : null;
+      const col = el("div", "rr-dcol");
+      const nm = el("div", "rr-dnm");
+      const nspan = el("b", null, sd.name);
+      nspan.style.color = sideCol(p ? p.side : "?");
+      nm.append(nspan, el("span", "rr-drole", sd.role));
+      col.appendChild(nm);
+      const stats = el("div", "rr-dst");
+      const cell = (key, label) => {
+        const c = el("div", "rr-dcell");
+        const v = el("b", "rr-dv", "\u2014");
+        c.append(el("span", "rr-dl", label), v);
+        stats.appendChild(c);
+        return v;
+      };
+      const live = {
+        sp: cell("sp", lab.tel_speed || "speed"),
+        tn: cell("tn", lab.tel_turn || "turn"),
+        er: cell("er", lab.tel_err || "aim error"),
+      };
+      col.appendChild(stats);
+      // what the duels table measured at THIS player's first shot
+      const fb = [];
+      if (sd.ft != null) fb.push((lab.tel_first || "first shot") + " " + fmtT((sd.ft - d.t0) / d.tr));
+      if (sd.sp != null) {
+        fb.push(sd.sp + " " + (lab.u_s || "u/s") + (THR != null ? " (" + (sd.sp > THR ? (lab.tel_moving || "moving") : (lab.tel_standing || "standing")) + ")" : ""));
+      }
+      if (sd.er != null) fb.push(sd.er + "\u00B0");
+      if (sd.sh != null) fb.push((lab.tel_shots || "shots") + ": " + sd.sh);
+      if (fb.length) col.appendChild(el("div", "rr-dfs", fb.join(" \u00B7 ")));
+      let cv = null, cx = null;
+      if (tel) {
+        cv = document.createElement("canvas");
+        cv.className = "rr-dcv";
+        col.appendChild(cv);
+        cx = cv.getContext("2d");
+        const seekFrom = (e) => {
+          const r = cv.getBoundingClientRect();
+          const f = Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)));
+          seek(Math.round(z.a + f * (z.b - z.a)));
+        };
+        let down = false;
+        cv.addEventListener("pointerdown", (e) => {
+          e.preventDefault(); down = true; if (playing) setPlaying(false);
+          try { cv.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+          seekFrom(e);
+        });
+        cv.addEventListener("pointermove", (e) => { if (down) seekFrom(e); });
+        cv.addEventListener("pointerup", () => { down = false; });
+        cv.addEventListener("pointercancel", () => { down = false; });
+      }
+      const kp = sd.pi >= 0 ? keyPanels[sd.pi] : null;
+      if (kp) { kp.el.classList.add("on"); col.appendChild(kp.el); }
+      cols.appendChild(col);
+      dp.cols.push({ side: sd, live: live, cv: cv, cx: cx, kp: kp, vmax: vmax, p: p });
+    }
+    // legend of the chart lines
+    if (tel) {
+      const lg = el("div", "rr-dleg");
+      const mk = (cls, col, text) => { const s = el("span"); const i = el("i", cls); i.style.background = col; s.append(i, " " + text); return s; };
+      lg.append(mk("rr-legline", C.acc, lab.tel_leg_speed || "speed"),
+        mk("rr-legline", C.warn, lab.tel_leg_err || "aim error"));
+      if (THR != null) lg.append(mk("rr-legdash", C.text2, (lab.tel_leg_thr || "moving threshold") + " " + Math.round(THR)));
+      lg.append(mk("rr-legline", C.text, lab.tel_leg_shot || "shot"));
+      duelWrap.appendChild(lg);
+    }
+    duelWrap.classList.remove("hid");
+    sizeCharts();
+  }
+  function sizeCharts() {
+    if (!dp) return;
+    const k = DPR();
+    for (const c of dp.cols) {
+      if (!c.cv) continue;
+      const w = Math.max(160, Math.round(c.cv.getBoundingClientRect().width || 300));
+      c.w = w; c.h = 92;
+      c.cv.width = Math.round(w * k); c.cv.height = Math.round(c.h * k);
+      c.cv.style.height = c.h + "px";
+      c.cx.setTransform(k, 0, 0, k, 0, 0);
+    }
+  }
+  const ERR_MAX = 30;
+  function drawDuelPanel() {
+    if (!dp) return;
+    const z = duelAt(dp.sel);
+    if (!z) return;
+    const tel = z.tel || null;
+    for (const c of dp.cols) {
+      const who = c.side.who;
+      // live numbers at the playhead (from the telemetry of the duel)
+      const sp = telAt(tel, who, "sp", t), tn = telAt(tel, who, "tn", t), er = telAt(tel, who, "er", t);
+      c.live.sp.textContent = sp == null ? "\u2014" : sp + " " + (lab.u_s || "u/s");
+      c.live.sp.classList.toggle("mv", sp != null && THR != null && sp > THR);
+      c.live.tn.textContent = tn == null ? "\u2014" : tn + "\u00B0/s";
+      c.live.er.textContent = er == null ? "\u2014" : er + "\u00B0";
+      if (!c.cx || !tel) continue;
+      const cx = c.cx, W2 = c.w, H2 = c.h, padB = 12, hh = H2 - padB;
+      cx.clearRect(0, 0, W2, H2);
+      cx.fillStyle = rgba(C.text2, 0.07);
+      cx.fillRect(0, 0, W2, hh);
+      const xOf = (tick) => ((tick - z.a) / Math.max(1, z.b - z.a)) * (W2 - 2) + 1;
+      const ySp = (v) => hh - Math.min(1, v / c.vmax) * (hh - 3) - 1;
+      const yEr = (v) => hh - Math.min(1, v / ERR_MAX) * (hh - 3) - 1;
+      // moving threshold
+      if (THR != null) {
+        cx.setLineDash([4, 3]); cx.strokeStyle = rgba(C.text2, 0.8); cx.lineWidth = 1;
+        cx.beginPath(); cx.moveTo(0, ySp(THR)); cx.lineTo(W2, ySp(THR)); cx.stroke();
+        cx.setLineDash([]);
+      }
+      const line = (arr, yf, col) => {
+        cx.strokeStyle = col; cx.lineWidth = 1.6; cx.beginPath();
+        let pen = false;
+        arr.forEach((v, j) => {
+          if (v == null) { pen = false; return; }
+          const tick = d.t0 + (tel.i0 + j) * d.step;
+          const x = xOf(tick), y = yf(v);
+          if (!pen) { cx.moveTo(x, y); pen = true; } else cx.lineTo(x, y);
+        });
+        cx.stroke();
+      };
+      line(tel[who].er, yEr, C.warn);
+      line(tel[who].sp, ySp, C.acc);
+      // this player's shots (ticks along the bottom), the first shot taller
+      if (c.p) {
+        const pi = P.indexOf(c.p);
+        cx.strokeStyle = C.text; cx.lineWidth = 1;
+        for (const sh of d.shots) {
+          if (sh[1] !== pi || sh[0] < z.a || sh[0] > z.b) continue;
+          const x = Math.round(xOf(sh[0])) + 0.5;
+          cx.beginPath(); cx.moveTo(x, hh); cx.lineTo(x, hh + 7); cx.stroke();
+        }
+      }
+      if (c.side.ft != null && c.side.ft >= z.a && c.side.ft <= z.b) {
+        const x = Math.round(xOf(c.side.ft)) + 0.5;
+        cx.strokeStyle = C.good; cx.lineWidth = 1.5;
+        cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x, hh + 10); cx.stroke();
+      }
+      // the kill
+      const xk = Math.round(xOf(z.tk)) + 0.5;
+      cx.strokeStyle = C.dead; cx.lineWidth = 1.5;
+      cx.beginPath(); cx.moveTo(xk, 0); cx.lineTo(xk, hh); cx.stroke();
+      // playhead
+      const xp = xOf(t);
+      cx.strokeStyle = C.acc; cx.lineWidth = 2;
+      cx.beginPath(); cx.moveTo(xp, 0); cx.lineTo(xp, H2); cx.stroke();
+      // axis hints
+      cx.font = "9px " + FF; cx.fillStyle = C.text2; cx.textAlign = "left";
+      cx.fillText(Math.round(c.vmax) + " " + (lab.u_s || "u/s"), 3, 9);
+      cx.textAlign = "right";
+      cx.fillText(ERR_MAX + "\u00B0", W2 - 3, 9);
+    }
+    for (const c of dp.cols) {
+      if (!c.kp) continue;
+      const j = sampleIdx(t);
+      const mask = c.kp.p.kb ? (c.kp.p.kb[j] || 0) : 0;
+      c.kp.boxes.forEach((b, bit) => b.classList.toggle("on", ((mask >> bit) & 1) === 1));
+    }
   }
 
-  // ---------- radar geometry + zoom / pan -------------------------------------------------
+  // ---------- radar geometry + zoom / pan --------------------------------------------------------------------
   const DPR = () => Math.max(1, window.devicePixelRatio || 1);
   const ctx = cvs.getContext("2d");
   const imgs = [];
@@ -439,6 +752,7 @@ export default function (component) {
       const fit = Math.min(W / (g.maxx - g.minx), H / (g.maxy - g.miny));
       mk(0, (W - (g.maxx - g.minx) * fit) / 2, (H - (g.maxy - g.miny) * fit) / 2, fit);
     }
+    sizeCharts();
   }
   function toPx(level, x, y) {
     const p = panels[level] || panels[0] || { ox: 0, oy: 0, fit: 1, v: { z: 1, dx: 0, dy: 0 } };
@@ -489,7 +803,7 @@ export default function (component) {
   cvs.addEventListener("pointercancel", endPan);
   cvs.addEventListener("dblclick", resetView);
 
-  // ---------- interpolated player state -------------------------------------------------------
+  // ---------- interpolated player state -------------------------------------------------------------------------
   function state(p, tick) {
     const n = p.x.length;
     if (!n) return null;
@@ -516,9 +830,21 @@ export default function (component) {
     for (const ch of p.w) { if (ch[0] <= tick) w = ch[1]; else break; }
     return w || "";
   }
-  const sampleAt = (tick) => Math.max(0, Math.min(Math.round((tick - d.t0) / d.step), Math.max(0, (P[0] ? P[0].x.length : 1) - 1)));
+  // horizontal speed (u/s) from the positions around the playhead (a central
+  // difference over one sample each way); null for a dead player, a
+  // teleport or a sample outside the round
+  function speedAt(p, tick) {
+    const n = p.x.length;
+    if (n < 2) return null;
+    const i = Math.max(0, Math.min(n - 1, Math.round((tick - d.t0) / d.step)));
+    const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+    if (b === a || p.x[a] == null || p.x[b] == null || p.y[a] == null || p.y[b] == null) return null;
+    if (p.al && !p.al[i]) return null;
+    const v = Math.hypot(p.x[b] - p.x[a], p.y[b] - p.y[a]) / (((b - a) * d.step) / d.tr);
+    return v > 600 ? null : v;
+  }
 
-  // ---------- drawing -------------------------------------------------------------------------------
+  // ---------- drawing --------------------------------------------------------------------------------------------------
   const rgba = (hex, a) => {
     const h = (hex || "").replace("#", "");
     if (h.length !== 6) return "transparent";
@@ -529,7 +855,7 @@ export default function (component) {
 
   function drawBg() {
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = C.bg || "#000";
+    ctx.fillStyle = C.bg || "transparent";
     ctx.fillRect(0, 0, W, H);
     const n = twoPanels ? 2 : 1;
     for (let i = 0; i < n; i++) {
@@ -589,6 +915,7 @@ export default function (component) {
   function drawPlayers() {
     const R = Math.max(5, Math.min(7.5, W / 110));  // small dots: the map stays readable
     ctx.textAlign = "center";
+    const z = duelAt(sel);
     for (const p of P) {
       if (!visible(p)) continue;
       const s = state(p, t);
@@ -600,6 +927,14 @@ export default function (component) {
           ctx.beginPath(); ctx.arc(px, py, R + 3, 0, Math.PI * 2);
           ctx.strokeStyle = rgba(C.flash, Math.min(0.9, 0.3 + s.fl / 4));
           ctx.lineWidth = 2.5; ctx.stroke();
+        }
+        // moving faster than the stop threshold: a dashed ring (shots on the
+        // move are the inaccurate ones - this is the state the audit cares about)
+        const v = THR != null ? speedAt(p, t) : null;
+        if (v != null && v > THR) {
+          ctx.beginPath(); ctx.arc(px, py, R + 3.5, 0, Math.PI * 2);
+          ctx.setLineDash([2.5, 2.5]); ctx.strokeStyle = col; ctx.lineWidth = 1.3; ctx.stroke();
+          ctx.setLineDash([]);
         }
         // view direction: a short arrow
         const a = (s.yaw == null ? 0 : s.yaw) * Math.PI / 180;
@@ -618,6 +953,11 @@ export default function (component) {
         ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2);
         ctx.fillStyle = col; ctx.fill();
         ctx.lineWidth = 1; ctx.strokeStyle = rgba(C.bg, 0.9); ctx.stroke();
+        // the two duelists of the selected duel get an accent ring
+        if (z && (P[z.ki] === p || P[z.vi] === p)) {
+          ctx.beginPath(); ctx.arc(px, py, R + 6.5, 0, Math.PI * 2);
+          ctx.strokeStyle = C.acc; ctx.lineWidth = 1.6; ctx.stroke();
+        }
         // HP bar + weapon under the dot
         if (s.hp != null && s.hp > 0) {
           const bw = 16, bx = px - bw / 2, by = py + R + 3;
@@ -634,7 +974,7 @@ export default function (component) {
         ctx.font = "600 10px " + FF; ctx.fillStyle = C.text;
         halo(p.name, px, py - R - 5);
       } else {
-        ctx.strokeStyle = C.dead || "#777"; ctx.lineWidth = 2;
+        ctx.strokeStyle = C.dead || C.text2; ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(px - R * 0.8, py - R * 0.8); ctx.lineTo(px + R * 0.8, py + R * 0.8);
         ctx.moveTo(px + R * 0.8, py - R * 0.8); ctx.lineTo(px - R * 0.8, py + R * 0.8);
@@ -693,15 +1033,7 @@ export default function (component) {
     }
   }
 
-  function drawKeys() {
-    const j = sampleAt(t);
-    for (const kp of activePanels()) {
-      const mask = kp.p.kb ? (kp.p.kb[j] || 0) : 0;
-      kp.boxes.forEach((b, bit) => b.classList.toggle("on", ((mask >> bit) & 1) === 1));
-    }
-  }
-
-  // ---------- legend + howto --------------------------------------------------------------------------------
+  // ---------- legend + howto ------------------------------------------------------------------------------------------------
   const leg = el("div", "rr-legend");
   const mark = (cls, col, text) => {
     const s = el("span"); const i = el("i", cls);
@@ -716,15 +1048,27 @@ export default function (component) {
     mark("rr-legline", C.ct, lab.leg_ct || "CT kill"),
     mark("rr-legline", C.t, lab.leg_t || "T kill"),
   );
+  if (THR != null) {
+    const s = el("span"); s.append(el("i", "rr-legring"), " " + (lab.leg_move || "moving") + " > " + Math.round(THR) + " " + (lab.u_s || "u/s"));
+    leg.appendChild(s);
+  }
   box.appendChild(leg);
   if (lab.howto) box.appendChild(el("div", "rr-howto", lab.howto));
 
-  // ---------- sync / draw ----------------------------------------------------------------------------------------
+  // ---------- sync / draw ------------------------------------------------------------------------------------------------------------
+  let builtSel = null;
   function sync() {
     playBtn.textContent = playing ? "\u23F8" : "\u25B6";
     playBtn.title = playing ? (lab.pause || "pause") : (lab.play || "play");
     playBtn.setAttribute("aria-label", playBtn.title);
-    spdBtns.forEach((b) => b.classList.toggle("on", Number(b.dataset.spd) === speed));
+    spdBtn.textContent = spdTxt(speed) + " \u25BE";
+    spdBtn.title = (lab.speed || "speed") + " " + spdTxt(speed);
+    spdBtn.setAttribute("aria-label", spdBtn.title);
+    spdItems.forEach((b, i) => {
+      const on = SPEEDS[i] === speed;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-checked", on ? "true" : "false");
+    });
     const z = duelAt(sel);
     exitBtn.style.display = z ? "" : "none";
     lockChip.style.display = z ? "" : "none";
@@ -744,9 +1088,7 @@ export default function (component) {
     }
     track.setAttribute("aria-valuemin", z ? z.a : d.t0);
     track.setAttribute("aria-valuemax", z ? z.b : d.t1);
-    const act = activePanels();
-    keyWrap.classList.toggle("hid", !act.length);
-    Object.values(keyPanels).forEach((kp) => kp.el.classList.toggle("on", act.indexOf(kp) >= 0));
+    if (builtSel !== sel) { builtSel = sel; buildDuelPanel(); }
   }
 
   function draw() {
@@ -755,16 +1097,17 @@ export default function (component) {
     drawPlayers();
     drawImpacts();
     drawFeed();
-    drawKeys();
+    drawDuelPanel();
     updateLeft();
     cardEls.forEach((c, i) => c.classList.toggle("up", !!(d.duels[i] && d.duels[i].b > t)));
     timeLab.textContent = "\u23F1 " + fmtT((t - d.t0) / d.tr) + " / " + fmtT((winEnd() - d.t0) / d.tr);
     ph.style.left = (Math.max(0, Math.min(1, pct(t))) * 100) + "%";
     track.setAttribute("aria-valuenow", Math.round(t));
-    S.st = { t: t, playing: playing, sel: sel, hidden: Object.keys(S.hidden), z: panels.map((p) => (p ? p.v.z : 1)) };
+    S.st = { t: t, playing: playing, sel: sel, speed: speed, hidden: Object.keys(S.hidden), z: panels.map((p) => (p ? p.v.z : 1)) };
   }
 
-  // ---------- init -----------------------------------------------------------------------------------------------------------
+  // ---------- init ------------------------------------------------------------------------------------------------------------------------
+  buildOutcome();
   layout();
   applyPanel();
   buildLeft();

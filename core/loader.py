@@ -36,6 +36,7 @@ from core.model import (
     _round_col,
     _safe_int,
     _speed_from_positions,
+    build_round_info,
     build_round_windows,
     hg_key,
     is_gun,
@@ -850,12 +851,17 @@ def load_demo(path: str, progress=None) -> Demo:
     # round_officially_ended ends them (the win panel is part of the round),
     # the events' own round numbers name them. round_officially_ended is a
     # separate parse: an old parser without the event must not take the
-    # whole events parse down with it.
+    # whole events parse down with it. The same single pass reads how every
+    # round ended (round_end + the bomb events, see build_round_info): if the
+    # combined request fails, the old one-event parse still gives the windows.
     try:
-        _roe = dict(p.parse_events(["round_officially_ended"]))
-        _rod = _roe.get("round_officially_ended", pd.DataFrame())
+        _roe = dict(p.parse_events(list(_ROUND_MARK_EVENTS)))
     except Exception:  # noqa: BLE001 - old parser / no such event
-        _rod = pd.DataFrame()
+        try:
+            _roe = dict(p.parse_events(["round_officially_ended"]))
+        except Exception:  # noqa: BLE001
+            _roe = {}
+    _rod = _roe.get("round_officially_ended", pd.DataFrame())
     fe_live = sorted(
         t for t, w in fe_rows if not w and (live_start is None or t >= live_start)
     )
@@ -899,6 +905,7 @@ def load_demo(path: str, progress=None) -> Demo:
             _prev_last = _hi
         fe_live = sorted(_bounds)
     round_windows = build_round_windows(fe_live, off_ticks, _win_ev, tickrate)
+    round_info = _round_info_from_events(_roe, round_windows, live_start)
     return Demo(
         path,
         header,
@@ -913,6 +920,56 @@ def load_demo(path: str, progress=None) -> Demo:
         totals=totals,
         mouse=mouse,
         round_windows=round_windows,
+        round_info=round_info,
+    )
+
+
+# events read in ONE pass next to the round windows: how a round ended
+_ROUND_MARK_EVENTS = (
+    "round_officially_ended",
+    "round_end",
+    "bomb_planted",
+    "bomb_begindefuse",
+    "bomb_defused",
+    "bomb_exploded",
+)
+
+
+def _round_info_from_events(ev: dict, windows: dict, live_start) -> dict:
+    """Demo.round_info from the parsed round_end + bomb events (live only)."""
+
+    def _live(name) -> pd.DataFrame:
+        df = ev.get(name)
+        if df is None or not len(df) or "tick" not in df.columns:
+            return pd.DataFrame(columns=["tick"])
+        d = df.copy()
+        d["tick"] = pd.to_numeric(d["tick"], errors="coerce")
+        m = d["tick"].notna()
+        if "is_warmup_period" in d.columns:
+            m &= ~d["is_warmup_period"].fillna(False).astype(bool)
+        if live_start is not None:
+            m &= d["tick"] >= live_start
+        return d[m]
+
+    bombs: list[tuple[int, str, str]] = []
+    for name, kind in (
+        ("bomb_planted", "plant"),
+        ("bomb_begindefuse", "defuse_start"),
+        ("bomb_defused", "defuse"),
+        ("bomb_exploded", "boom"),
+    ):
+        d = _live(name)
+        for i, tk in enumerate(d["tick"]):
+            sid = ""
+            if "user_steamid" in d.columns:
+                v = d["user_steamid"].iloc[i]
+                sid = "" if pd.isna(v) else str(int(v))
+            bombs.append((int(tk), kind, sid))
+    return build_round_info(
+        windows,
+        _live("round_end"),
+        bombs,
+        bomb_known=any(b[1] == "plant" for b in bombs),
     )
 
 

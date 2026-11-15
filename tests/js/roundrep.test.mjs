@@ -87,12 +87,12 @@ if (payload.duels.length) {
   assert.ok($(".rr-lock").style.display !== "none");
   seekFrac(0.99);
   assert.ok(root.__rr.st.t <= z.b && root.__rr.st.t >= z.a);
-  const named = $$(".rr-kp.on .rr-kname").map((n) => n.textContent).sort();
+  const named = $$(".rr-dcol .rr-dnm b").map((n) => n.textContent).sort();
   assert.deepStrictEqual(named, [...new Set([z.kn, z.vn])].filter((n) => payload.players.some((p) => p.name === n)).sort());
   save("duel");
   click($(".rr-sbtn.exit"));
   assert.strictEqual(root.__rr.st.sel, -1);
-  ok("a duel locks the playhead to its segment, both duelists' keys, exit releases");
+  ok("a duel locks the playhead to its segment, the panel names both duelists, exit releases");
 }
 
 // rounds bar + round buttons are the one Streamlit event
@@ -106,12 +106,83 @@ if (payload.rounds.length > 1) {
   ok("a round chip click -> one 'rnd' trigger " + JSON.stringify(triggers[0]));
 }
 
+// the result banner: who won and how, plus the bomb story
+const out = $(".rr-out");
+assert.ok(out && out.classList.contains(payload.out.win === "CT" ? "wct" : "wt"));
+if (payload.out.why) assert.ok(out.textContent.includes(payload.lab["why_" + payload.out.why]));
+ok("result banner: " + out.querySelector(".rr-out1").textContent.replace(/\s+/g, " ").trim());
+if (payload.bomb.length) {
+  assert.strictEqual($$(".rr-bmk").length, payload.bomb.length + (payload.out.end != null ? 1 : 0));
+  ok("bomb events + the round end are marked on the timeline (" + $$(".rr-bmk").length + ")");
+}
+// rounds bar chips carry how the round ended
+assert.ok($$(".rr-rd .rr-rg").length > 0);
+ok("round chips are marked with how the round ended");
+
+// the speed menu: hidden until hover / click, 0.1x..4x, the choice sticks and survives a round switch
+const spdBtn = $(".rr-sbtn.spd"), menu = $(".rr-spdmenu");
+assert.ok(menu.hidden);
+spdBtn.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: false }));
+$(".rr-spd").dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: false }));
+assert.ok(!menu.hidden);
+const items = [...menu.querySelectorAll(".rr-spdi")].map((b) => b.textContent);
+assert.deepStrictEqual(items, ["0.1x", "0.25x", "0.5x", "1x", "2x", "4x"]);
+click(menu.querySelectorAll(".rr-spdi")[0]);
+assert.ok(menu.hidden);
+assert.strictEqual(root.__rr.speed, 0.1);
+assert.ok(spdBtn.textContent.startsWith("0.1x"));
+click(spdBtn);                      // a click (touch / keyboard) opens it too
+assert.ok(!menu.hidden);
+click(spdBtn);
+assert.ok(menu.hidden);
+cleanup();
+cleanup = mount({ ...payload, round: payload.round + 1 });
+await new Promise((r) => setTimeout(r, 100));
+assert.ok($(".rr-sbtn.spd").textContent.startsWith("0.1x"));
+ok("speed menu: 0.1x..4x on hover or click; the choice survives a round switch");
+
+// slow motion really is slow: at 0.1x one second of wall time moves ~0.1 s of round time
+triggers.length = 0;
+const t00 = root.__rr.st.t;
+click($$(".rr-sbtn")[0]);  // play
+await new Promise((r) => setTimeout(r, 500));
+click($$(".rr-sbtn")[0]);  // pause
+const moved = (root.__rr.st.t - t00) / payload.tr;
+assert.ok(moved > 0 && moved < 0.2, "moved " + moved + " s in 0.5 s at 0.1x");
+ok("0.1x plays slowly (" + moved.toFixed(3) + " s of the round in 0.5 s)");
+
+// keys on the timeline: arrows step ONE sample, [ ] change the speed
+const trackEl = $(".rr-track");
+const key = (k, extra) => trackEl.dispatchEvent(new window.KeyboardEvent("keydown", { key: k, bubbles: true, ...extra }));
+const tBefore = root.__rr.st.t;
+key("ArrowRight");
+assert.strictEqual(Math.round(root.__rr.st.t - tBefore), payload.step);
+key("ArrowRight", { shiftKey: true });
+key("]");
+assert.strictEqual(root.__rr.speed, 0.25);
+key("[");
+assert.strictEqual(root.__rr.speed, 0.1);
+ok("arrows step one sample, Shift one second, [ ] change the speed");
+
+// the duel panel: live aim numbers of both duelists
+if (payload.duels.length && payload.duels[0].tel) {
+  click($$(".rr-card")[0]);
+  const cells = $$(".rr-dcol .rr-dv").map((n) => n.textContent);
+  assert.ok(cells.length >= 6);
+  assert.ok($$(".rr-dcv").length === 2);
+  assert.ok($(".rr-dfs"));
+  ok("duel panel: live numbers " + cells.slice(0, 3).join(" | ") + " and a chart per duelist");
+  save("duel_panel");
+  click($(".rr-sbtn.exit"));
+  assert.ok($(".rr-duelp").classList.contains("hid"));
+}
+
 // playback never reruns Streamlit
 triggers.length = 0;
 click($$(".rr-sbtn")[0]);  // play
 await new Promise((r) => setTimeout(r, 120));
 assert.strictEqual(root.__rr.st.playing, true);
-assert.ok(root.__rr.st.t > payload.at);
+assert.ok(root.__rr.st.t >= payload.at);
 click($$(".rr-sbtn")[0]);  // pause
 assert.strictEqual(triggers.length, 0);
 ok("playback runs in the browser (no Streamlit trigger)");

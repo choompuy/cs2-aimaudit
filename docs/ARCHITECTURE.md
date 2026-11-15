@@ -16,14 +16,14 @@ written here, so the doc and the guardrails stay honest.
 | `views/overview.py`               |        77 | Overview page (one grid for both teams).                                                                                                     |
 | `views/shooting.py`               |       433 | Shooting page: metric tiles, Top-3 issues, charts, the weapons grid.                                                                         |
 | `views/duels.py`                  |       197 | Duels page: the duels grid, the by-zone table, the openings table.                                                                           |
-| `views/timeline.py`               |       568 | Timeline page (`@st.fragment` replay + duel strip navigation).                                                                               |
+| `views/replay.py`                 |       560 | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart).                                                      |
 | `views/map.py`                    |       104 | Map page (`@st.fragment`, radar plot).                                                                                                       |
 | `views/extras.py`                 |        80 | Guide page and the debug expander rendered under every page.                                                                                 |
 | `core/model.py`                   |       601 | Constants, the `Demo` container, pure helpers (weapons, angles, `wilson_ci`, `rank_in_lobby`).                                               |
 | `core/filters.py`                 |       203 | `Filters`, round halves/pistol rounds, `apply_filters`.                                                                                      |
 | `core/loader.py`                  |       897 | Demo unpacking, path resolution, `state.json`, `load_demo` and data preparation.                                                             |
 | `core/metrics.py`                 |       964 | `shots_table`, risk model, `build_duels`, `openings_table`, `impact_stats`, `player_summary`, `weapon_stats`.                                |
-| `core/replay.py`                  |       357 | `timeline_data`, `replay_data`, radar transforms, `kill_points`.                                                                             |
+| `core/replay.py`                  |       674 | `timeline_data`, `replay_data`, `round_replay_data`, `round_duels`, `duel_telemetry`, radar transforms.                                      |
 | `core/checks.py`                  |       353 | `data_checks`, `debug_report`.                                                                                                               |
 | `core/__init__.py`                |       134 | Facade: re-exports the public API so `import core` / `core.X` keep working.                                                                  |
 | `ui/table.py`                     |       432 | The universal grid renderer: `Col`, `table_payload`, `data_table` (custom component).                                                        |
@@ -31,6 +31,7 @@ written here, so the doc and the guardrails stay honest.
 | `ui/charts.py`                    |        86 | `style_figure` and shared chart builders.                                                                                                    |
 | `ui/format.py`                    |        51 | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`.                                                                                       |
 | `ui/strip.py`                     |       352 | The duel navigation strip (Timeline).                                                                                                        |
+| `ui/roundrep.py`                  |       353 | 2D replay component: `round_payload` (pure JSON model) + `round_replay`; front end in `roundrep.js` / `.css`.                                |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `sources/model.py`                |       162 | The match-import model: `MatchRecord`, `DemoState`, the Steam config and the localized `ProviderError` family.                               |
 | `sources/http.py`                 |       214 | Shared urllib transport: timeouts, 429/Retry-After and 5xx retries, streaming downloads to `.part`, https-only, `AIMAUDIT_OFFLINE`.           |

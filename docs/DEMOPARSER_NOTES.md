@@ -379,6 +379,17 @@ Sources: two real demos parsed with `tools/inspect_rounds.py`
   demoparser2 (`list_game_events()`), so step 2B4 cannot add them. There is
   no `winner`/`reason` field anywhere → **round winner and score are NOT
   reliably available via events; do not show them** (degrade silently).
+- **Exception worth knowing:** the public test demo shipped with demoparser2
+  (`src/parser/test_demo.dem`, de_mirage) DOES carry `round_end` (columns
+  `winner` 2=T / 3=CT, `reason`, `message` such as
+  `#SFUI_Notice_Target_Bombed`) plus `bomb_planted` / `bomb_begindefuse` /
+  `bomb_defused` / `bomb_exploded`. Event sets differ per server, so
+  `core.load_demo` reads them in ONE guarded pass and `core.round_outcomes`
+  uses `round_end` when it is there and otherwise INFERS the result from the
+  bomb events and the kills (exploded -> T by the bomb, defused -> CT by the
+  defuse, a side wiped out -> elimination, no plant and nobody wiped out ->
+  CT on time). On that demo the inference matched `round_end` in 9 of 9
+  rounds; the UI marks an inferred result as such.
 - Round boundary events that DO exist: `round_freeze_end`,
   `round_prestart` / `round_poststart`, `round_officially_ended`,
   `cs_pre_restart`, `begin_new_match`, `round_announce_last_round_half`,

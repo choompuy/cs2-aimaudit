@@ -19,7 +19,10 @@ from core.model import (
     ALIVE_PROPS,
     BTN_NAMED,
     BUTTONS,
+    DUCK_DROP,
     Demo,
+    EYE_STAND,
+    HEAD_STAND,
     NA,
     POS,
     TICKRATE,
@@ -389,7 +392,7 @@ def round_replay_data(
     demo: Demo,
     round_no: int,
     *,
-    max_samples: int = 3200,
+    max_samples: int = 2400,
     max_s: float = 180.0,
 ):
     """
@@ -406,7 +409,8 @@ def round_replay_data(
     {"t0", "t1", "step", "tickrate", "round", "frames": {sid: df},
      "keys": [available key names], "shots": [(tick, sid, weapon)],
      "kills": [(tick, attacker, victim, weapon, hs)],
-     "hits": [(tick, attacker, victim)]}
+     "hits": [(tick, attacker, victim)],
+     "info": how the round ended (Demo.round_info[round])}
     (hits cover EVERY pair of the round - the replay shows the whole
     round, teammate trades included).
     """
@@ -520,47 +524,182 @@ def round_replay_data(
         "shots": out_shots,
         "kills": out_kills,
         "hits": out_hits,
+        "info": dict((getattr(demo, "round_info", None) or {}).get(round_no) or {}),
     }
 
 
-def round_duels(df, window, tickrate: int = TICKRATE) -> list[dict]:
+def round_duels(
+    duels: pd.DataFrame, window: tuple[int, int], tickrate: int
+) -> list[dict]:
     """
-    Every duel of EVERY player inside the replay ``window`` (t0, t1), as
-    cards for ui.roundrep: {"a", "b", "tick", "killer", "victim",
-    "weapon", "hs", "dur"}. The segment runs from the FIRST shot of
-    either duelist (-0.75 s pre-roll) to 1.5 s after the kill, clamped
-    into the window - the same window the replay plays decides the round,
-    so a duel can never show up under another round. Input is a
-    build_duels frame; empty/None input -> [].
+    EVERY duel of every player inside a round window (one entry per kill
+    of a gun fight), earliest first - the right-hand list of the 2D replay.
+
+    ``duels`` is core.build_duels' frame; a duel belongs to the round whose
+    window holds the kill tick (the same window the replay plays), never to
+    a round number read from another column. ``a``/``b`` bracket the
+    segment the replay locks to: from the first shot of EITHER duelist
+    (minus a short pre-roll to see the approach) to a bit after the kill
+    (to see the outcome / the trade), clamped to the round.
+
+    Besides who killed whom the entry carries the per-duelist numbers the
+    duels table already measured at the FIRST SHOT of each side (speed,
+    aim error, how many shots, the first-shot tick; k* = killer, v* =
+    victim) so the replay can state them next to the live curves.
     """
-    if df is None or not len(df) or "tick" not in df.columns:
+    if duels is None or not len(duels) or "tick" not in duels.columns:
         return []
     t0, t1 = int(window[0]), int(window[1])
-    tr = int(tickrate or TICKRATE)
-    pre, post = int(0.75 * tr), int(1.5 * tr)
-    out = []
-    for r in df[df["tick"].between(t0, t1)].itertuples():
-        firsts = [
-            x
-            for x in (
-                getattr(r, "killer_first_tick", None),
-                getattr(r, "victim_first_tick", None),
-            )
-            if pd.notna(x)
-        ]
+    d = duels[duels["tick"].between(t0, t1)].sort_values("tick", kind="stable")
+    tr = max(int(tickrate), 1)
+
+    def _num(r, name, nd=1):
+        v = getattr(r, name, None)
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return None if not np.isfinite(f) else round(f, nd)
+
+    def _tick(r, name):
+        v = getattr(r, name, None)
+        return None if v is None or pd.isna(v) else int(v)
+
+    out: list[dict] = []
+    for r in d.itertuples(index=False):
         tk = int(r.tick)
-        start = int(min(firsts)) if firsts else tk - tr
+        kft, vft = _tick(r, "killer_first_tick"), _tick(r, "victim_first_tick")
+        firsts = [x for x in (kft, vft) if x is not None]
+        start = min(firsts) if firsts else tk - tr
         out.append(
             {
-                "a": max(t0, start - pre),
-                "b": min(t1, tk + post),
+                "a": max(t0, start - int(0.75 * tr)),
+                "b": min(t1, tk + int(1.5 * tr)),
                 "tick": tk,
                 "killer": str(r.killer),
                 "victim": str(r.victim),
-                "weapon": str(getattr(r, "weapon", "") or ""),
-                "hs": bool(getattr(r, "headshot", False)),
-                "dur": getattr(r, "duration_s", None),
+                "weapon": str(r.weapon),
+                "hs": bool(r.headshot),
+                "dur": _num(r, "duration_s", 2),
+                "dist": _num(r, "distance", 0),
+                "first": str(getattr(r, "first", "") or ""),
+                "kft": kft,
+                "vft": vft,
+                "ksp": _num(r, "killer_speed", 0),
+                "vsp": _num(r, "victim_speed", 0),
+                "kerr": _num(r, "killer_err", 1),
+                "verr": _num(r, "victim_err", 1),
+                "kshots": _num(r, "killer_shots", 0),
+                "vshots": _num(r, "victim_shots", 0),
             }
         )
-    out.sort(key=lambda z: z["tick"])
     return out
+
+
+def _wrap180(a: np.ndarray) -> np.ndarray:
+    """Angle difference wrapped into [-180, 180) (the shortest way round)."""
+    return (a + 180.0) % 360.0 - 180.0
+
+
+def duel_telemetry(
+    fa: pd.DataFrame,
+    fb: pd.DataFrame,
+    window: tuple[int, int],
+    t0: int,
+    step: int,
+    tickrate: int,
+) -> dict:
+    """
+    Live aim numbers of one duel for the replay: both duelists' speed, how
+    fast the crosshair turns, and the angle between the crosshair and the
+    ENEMY'S HEAD, plus the distance between them - one value per replay
+    sample inside ``window`` (``t0``/``step`` are the replay grid, so the
+    UI indexes by sample).
+
+    fa / fb are the players' frames on that grid (X, Y, Z, pitch, yaw,
+    is_alive, DUCK when the parser has it). Same rules as the timeline:
+    speed is the position delta (NaN on gaps, teleports, a dead pawn);
+    ``turn`` is deg/s of the view vector (yaw scaled by cos(pitch) + pitch);
+    ``err`` is the crosshair-to-head angle with eyes/head heights of a
+    standing (or ducking) player. Recoil punch is NOT in these frames, so
+    ``err`` is the pre-recoil crosshair - the table's per-duel number at
+    the first shot includes the punch.
+
+    Returns {"i0": first sample index, "a"/"b": {"sp", "tn", "er"}, "d": [...]}
+    (lists of ints / 1-decimal floats, None for NaN) or {} when there is
+    nothing to show.
+    """
+    step = max(int(step), 1)
+    if fa is None or fb is None or not len(fa) or not len(fb):
+        return {}
+    lo, hi = int(window[0]), int(window[1])
+    # a window outside what was sampled has nothing to show
+    if hi < max(fa["tick"].min(), fb["tick"].min()) or lo > min(fa["tick"].max(), fb["tick"].max()):
+        return {}
+    i0 = max(0, -(-(lo - int(t0)) // step))
+    i1 = (hi - int(t0)) // step
+    if i1 < i0:
+        return {}
+    ticks = int(t0) + np.arange(i0, i1 + 1) * step
+
+    def _prep(f: pd.DataFrame) -> pd.DataFrame:
+        g = f.drop_duplicates("tick").set_index("tick").sort_index()
+        # one extra sample before the window: speed / turn are deltas
+        keep = np.concatenate(([ticks[0] - step], ticks))
+        return g.reindex(keep)
+
+    a, b = _prep(fa), _prep(fb)
+    dt_s = step / max(int(tickrate), 1)
+
+    def _series(me: pd.DataFrame, foe: pd.DataFrame) -> dict:
+        x, y = me["X"].to_numpy(float), me["Y"].to_numpy(float)
+        sp = np.hypot(np.diff(x), np.diff(y)) / dt_s
+        yaw = me["yaw"].to_numpy(float)
+        pit = me["pitch"].to_numpy(float)
+        dyaw = _wrap180(np.diff(yaw))
+        dpit = np.diff(pit)
+        tn = np.hypot(dyaw * np.cos(np.radians(pit[1:])), dpit) / dt_s
+        alive = (
+            me["is_alive"].astype(float).fillna(1.0).to_numpy()[1:] > 0
+            if "is_alive" in me.columns
+            else np.ones(len(sp), bool)
+        )
+        sp = np.where(alive & (sp <= 600.0), sp, np.nan)
+        tn = np.where(alive, tn, np.nan)
+        # crosshair -> enemy head
+        z = me["Z"].to_numpy(float)[1:] if "Z" in me.columns else np.zeros(len(sp))
+        zf = foe["Z"].to_numpy(float)[1:] if "Z" in foe.columns else np.zeros(len(sp))
+        duck_me = (
+            np.nan_to_num(me["DUCK"].to_numpy(float)[1:]) > 0 if "DUCK" in me.columns else 0
+        )
+        duck_foe = (
+            np.nan_to_num(foe["DUCK"].to_numpy(float)[1:]) > 0 if "DUCK" in foe.columns else 0
+        )
+        eye = z + EYE_STAND - DUCK_DROP * duck_me
+        head = zf + HEAD_STAND - DUCK_DROP * duck_foe
+        vx = foe["X"].to_numpy(float)[1:] - x[1:]
+        vy = foe["Y"].to_numpy(float)[1:] - y[1:]
+        vz = head - eye
+        n = np.sqrt(vx * vx + vy * vy + vz * vz)
+        p, yw = np.radians(pit[1:]), np.radians(yaw[1:])
+        view = np.stack([np.cos(p) * np.cos(yw), np.cos(p) * np.sin(yw), -np.sin(p)])
+        with np.errstate(invalid="ignore", divide="ignore"):
+            cosang = (view[0] * vx + view[1] * vy + view[2] * vz) / n
+        er = np.degrees(np.arccos(np.clip(cosang, -1, 1)))
+        er = np.where(alive & (n > 0), er, np.nan)
+        return {"sp": sp, "tn": tn, "er": er, "dist": n}
+
+    sa, sb = _series(a, b), _series(b, a)
+
+    def _lst(arr, nd):
+        return [
+            None if not np.isfinite(v) else (int(round(v)) if nd == 0 else round(float(v), nd))
+            for v in arr
+        ]
+
+    return {
+        "i0": int(i0),
+        "a": {"sp": _lst(sa["sp"], 0), "tn": _lst(sa["tn"], 0), "er": _lst(sa["er"], 1)},
+        "b": {"sp": _lst(sb["sp"], 0), "tn": _lst(sb["tn"], 0), "er": _lst(sb["er"], 1)},
+        "d": _lst(sa["dist"], 0),
+    }

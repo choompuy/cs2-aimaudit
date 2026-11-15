@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import cached_property
+from typing import Sequence
 import numpy as np
 import pandas as pd
 
@@ -525,6 +526,12 @@ class Demo:
     #                      {round: (t0, t1)} tick windows of the played
     #                      rounds (build_round_windows) - input of the
     #                      2D replay and the duels' round column
+    round_info: dict = field(default_factory=dict)
+    #                      {round: how it ended}: {"winner": 'CT'/'T'/'',
+    #                      "reason": see ROUND_REASONS, "end": tick of
+    #                      round_end | None, "bomb": [(tick, kind, sid)],
+    #                      "bomb_known": bool} - from the demo's round_end
+    #                      and bomb events (build_round_info)
 
     def side_at(self, round_no: int, sid: str) -> str:
         """Player's side in a given round (falls back to the static team)."""
@@ -553,6 +560,56 @@ class Demo:
     @cached_property
     def teams(self) -> dict[str, str]:
         return dict(zip(self.players["sid"], self.players["team"]))
+
+
+# How a round ended (the key of Demo.round_info[n]["reason"]).
+ROUND_REASONS = ("bomb", "defuse", "elim", "time", "surrender", "hostage", "draw", "other")
+# round_end's `message` is the stable signal; the numeric `reason` codes are
+# the fallback (CS2: 1 bombed, 7 defused, 8 CT win, 9 T win, 12 target saved).
+_REASON_BY_MESSAGE = (
+    ("Target_Bombed", "bomb"),
+    ("Bomb_Defused", "defuse"),
+    ("Target_Saved", "time"),
+    ("Surrender", "surrender"),
+    ("Hostages", "hostage"),
+    ("Round_Draw", "draw"),
+    ("Terrorists_Win", "elim"),
+    ("CTs_Win", "elim"),
+)
+_REASON_BY_CODE = {
+    1: "bomb",
+    7: "defuse",
+    8: "elim",
+    9: "elim",
+    10: "draw",
+    11: "hostage",
+    12: "time",
+    13: "hostage",
+    17: "surrender",
+    18: "surrender",
+}
+
+
+def classify_round_end(message, code=None) -> str:
+    """round_end -> one of ROUND_REASONS (message first, numeric code second)."""
+    msg = str(message or "")
+    for needle, key in _REASON_BY_MESSAGE:
+        if needle in msg:
+            return key
+    try:
+        return _REASON_BY_CODE.get(int(code), "other")
+    except (TypeError, ValueError):
+        return "other"
+
+
+def _side_of_winner(w) -> str:
+    """round_end.winner (team number 2 = T, 3 = CT, or a name) -> 'T'/'CT'/''."""
+    s = str(w).strip().upper()
+    if s in ("2", "2.0", "T", "TERRORIST", "TERRORISTS"):
+        return "T"
+    if s in ("3", "3.0", "CT", "COUNTER-TERRORIST", "COUNTERTERRORIST"):
+        return "CT"
+    return ""
 
 
 def build_round_windows(
@@ -632,6 +689,53 @@ def round_of_tick(windows, tick) -> int | None:
         if t0 <= t <= t1:
             return n
     return None
+
+
+def build_round_info(
+    windows: dict[int, tuple[int, int]],
+    round_end: pd.DataFrame | None,
+    bombs: Sequence[tuple[int, str, str]],
+    bomb_known: bool = False,
+) -> dict[int, dict]:
+    """
+    round -> how it ended, from the demo's own ``round_end`` rows
+    (columns tick / winner / reason / message) and the bomb events
+    [(tick, kind, sid)], kind in plant / defuse_start / defuse / boom.
+
+    A ``round_end`` belongs to the round whose window holds its tick (a row
+    past the last window - the match-ending surrender - belongs to nobody).
+    A round without a ``round_end`` (many demos do not carry the event, see
+    docs/DEMOPARSER_NOTES.md 12.1) gets winner '' and reason '' - the
+    result is then inferred from the bomb events and the kills
+    (core.round_outcomes). ``bomb_known`` says the demo reports bomb events
+    at all, so "no plant in this round" is a fact and not a blind spot.
+    """
+    out: dict[int, dict] = {}
+    ends: list[tuple[int, str, str]] = []
+    if round_end is not None and len(round_end) and "tick" in round_end.columns:
+        for r in round_end.itertuples(index=False):
+            tk = pd.to_numeric(getattr(r, "tick", None), errors="coerce")
+            if pd.isna(tk):
+                continue
+            ends.append(
+                (
+                    int(tk),
+                    _side_of_winner(getattr(r, "winner", "")),
+                    classify_round_end(getattr(r, "message", ""), getattr(r, "reason", None)),
+                )
+            )
+    for n, (lo, hi) in windows.items():
+        hit = [e for e in ends if lo <= e[0] <= hi + 1]
+        # the round_end of the round is its LAST one inside the window
+        end = max(hit, key=lambda e: e[0]) if hit else None
+        out[int(n)] = {
+            "winner": end[1] if end else "",
+            "reason": end[2] if end else "",
+            "end": end[0] if end else None,
+            "bomb": sorted(b for b in bombs if lo <= int(b[0]) <= hi),
+            "bomb_known": bool(bomb_known),
+        }
+    return out
 
 
 def _first_shot_arr(ticks, sids) -> np.ndarray:

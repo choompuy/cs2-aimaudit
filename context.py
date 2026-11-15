@@ -76,8 +76,10 @@ def get_round_replay(path: str, mtime: float, round_no: int):
 
 
 @st.cache_data(show_spinner=False)
-def get_round_winners(path: str, mtime: float) -> dict:
-    return core.round_winners(get_demo(path, mtime))
+def get_round_outcomes(path: str, mtime: float) -> dict:
+    """How every round ended (winner + reason; the demo's round_end, else
+    read from the bomb events and the kills - core.round_outcomes)."""
+    return core.round_outcomes(get_demo(path, mtime))
 
 
 # The heavy frames behind st.cache_data, keyed on the demo file and

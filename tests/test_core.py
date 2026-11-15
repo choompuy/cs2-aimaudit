@@ -2998,6 +2998,119 @@ if _ws is not None:
         _ws.round_windows,
     )
 
+# --- how a round ended: round_end + the bomb events ---------------------------
+check(
+    "classify_round_end: the message is the signal, the numeric code the fallback",
+    core.classify_round_end("#SFUI_Notice_Target_Bombed", 1) == "bomb"
+    and core.classify_round_end("#SFUI_Notice_Bomb_Defused", 7) == "defuse"
+    and core.classify_round_end("#SFUI_Notice_Terrorists_Win", 9) == "elim"
+    and core.classify_round_end("#SFUI_Notice_CTs_Win", 8) == "elim"
+    and core.classify_round_end("#SFUI_Notice_Target_Saved", 12) == "time"
+    and core.classify_round_end("#SFUI_Notice_CTs_Surrender", 18) == "surrender"
+    and core.classify_round_end("", 12) == "time"
+    and core.classify_round_end("", None) == "other"
+    and core.classify_round_end(None, "x") == "other",
+)
+_re = pd.DataFrame(
+    {
+        "tick": [700, 5000],
+        "winner": [3, 2],
+        "reason": [7, 18],
+        "message": ["#SFUI_Notice_Bomb_Defused", "#SFUI_Notice_CTs_Surrender"],
+    }
+)
+_ri = core.build_round_info(
+    {1: (100, 830)},
+    _re,
+    [(300, "plant", S1), (650, "defuse_start", S2), (690, "defuse", S2), (9000, "plant", S1)],
+)
+check(
+    "round_info: winner + reason + end tick, bomb events of the window only",
+    _ri == {1: {"winner": "CT", "reason": "defuse", "end": 700,
+                "bomb": [(300, "plant", S1), (650, "defuse_start", S2), (690, "defuse", S2)],
+                "bomb_known": False}},
+    _ri,
+)
+check(
+    "round_info: bomb_known is carried per round",
+    core.build_round_info({1: (100, 830)}, None, [], bomb_known=True)[1]["bomb_known"] is True,
+)
+check(
+    "round_info: a match-ending round_end past the last window belongs to nobody; no round_end -> blank",
+    core.build_round_info({1: (100, 830)}, _re.iloc[1:], [])[1]["winner"] == ""
+    and core.build_round_info({1: (100, 830)}, None, [])[1]["reason"] == ""
+    and core.build_round_info({}, _re, []) == {},
+)
+_rr_info = make_match()
+_rr_info["ticks"] = pd.DataFrame(_rr_rows)
+_rr_info["events"].update(_rr_events)
+_rr_info["events"]["round_end"] = pd.DataFrame(
+    {"tick": [700], "winner": [3], "reason": [7], "message": ["#SFUI_Notice_Bomb_Defused"]}
+)
+_rr_info["events"]["bomb_planted"] = pd.DataFrame(
+    {"tick": [300], "user_steamid": pd.array([int(S1)], dtype="uint64")}
+)
+_rr_info["events"]["bomb_defused"] = pd.DataFrame(
+    {"tick": [690], "user_steamid": pd.array([int(S2)], dtype="uint64")}
+)
+FakeParser.demos["rr_info.dem"] = _rr_info
+_di = core.load_demo("rr_info.dem")
+check(
+    "load_demo: round_info carries the winner, how (defuse) and the bomb story",
+    _di.round_info.get(1, {}).get("winner") == "CT"
+    and _di.round_info[1]["reason"] == "defuse"
+    and _di.round_info[1]["end"] == 700
+    and [b[1] for b in _di.round_info[1]["bomb"]] == ["plant", "defuse"],
+    _di.round_info,
+)
+check(
+    "round_winners: the demo's own round_end wins over the elimination guess",
+    core.round_winners(_di) == {1: "CT"},
+    core.round_winners(_di),
+)
+# a demo WITHOUT round_end (the FACEIT / Valve demos of docs/DEMOPARSER_NOTES.md
+# have none): the result is read from the bomb events and the kills
+import copy as _copy  # noqa: E402
+
+
+def _no_round_end(demo, bombs, known=True):
+    d = _copy.copy(demo)
+    d.round_info = {1: {"winner": "", "reason": "", "end": None, "bomb": bombs, "bomb_known": known}}
+    return d
+
+
+check(
+    "round_outcomes: the bomb exploded -> T won by the bomb (read from the events)",
+    core.round_outcomes(_no_round_end(_di, [(300, "plant", S1), (750, "boom", S1)]))[1]
+    == {"winner": "T", "reason": "bomb", "end": 750, "inferred": True},
+)
+check(
+    "round_outcomes: the bomb was defused -> CT won by the defuse",
+    core.round_outcomes(_no_round_end(_di, [(300, "plant", S1), (690, "defuse", S2)]))[1]
+    == {"winner": "CT", "reason": "defuse", "end": 690, "inferred": True},
+)
+check(
+    "round_outcomes: no plant, nobody eliminated, bomb events known -> CT won on time",
+    core.round_outcomes(_no_round_end(_di, []))[1]
+    == {"winner": "CT", "reason": "time", "end": None, "inferred": True},
+)
+check(
+    "round_outcomes: a planted bomb nobody resolved, or bomb events not reported -> stays blank",
+    core.round_outcomes(_no_round_end(_di, [(300, "plant", S1)]))[1]["winner"] == ""
+    and core.round_outcomes(_no_round_end(_di, [], known=False))[1]["winner"] == "",
+)
+check(
+    "round_outcomes: the demo's own round_end is never second-guessed",
+    core.round_outcomes(_di)[1] == {"winner": "CT", "reason": "defuse", "end": 700, "inferred": False},
+    core.round_outcomes(_di)[1],
+)
+check(
+    "load_demo: a demo without round_end / bomb events still loads (blank outcome)",
+    core.load_demo("rr.dem").round_info.get(1)
+    == {"winner": "", "reason": "", "end": None, "bomb": [], "bomb_known": False},
+    core.load_demo("rr.dem").round_info,
+)
+
 # --- round_replay_data -------------------------------------------------------
 _rrd = core.round_replay_data(_rrdemo, 1)
 check(
@@ -3174,6 +3287,7 @@ _rpl = round_payload(
     radar=None,
     duels=_rdu[:1],
     rounds=[{"n": 1, "win": "CT"}, {"n": 2, "win": "unknown"}],
+    thr=34.0,
     at=460,
     sel=0,
 )
@@ -3235,28 +3349,30 @@ check(
     and _rpl["at"] == 460,
     (_rpl["shots"], _rpl["kills"], _rpl["hits"]),
 )
+_dz = _rpl["duels"][0]
 check(
     "payload: a duel card carries killer / victim (index + name), segment, weapon",
-    _rpl["duels"]
-    == [
-        {
-            "a": 452,
-            "b": 606,
-            "tk": 510,
-            "ki": _pi[S1],
-            "vi": _pi[S3],
-            "kn": "alpha",
-            "vn": "charlie",
-            "w": "ak47",
-            "hs": True,
-            "dur": 0.2,
-        }
-    ],
-    _rpl["duels"],
+    {k: _dz[k] for k in ("a", "b", "tk", "ki", "vi", "kn", "vn", "w", "hs", "dur", "first", "kft", "vft")}
+    == {
+        "a": 452,
+        "b": 606,
+        "tk": 510,
+        "ki": _pi[S1],
+        "vi": _pi[S3],
+        "kn": "alpha",
+        "vn": "charlie",
+        "w": "ak47",
+        "hs": True,
+        "dur": 0.2,
+        "first": "killer",
+        "kft": 500,
+        "vft": 505,
+    },
+    _dz,
 )
 check(
     "payload: rounds row for the match bar (unknown winner -> '')",
-    _rpl["rounds"] == [[1, "CT"], [2, ""]],
+    _rpl["rounds"] == [[1, "CT", ""], [2, "", ""]],
     _rpl["rounds"],
 )
 _du1 = [{"a": 400, "b": 700, "tick": 510, "killer": S1, "victim": S3, "weapon": "ak47"}]
@@ -3294,6 +3410,79 @@ check(
                     "frames": {}, "keys": [], "shots": [], "kills": [],
                     "hits": []}, names={}, side_of=_rside)["players"] == [],
 )
+# --- duel telemetry: live aim numbers of both duelists ----------------------------
+_tel = core.duel_telemetry(
+    _rrd["frames"][S1], _rrd["frames"][S3], (400, 500), _rrd["t0"], _rrd["step"], 64
+)
+_n_tel = len(_tel["a"]["sp"])
+check(
+    "duel_telemetry: one value per replay sample of the window, i0 = first sample",
+    _tel["i0"] == 300 and _n_tel == 101 and len(_tel["d"]) == _n_tel,
+    (_tel["i0"], _n_tel),
+)
+check(
+    "duel_telemetry: speed = the position delta (1 unit/tick = 64 u/s), a standing player 0",
+    _tel["a"]["sp"][5] == 64 and _tel["b"]["sp"][5] == 0,
+    (_tel["a"]["sp"][5], _tel["b"]["sp"][5]),
+)
+check(
+    "duel_telemetry: a steady crosshair turns 0 deg/s; the distance shrinks as S1 closes in",
+    _tel["a"]["tn"][5] == 0 and _tel["d"][0] > _tel["d"][-1],
+    (_tel["a"]["tn"][5], _tel["d"][0], _tel["d"][-1]),
+)
+check(
+    "duel_telemetry: aiming straight at the enemy -> a small crosshair-to-head angle",
+    _tel["a"]["er"][5] is not None and _tel["a"]["er"][5] < 2.0,
+    _tel["a"]["er"][5],
+)
+_tel2 = core.duel_telemetry(
+    _rrd["frames"][S1], _rrd["frames"][S3], (600, 700), _rrd["t0"], _rrd["step"], 64
+)
+check(
+    "duel_telemetry: a dead player has no speed / turn / aim error (parser artifact masked)",
+    _tel2["a"]["sp"][5] is None and _tel2["a"]["er"][5] is None,
+    (_tel2["a"]["sp"][5], _tel2["a"]["er"][5]),
+)
+check(
+    "duel_telemetry: nothing to show -> empty",
+    core.duel_telemetry(_rrd["frames"][S1], _rrd["frames"][S3], (5000, 6000), _rrd["t0"], _rrd["step"], 64) == {}
+    and core.duel_telemetry(None, None, (0, 1), 0, 1, 64) == {},
+)
+check(
+    "payload: every duel carries its telemetry for killer and victim",
+    "tel" in _dz
+    and _dz["tel"]["i0"] == _dz["a"] - _rrd["t0"]
+    and set(_dz["tel"]) == {"i0", "k", "v", "d"}
+    and set(_dz["tel"]["k"]) == {"sp", "tn", "er"},
+    list(_dz.get("tel", {})),
+)
+check(
+    "payload: the moving threshold passes through",
+    _rpl["thr"] == 34.0
+    and round_payload(_rrd, names=_rnames, side_of=_rside)["thr"] is None,
+    _rpl["thr"],
+)
+check(
+    "payload: no outcome in the demo -> the rounds bar's winner fills the gap, no reason",
+    _rpl["out"] == {"win": "CT", "why": "", "end": None, "inferred": False} and _rpl["bomb"] == [],
+    (_rpl["out"], _rpl["bomb"]),
+)
+_rrd_i = core.round_replay_data(_di, 1)
+_rpl_i = round_payload(_rrd_i, names=_rnames, side_of=_rside)
+_pi_i = {p["sid"]: i for i, p in enumerate(_rpl_i["players"])}
+check(
+    "payload: how the round ended (winner, reason, end tick) + the bomb events with player indices",
+    _rpl_i["out"] == {"win": "CT", "why": "defuse", "end": 700, "inferred": False}
+    and _rpl_i["bomb"] == [[300, "plant", _pi_i[S1]], [690, "defuse", _pi_i[S2]]],
+    (_rpl_i["out"], _rpl_i["bomb"]),
+)
+check(
+    "payload: a round bar chip carries how the round ended (unknown reason -> '')",
+    round_payload(_rrd, names=_rnames, side_of=_rside,
+                  rounds=[{"n": 1, "win": "T", "why": "bomb"}, {"n": 2, "win": "CT", "why": "nonsense"}])["rounds"]
+    == [[1, "T", "bomb"], [2, "CT", ""]],
+)
+
 check(
     "payload: JSON-serialisable (NaN never leaks into the model)",
     "NaN" not in _json.dumps(_rpl),

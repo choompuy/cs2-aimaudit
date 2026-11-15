@@ -14,7 +14,7 @@ from plotly.subplots import make_subplots
 
 import core
 import theme
-from context import get_round_replay, get_round_winners, get_timeline
+from context import get_round_outcomes, get_round_replay, get_timeline
 from ui.charts import PAL, style_figure
 from ui.format import duel_label, fmt_first, fmt_result, num
 from ui.roundrep import round_payload, round_replay
@@ -430,14 +430,21 @@ def _replay_fragment(ctx) -> None:
                 sel = pos
                 break
 
-    winners = get_round_winners(path, mtime)
+    # how every round ended: the demo's round_end when it has one, else read
+    # from the bomb events and the kills (core.round_outcomes)
+    outcomes = get_round_outcomes(path, mtime)
+    data["info"] = {**(data.get("info") or {}), **outcomes.get(int(round_no), {})}
     payload = round_payload(
         data,
         names=name_of,
         side_of=lambda s: demo.side_at(int(round_no), s),
         radar=core.load_radar(str(demo.header.get("map_name") or "")),
         duels=duels,
-        rounds=[{"n": n, "win": winners.get(n, "")} for n in sorted(windows)],
+        rounds=[
+            {"n": n, "win": o["winner"], "why": o["reason"]}
+            for n, o in sorted(outcomes.items())
+        ],
+        thr=ctx.thr,
         sel=sel,
         labels={
             **{
@@ -448,7 +455,14 @@ def _replay_fragment(ctx) -> None:
                     "players_hide", "players_show", "duels", "no_duels",
                     "locked", "rounds", "round", "won_ct", "won_t", "leg_ct", "leg_t",
                     "view_reset", "round_prev", "round_next", "eye_hide", "eye_show",
-                    "eye_all", "eye_none",
+                    "eye_all", "eye_none", "leg_move", "u_s", "out_unknown",
+                    "out_inferred", "why_bomb", "why_defuse", "why_elim", "why_time",
+                    "why_surrender", "why_hostage", "why_draw", "why_other",
+                    "b_plant", "b_defuse", "b_boom", "duel_panel", "first_killer",
+                    "first_victim", "first_sim", "role_killer", "role_victim",
+                    "tel_speed", "tel_turn", "tel_err", "tel_dist", "tel_first",
+                    "tel_moving", "tel_standing", "tel_shots", "tel_leg_speed",
+                    "tel_leg_err", "tel_leg_thr", "tel_leg_shot",
                 )
             },
             "exit": t("rr_exit_duel"),
