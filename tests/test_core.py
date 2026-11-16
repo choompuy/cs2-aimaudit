@@ -3287,20 +3287,21 @@ _rpl = round_payload(
     radar=None,
     duels=_rdu[:1],
     rounds=[{"n": 1, "win": "CT"}, {"n": 2, "win": "unknown"}],
-    thr=34.0,
     at=460,
     sel=0,
 )
 check(
-    "payload: players sorted by nickname (case-insensitive), whatever the frame order",
-    [p["name"] for p in _rpl["players"]] == ["alpha", "Bravo", "charlie", "Delta"],
+    "payload: split by side (CT first, then T), by nickname (case-insensitive) inside a team",
+    [p["name"] for p in _rpl["players"]] == ["charlie", "Delta", "alpha", "Bravo"],
     [p["name"] for p in _rpl["players"]],
 )
 _rrd_rev = dict(_rrd, frames=dict(reversed(list(_rrd["frames"].items()))))
 check(
-    "payload: the order is the same in every round (it never depends on frame order or side)",
-    [p["sid"] for p in round_payload(_rrd_rev, names=_rnames, side_of=lambda s: "CT").get("players")]
-    == [p["sid"] for p in _rpl["players"]],
+    "payload: the order never depends on the frame order; a side with nobody on it goes last",
+    [p["sid"] for p in round_payload(_rrd_rev, names=_rnames, side_of=_rside).get("players")]
+    == [p["sid"] for p in _rpl["players"]]
+    and [p["name"] for p in round_payload(_rrd, names=_rnames, side_of=lambda s: "CT" if s == S2 else "?")["players"]][0]
+    == "Bravo",
 )
 check(
     "payload: nobody is special - no role / me / marks in the model",
@@ -3455,12 +3456,6 @@ check(
     and set(_dz["tel"]) == {"i0", "k", "v", "d"}
     and set(_dz["tel"]["k"]) == {"sp", "tn", "er"},
     list(_dz.get("tel", {})),
-)
-check(
-    "payload: the moving threshold passes through",
-    _rpl["thr"] == 34.0
-    and round_payload(_rrd, names=_rnames, side_of=_rside)["thr"] is None,
-    _rpl["thr"],
 )
 check(
     "payload: no outcome in the demo -> the rounds bar's winner fills the gap, no reason",

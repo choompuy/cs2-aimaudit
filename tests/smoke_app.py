@@ -567,15 +567,18 @@ def scenario_one_round():
         radar=None,
         duels=_all_duels,
         rounds=[{"n": 1, "win": "T", "why": "bomb"}],
-        thr=34.0,
         sel=0,
     )
     _names_sorted = [p["name"] for p in _pl["players"]]
     _p0 = next(p for p in _pl["players"] if p["sid"] == S1)
-    _i_at = int(_pl["at"]) - _pl["t0"]
+    _by_side = {}
+    for p in _pl["players"]:
+        _by_side.setdefault(p["side"], []).append(p["name"])
+    _sides_seen = [p["side"] for p in _pl["players"]]
     check(
-        "replay payload: sorted by nickname, hp, weapon change, held keys for everyone",
-        _names_sorted == sorted(_names_sorted, key=str.casefold)
+        "replay payload: CT group then T group, sorted by nickname inside a team; hp, weapon change, held keys",
+        all(v == sorted(v, key=str.casefold) for v in _by_side.values())
+        and _sides_seen == sorted(_sides_seen, key=lambda x: {"CT": 0, "T": 1}.get(x, 2))
         and _p0["hp"][0] == 100
         and _p0["w"][0][1] == "ak47"
         and all("kb" in p for p in _pl["players"] if p["sid"] == S1),
@@ -590,7 +593,6 @@ def scenario_one_round():
         and _pl["rounds"] == [[1, "T", "bomb"]]
         and _pl["sel"] == 0
         and _pl["at"] == _pl["duels"][0]["a"]
-        and _pl["thr"] == 34.0
         and "tel" in _pl["duels"][0],
         (_pl["duels"], _pl["rounds"], _pl["sel"], _pl["at"]),
     )

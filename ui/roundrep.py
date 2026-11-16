@@ -92,7 +92,6 @@ def round_payload(
     duels: Sequence[Mapping[str, Any]] = (),
     rounds: Sequence[Mapping[str, Any]] = (),
     bombs: Sequence[Sequence[Any]] | None = None,
-    thr: float | None = None,
     at: int | None = None,
     sel: int | None = None,
     labels: Mapping[str, str] | None = None,
@@ -110,11 +109,11 @@ def round_payload(
     the numbers measured at the first shots. ``rounds`` is the whole match
     [{"n", "win", "why"}] for the round bar (win 'CT'/'T'/'', why one of
     core.ROUND_REASONS); ``bombs`` are [(tick, kind, sid)] of the round
-    (default: ``data["info"]["bomb"]``); ``thr`` is the "moving" speed
-    threshold (u/s); ``at`` is the tick to start at; ``sel`` preselects a
-    duel (locks the timeline).
+    (default: ``data["info"]["bomb"]``); ``at`` is the tick to start at;
+    ``sel`` preselects a duel (locks the timeline).
 
-    Players come out sorted by nickname (stable order across rounds);
+    Players come out grouped by side (CT first, then T) and sorted by
+    nickname inside a side, so a player keeps his place in his team's list;
     positions and view angles are whole numbers; held keys are ONE bitmask
     per sample (bit i = ``keys[i]``), so every player's keys cost a single
     array. Every duel carries ``tel``: both duelists' speed / turn rate /
@@ -135,10 +134,13 @@ def round_payload(
     players: list[dict] = []
     xall: list[float] = []
     yall: list[float] = []
-    for sid, f in sorted(
-        ((str(s), fr) for s, fr in data["frames"].items()),
-        key=lambda kv: (_name(kv[0]).casefold(), kv[0]),
-    ):
+    side_rank = {"CT": 0, "T": 1}
+
+    def _order(kv):
+        sid = kv[0]
+        return (side_rank.get(side_of(sid), 2), _name(sid).casefold(), sid)
+
+    for sid, f in sorted(((str(s), fr) for s, fr in data["frames"].items()), key=_order):
         g = f.drop_duplicates("tick").set_index("tick").reindex(grid)
         wx, wy = _ffilled(g, "X"), _ffilled(g, "Y")
         if not len(wx) or np.isnan(wx).all():
@@ -311,7 +313,6 @@ def round_payload(
         "rounds": rd,
         "out": out,
         "bomb": bomb,
-        "thr": None if thr is None else float(thr),
         "sel": sel_i,
         "at": at_t,
         "radar": rp,

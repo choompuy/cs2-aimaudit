@@ -36,7 +36,6 @@ export default function (component) {
   const lab = d.lab || {};
   const C = d.col || {};
   const P = d.players || [];
-  const THR = typeof d.thr === "number" ? d.thr : null;
   // glyphs of how a round ended / what the bomb did (icons never stand alone:
   // every use also carries a title / text label)
   const WHY_GLYPH = { bomb: "\u{1F4A5}", defuse: "\u2702", elim: "\u2620", time: "\u23F1", surrender: "\u2691" };
@@ -189,15 +188,16 @@ export default function (component) {
     const b = el("button", "rr-spdi", spdTxt(s));
     b.type = "button";
     b.setAttribute("role", "menuitemradio");
-    b.addEventListener("click", () => { setSpeed(s); openMenu(false); spdBtn.focus(); });
+    b.addEventListener("click", () => { setSpeed(s); openMenu(false); try { spdBtn.focus(); } catch (err) { /* ignore */ } });
     spdMenu.appendChild(b);
     return b;
   });
   spdWrap.append(spdBtn, spdMenu);
-  let menuOpen = false, menuTimer = null;
-  function openMenu(on) {
+  let menuOpen = false, menuPinned = false, menuTimer = null;
+  function openMenu(on, pin) {
     if (menuTimer) { clearTimeout(menuTimer); menuTimer = null; }
     menuOpen = on;
+    menuPinned = on ? !!pin : false;
     spdMenu.hidden = !on;
     spdBtn.setAttribute("aria-expanded", on ? "true" : "false");
   }
@@ -210,9 +210,15 @@ export default function (component) {
     const j = Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? SPEEDS.indexOf(1) : i) + dir));
     setSpeed(SPEEDS[j]);
   };
-  spdBtn.addEventListener("click", () => openMenu(!menuOpen));
-  spdWrap.addEventListener("mouseenter", () => openMenu(true));
+  // a click PINS the menu open (a hover alone closes it when the pointer leaves);
+  // a click on the button while it is pinned closes it
+  spdBtn.addEventListener("click", () => {
+    if (menuOpen && menuPinned) openMenu(false);
+    else openMenu(true, true);
+  });
+  spdWrap.addEventListener("mouseenter", () => { if (!menuOpen) openMenu(true, false); else if (menuTimer) { clearTimeout(menuTimer); menuTimer = null; } });
   spdWrap.addEventListener("mouseleave", () => {
+    if (menuPinned) return;
     if (menuTimer) clearTimeout(menuTimer);
     menuTimer = setTimeout(() => openMenu(false), 250);
   });
@@ -220,15 +226,27 @@ export default function (component) {
     if (e.key === "Escape") { openMenu(false); spdBtn.focus(); }
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      openMenu(true);
-      const k = spdItems.indexOf(document.activeElement);
+      openMenu(true, true);
+      const root2 = spdWrap.getRootNode();
+      const act = root2 && root2.activeElement ? root2.activeElement : document.activeElement;
+      const k = spdItems.indexOf(act);
       const nx = e.key === "ArrowDown" ? k + 1 : k - 1;
       spdItems[(nx + spdItems.length) % spdItems.length].focus();
     }
   });
-  const outside = (e) => { if (menuOpen && !spdWrap.contains(e.target)) openMenu(false); };
-  document.addEventListener("pointerdown", outside);
-  disposers.push(() => { document.removeEventListener("pointerdown", outside); if (menuTimer) clearTimeout(menuTimer); });
+  // close on a press OUTSIDE the menu. The player lives in a shadow root, so a
+  // listener on the document sees the event retargeted to the shadow HOST:
+  // `contains(e.target)` would call every press - on the menu items too -
+  // "outside" and close the menu before the click lands. composedPath() holds
+  // the real elements.
+  const outside = (e) => {
+    if (!menuOpen) return;
+    const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+    const inside = path.length ? path.indexOf(spdWrap) >= 0 : spdWrap.contains(e.target);
+    if (!inside) openMenu(false);
+  };
+  document.addEventListener("pointerdown", outside, true);
+  disposers.push(() => { document.removeEventListener("pointerdown", outside, true); if (menuTimer) clearTimeout(menuTimer); });
 
   const plBtn = btn("", lab.players || "players", lab.players_hide || "hide", () => {
     S.panel = !S.panel; applyPanel(); layout(); draw();
@@ -431,7 +449,17 @@ export default function (component) {
     });
     head.appendChild(masterEye);
     left.appendChild(head);
+    let lastSide = null;
     for (const p of P) {
+      if (p.side !== lastSide) {
+        // a group header per side; the players inside are sorted by nickname
+        lastSide = p.side;
+        const cnt = P.filter((q) => q.side === p.side).length;
+        const th = el("div", "rr-th " + sideCls(p.side));
+        th.appendChild(el("i", "rr-sdot " + sideCls(p.side)));
+        th.appendChild(el("span", null, (p.side === "CT" ? "CT" : p.side === "T" ? "T" : "?") + " \u00B7 " + cnt));
+        left.appendChild(th);
+      }
       const row = el("div", "rr-prow");
       const eye = el("button", "rr-eye");
       eye.type = "button";
@@ -484,7 +512,6 @@ export default function (component) {
       lr.wp.title = w;
       const v = alive ? speedAt(lr.p, t) : null;
       lr.sp.textContent = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
-      lr.sp.classList.toggle("mv", v != null && THR != null && v > THR);
     }
   }
   function applyPanel() {
@@ -533,7 +560,7 @@ export default function (component) {
       { who: "v", pi: z.vi, name: z.vn, role: lab.role_victim || "victim", sp: z.vsp, er: z.ver, sh: z.vsh, ft: z.vft },
     ];
     // one speed scale for both charts, so the two duelists are comparable
-    let vmax = Math.max(250, THR != null ? THR * 3 : 0);
+    let vmax = 250;
     if (tel) for (const w of ["k", "v"]) for (const v of tel[w].sp) if (v != null && v > vmax) vmax = v;
     vmax = Math.ceil(vmax / 50) * 50;
     const head = el("div", "rr-dph");
@@ -571,9 +598,7 @@ export default function (component) {
       // what the duels table measured at THIS player's first shot
       const fb = [];
       if (sd.ft != null) fb.push((lab.tel_first || "first shot") + " " + fmtT((sd.ft - d.t0) / d.tr));
-      if (sd.sp != null) {
-        fb.push(sd.sp + " " + (lab.u_s || "u/s") + (THR != null ? " (" + (sd.sp > THR ? (lab.tel_moving || "moving") : (lab.tel_standing || "standing")) + ")" : ""));
-      }
+      if (sd.sp != null) fb.push(sd.sp + " " + (lab.u_s || "u/s"));
       if (sd.er != null) fb.push(sd.er + "\u00B0");
       if (sd.sh != null) fb.push((lab.tel_shots || "shots") + ": " + sd.sh);
       if (fb.length) col.appendChild(el("div", "rr-dfs", fb.join(" \u00B7 ")));
@@ -609,7 +634,6 @@ export default function (component) {
       const mk = (cls, col, text) => { const s = el("span"); const i = el("i", cls); i.style.background = col; s.append(i, " " + text); return s; };
       lg.append(mk("rr-legline", C.acc, lab.tel_leg_speed || "speed"),
         mk("rr-legline", C.warn, lab.tel_leg_err || "aim error"));
-      if (THR != null) lg.append(mk("rr-legdash", C.text2, (lab.tel_leg_thr || "moving threshold") + " " + Math.round(THR)));
       lg.append(mk("rr-legline", C.text, lab.tel_leg_shot || "shot"));
       duelWrap.appendChild(lg);
     }
@@ -639,7 +663,6 @@ export default function (component) {
       // live numbers at the playhead (from the telemetry of the duel)
       const sp = telAt(tel, who, "sp", t), tn = telAt(tel, who, "tn", t), er = telAt(tel, who, "er", t);
       c.live.sp.textContent = sp == null ? "\u2014" : sp + " " + (lab.u_s || "u/s");
-      c.live.sp.classList.toggle("mv", sp != null && THR != null && sp > THR);
       c.live.tn.textContent = tn == null ? "\u2014" : tn + "\u00B0/s";
       c.live.er.textContent = er == null ? "\u2014" : er + "\u00B0";
       if (!c.cx || !tel) continue;
@@ -650,12 +673,6 @@ export default function (component) {
       const xOf = (tick) => ((tick - z.a) / Math.max(1, z.b - z.a)) * (W2 - 2) + 1;
       const ySp = (v) => hh - Math.min(1, v / c.vmax) * (hh - 3) - 1;
       const yEr = (v) => hh - Math.min(1, v / ERR_MAX) * (hh - 3) - 1;
-      // moving threshold
-      if (THR != null) {
-        cx.setLineDash([4, 3]); cx.strokeStyle = rgba(C.text2, 0.8); cx.lineWidth = 1;
-        cx.beginPath(); cx.moveTo(0, ySp(THR)); cx.lineTo(W2, ySp(THR)); cx.stroke();
-        cx.setLineDash([]);
-      }
       const line = (arr, yf, col) => {
         cx.strokeStyle = col; cx.lineWidth = 1.6; cx.beginPath();
         let pen = false;
@@ -830,18 +847,20 @@ export default function (component) {
     for (const ch of p.w) { if (ch[0] <= tick) w = ch[1]; else break; }
     return w || "";
   }
-  // horizontal speed (u/s) from the positions around the playhead (a central
-  // difference over one sample each way); null for a dead player, a
-  // teleport or a sample outside the round
+  // horizontal speed (u/s) from the positions around the playhead: a delta
+  // over +-2 samples (~0.2 s) smooths the one-unit rounding of the positions,
+  // and the shown value snaps to 5 u/s - the number holds still instead of
+  // flickering with every sample. null for a dead player, a teleport or a
+  // sample outside the round
   function speedAt(p, tick) {
     const n = p.x.length;
-    if (n < 2) return null;
+    if (n < 3) return null;
     const i = Math.max(0, Math.min(n - 1, Math.round((tick - d.t0) / d.step)));
-    const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+    const a = Math.max(0, i - 2), b = Math.min(n - 1, i + 2);
     if (b === a || p.x[a] == null || p.x[b] == null || p.y[a] == null || p.y[b] == null) return null;
     if (p.al && !p.al[i]) return null;
     const v = Math.hypot(p.x[b] - p.x[a], p.y[b] - p.y[a]) / (((b - a) * d.step) / d.tr);
-    return v > 600 ? null : v;
+    return v > 600 ? null : Math.round(v / 5) * 5;
   }
 
   // ---------- drawing --------------------------------------------------------------------------------------------------
@@ -927,14 +946,6 @@ export default function (component) {
           ctx.beginPath(); ctx.arc(px, py, R + 3, 0, Math.PI * 2);
           ctx.strokeStyle = rgba(C.flash, Math.min(0.9, 0.3 + s.fl / 4));
           ctx.lineWidth = 2.5; ctx.stroke();
-        }
-        // moving faster than the stop threshold: a dashed ring (shots on the
-        // move are the inaccurate ones - this is the state the audit cares about)
-        const v = THR != null ? speedAt(p, t) : null;
-        if (v != null && v > THR) {
-          ctx.beginPath(); ctx.arc(px, py, R + 3.5, 0, Math.PI * 2);
-          ctx.setLineDash([2.5, 2.5]); ctx.strokeStyle = col; ctx.lineWidth = 1.3; ctx.stroke();
-          ctx.setLineDash([]);
         }
         // view direction: a short arrow
         const a = (s.yaw == null ? 0 : s.yaw) * Math.PI / 180;
@@ -1048,10 +1059,6 @@ export default function (component) {
     mark("rr-legline", C.ct, lab.leg_ct || "CT kill"),
     mark("rr-legline", C.t, lab.leg_t || "T kill"),
   );
-  if (THR != null) {
-    const s = el("span"); s.append(el("i", "rr-legring"), " " + (lab.leg_move || "moving") + " > " + Math.round(THR) + " " + (lab.u_s || "u/s"));
-    leg.appendChild(s);
-  }
   box.appendChild(leg);
   if (lab.howto) box.appendChild(el("div", "rr-howto", lab.howto));
 

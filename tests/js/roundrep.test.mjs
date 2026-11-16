@@ -46,12 +46,26 @@ const save = (name) => {
 };
 const ok = (msg) => console.log("  ok  " + msg);
 
-// players: ONE list, sorted by nickname, nobody special
+// players: split into CT / T groups, sorted by nickname inside a team, nobody special
 const rows = $$(".rr-prow .rr-pname").map((n) => n.textContent);
-const want = [...payload.players.map((p) => p.name)].sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0);
+const cmp = (a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0);
+const rank = { CT: 0, T: 1 };
+const want = [...payload.players]
+  .sort((a, b) => (rank[a.side] ?? 2) - (rank[b.side] ?? 2) || cmp(a.name, b.name))
+  .map((p) => p.name);
 assert.deepStrictEqual(rows, want);
+assert.deepStrictEqual(payload.players.map((p) => p.name), want);   // the payload already has this order
+const heads = $$(".rr-th").map((n) => n.textContent.replace(/\s+/g, " ").trim());
+assert.strictEqual(heads.length, 2);
+assert.ok(heads[0].startsWith("CT") && heads[1].startsWith("T"));
+// each team header sits right before the first player of that team
+const order = [...root.querySelector(".rr-left").children]
+  .filter((n) => n.classList.contains("rr-th") || n.classList.contains("rr-prow"))
+  .map((n) => (n.classList.contains("rr-th") ? "H" : "P"))
+  .join("");
+assert.ok(/^HP+HP+$/.test(order), order);
 assert.strictEqual($$(".rr-team").length, 0);
-ok("players listed in one list sorted by nickname (" + rows.length + ")");
+ok("players split into CT / T, sorted by nickname inside a team (" + rows.length + ")");
 
 // every duel of the round has a card
 assert.strictEqual($$(".rr-card").length, payload.duels.length);
@@ -119,6 +133,45 @@ if (payload.bomb.length) {
 assert.ok($$(".rr-rd .rr-rg").length > 0);
 ok("round chips are marked with how the round ended");
 
+// the speed menu inside a shadow root (how Streamlit hosts a component): a press on a menu
+// item must not be taken for an outside press, and a click on the button after a hover keeps it open
+{
+  const shost = document.createElement("div");
+  document.body.appendChild(shost);
+  const sroot = shost.attachShadow({ mode: "open" });
+  const sparent = document.createElement("div");
+  sroot.appendChild(sparent);
+  const sTriggers = [];
+  const sCleanup = mod.default({ data: payload, parentElement: sparent, setTriggerValue: (k, v) => sTriggers.push([k, v]) });
+  const sq = (sel) => sparent.querySelector(sel);
+  const fire = (el, type, init = {}) => el.dispatchEvent(new window.MouseEvent(type, { bubbles: true, composed: true, ...init }));
+  const sBtn = sq(".rr-sbtn.spd"), sMenu = sq(".rr-spdmenu"), sWrap = sq(".rr-spd");
+  assert.ok(sMenu.hidden);
+  // hover opens, then a click on the button PINS it (it used to toggle it shut)
+  fire(sWrap, "mouseenter", { bubbles: false });
+  assert.ok(!sMenu.hidden);
+  fire(sBtn, "pointerdown"); fire(sBtn, "click");
+  assert.ok(!sMenu.hidden, "a click on the button after the hover must keep the menu open");
+  fire(sWrap, "mouseleave", { bubbles: false });
+  await new Promise((r) => setTimeout(r, 400));
+  assert.ok(!sMenu.hidden, "a pinned menu stays open when the pointer leaves");
+  // the real press sequence on an item: pointerdown, pointerup, click
+  const item = sMenu.querySelectorAll(".rr-spdi")[0];   // 0.1x
+  fire(item, "pointerdown");
+  assert.ok(!sMenu.hidden, "a press ON the menu is not an outside press (shadow DOM retargets the event)");
+  fire(item, "pointerup"); fire(item, "click");
+  assert.ok(sMenu.hidden);
+  assert.ok(sBtn.textContent.startsWith("0.1x"), sBtn.textContent);
+  // a press outside closes an open menu
+  fire(sBtn, "click");
+  assert.ok(!sMenu.hidden);
+  fire(document.body, "pointerdown");
+  assert.ok(sMenu.hidden);
+  sCleanup();
+  shost.remove();
+  ok("speed menu inside a shadow root: hover opens, click pins, item press selects, outside press closes");
+}
+
 // the speed menu: hidden until hover / click, 0.1x..4x, the choice sticks and survives a round switch
 const spdBtn = $(".rr-sbtn.spd"), menu = $(".rr-spdmenu");
 assert.ok(menu.hidden);
@@ -163,6 +216,15 @@ assert.strictEqual(root.__rr.speed, 0.25);
 key("[");
 assert.strictEqual(root.__rr.speed, 0.1);
 ok("arrows step one sample, Shift one second, [ ] change the speed");
+
+// the speed shown in the list does not flicker: it snaps to 5 u/s
+for (const sp of $$(".rr-psp")) {
+  const txt = sp.textContent.trim();
+  if (txt) assert.ok(/^\d+ /.test(txt) && Number(txt.split(" ")[0]) % 5 === 0, "speed snaps to 5: " + txt);
+}
+assert.ok(!root.innerHTML.includes("rr-legring"));
+assert.ok(!/moving\s*>/.test(root.textContent));
+ok("player speeds snap to 5 u/s, no 'moving > N' legend");
 
 // the duel panel: live aim numbers of both duelists
 if (payload.duels.length && payload.duels[0].tel) {

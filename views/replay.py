@@ -444,7 +444,6 @@ def _replay_fragment(ctx) -> None:
             {"n": n, "win": o["winner"], "why": o["reason"]}
             for n, o in sorted(outcomes.items())
         ],
-        thr=ctx.thr,
         sel=sel,
         labels={
             **{
@@ -455,14 +454,13 @@ def _replay_fragment(ctx) -> None:
                     "players_hide", "players_show", "duels", "no_duels",
                     "locked", "rounds", "round", "won_ct", "won_t", "leg_ct", "leg_t",
                     "view_reset", "round_prev", "round_next", "eye_hide", "eye_show",
-                    "eye_all", "eye_none", "leg_move", "u_s", "out_unknown",
+                    "eye_all", "eye_none", "u_s", "out_unknown",
                     "out_inferred", "why_bomb", "why_defuse", "why_elim", "why_time",
                     "why_surrender", "why_hostage", "why_draw", "why_other",
                     "b_plant", "b_defuse", "b_boom", "duel_panel", "first_killer",
                     "first_victim", "first_sim", "role_killer", "role_victim",
                     "tel_speed", "tel_turn", "tel_err", "tel_dist", "tel_first",
-                    "tel_moving", "tel_standing", "tel_shots", "tel_leg_speed",
-                    "tel_leg_err", "tel_leg_thr", "tel_leg_shot",
+                    "tel_shots", "tel_leg_speed", "tel_leg_err", "tel_leg_shot",
                 )
             },
             "exit": t("rr_exit_duel"),

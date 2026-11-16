@@ -8,7 +8,7 @@
 
 .rr-grid {
   display: grid;
-  grid-template-columns: minmax(150px, 190px) minmax(280px, 1fr) minmax(170px, 220px);
+  grid-template-columns: 12.5rem minmax(280px, 1fr) minmax(170px, 220px);
   gap: 0.6rem;
   align-items: start;
 }
@@ -46,6 +46,18 @@
 .rr-lt { flex: 1 1 auto; }
 
 /* players: one list, sorted by nickname */
+.rr-th {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.15rem 0.1rem;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+.rr-th.ct { color: var(--rr-ct); }
+.rr-th.t { color: var(--rr-t); }
 .rr-prow {
   display: flex;
   align-items: center;
@@ -94,17 +106,16 @@
   font-size: var(--font-size-xs);
 }
 .rr-psub {
-  display: flex;
-  gap: 0.4rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3.5rem;
+  gap: 0.3rem;
   min-height: 0.95rem;
   color: var(--text-secondary);
   font-size: 0.68rem;
   white-space: nowrap;
-  overflow: hidden;
 }
 .rr-pw { overflow: hidden; text-overflow: ellipsis; }
-.rr-psp { font-variant-numeric: tabular-nums; }
-.rr-psp.mv { color: var(--warning); font-weight: var(--font-weight-semibold); }
+.rr-psp { text-align: right; font-variant-numeric: tabular-nums; }
 .rr-php {
   flex: none;
   min-width: 1.6rem;
@@ -396,12 +407,12 @@
 }
 .rr-dl { color: var(--text-secondary); font-size: 0.68rem; }
 .rr-dv {
+  min-width: 4.2rem;
   font-variant-numeric: tabular-nums;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   white-space: nowrap;
 }
-.rr-dv.mv { color: var(--warning); }
 .rr-dfs { color: var(--text-secondary); font-size: var(--font-size-xs); }
 .rr-dcv {
   display: block;
@@ -419,14 +430,6 @@
   font-size: var(--font-size-xs);
 }
 .rr-dleg span { display: inline-flex; align-items: center; gap: 0.25rem; }
-.rr-legdash {
-  width: 0.9rem;
-  height: 0;
-  border-top: 2px dashed var(--text-secondary);
-  background: none !important;
-  display: inline-block;
-  flex: none;
-}
 .rr-kp { display: none; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
 .rr-kp.on { display: flex; }
 .rr-k {
@@ -458,14 +461,6 @@
 .rr-legend span { display: inline-flex; align-items: center; gap: 0.25rem; }
 .rr-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex: none; }
 .rr-legline { width: 2px; height: 0.75rem; border-radius: 1px; display: inline-block; flex: none; }
-.rr-legring {
-  width: 0.65rem;
-  height: 0.65rem;
-  border-radius: 50%;
-  border: 1.5px dashed var(--text-secondary);
-  display: inline-block;
-  flex: none;
-}
 .rr-howto { color: var(--text-secondary); font-size: var(--font-size-xs); padding-top: 0.25rem; }
 
 /* ---------- round result banner: who won and how ------------------------------------ */
@@ -512,7 +507,7 @@
 
 /* ---------- speed menu: 0.1x .. 4x, hover or click ------------------------------------- */
 .rr-spd { position: relative; display: inline-flex; flex: none; }
-.rr-sbtn.spd { min-width: 3.2rem; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong)); font-variant-numeric: tabular-nums; }
+.rr-sbtn.spd { width: 4.3rem; justify-content: center; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong)); font-variant-numeric: tabular-nums; }
 .rr-spdmenu {
   position: absolute;
   bottom: calc(100% + 2px);
