@@ -5,4 +5,4 @@ Importing the submodules here (not lazily) keeps `views.<page>.render`
 working after a plain `import views`.
 """
 
-from . import duels, extras, map, matches, overview, replay, shooting  # noqa: F401
+from . import dashboard, duels, extras, map, matches, overview, replay, settings, shooting  # noqa: F401

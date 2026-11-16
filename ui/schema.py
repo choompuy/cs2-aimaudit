@@ -133,6 +133,7 @@ def table(
     on_click=None,
     all_columns: bool = False,
     t=None,
+    empty: str = "",
 ) -> None:
     """One call instead of a hand-written data_table(...): cols, stripe and
     height come from tables.toml; selected/on_click are runtime values."""
@@ -157,6 +158,7 @@ def table(
         stripe=stripe,
         on_click=on_click,
         max_height=spec.get("max_height", 620),
+        empty=empty,
     )
 
 

@@ -112,15 +112,13 @@ def render(ctx) -> None:
     # data-driven halves (MR15 / overtime lengths) when sides are known;
     # [] falls back to the MR12 assumption everywhere below
     halves = core.halves_from_sides(demo.sides, n_rounds)
-    # which controls a page needs: the panel renders above the nav, but the
-    # page is already known from session_state (the nav widget only
+    # which controls a tab needs: the panel renders above the tabs, but the
+    # tab is already known from session_state (the segmented control only
     # re-binds it on the next run)
-    page_now = st.session_state.get("page") or "overview"
-    if page_now == "timeline":  # the old Timeline page: its chart lives in Duels now
-        page_now = st.session_state["page"] = "duels"
-    show_result = page_now == "duels"
+    tab_now = st.session_state.get("match_tab") or "overview"
+    show_result = tab_now == "duels"
     # the replay shows the whole round, so none of the analysis filters apply
-    show_panel = page_now not in ("guide", "replay")
+    show_panel = tab_now != "replay"
     # distance bands reuse the stop-quality thresholds: close is inside
     # SAFE_DIST, long is beyond STRICT_DIST
     DIST_KEYS = ("all", "close", "mid", "long")
@@ -361,12 +359,15 @@ def render(ctx) -> None:
     if not filters.empty():
         _counts += " " + t("flt_sum_of", shots=len(shots), duels=len(duels_all))
 
-    # The sticky bar: the filter summary row and the page tabs stay
-    # visible while the page scrolls (position: sticky in
-    # theme/overrides.css, scoped to this container's key; on Streamlit
-    # builds without .st-key-* classes the rule does not match and
-    # the bar scrolls away - no fallback hacks).
-    _hdr = st.container(key="hdr_sticky", gap="xsmall")
+    # The sticky bar: the match header (back button + tabs, shell.match_shell)
+    # already created it - reuse that container so the filter summary joins
+    # the tabs in ONE sticky bar (a second keyed container would be a
+    # duplicate element id).
+    _hdr = (
+        ctx.hdr
+        if getattr(ctx, "hdr", None) is not None
+        else st.container(key="hdr_sticky", gap="xsmall")
+    )
 
     if show_panel:
         if _flt_open:
@@ -512,7 +513,8 @@ def render(ctx) -> None:
                             width="content",
                         )
 
-    # keep the URL in sync so the view can be bookmarked / shared
+    # keep the URL in sync so the view can be bookmarked / shared; the
+    # navigation state itself lives in the short ?p&m&tab keys (shell)
     url_view = {
         "lang": st.session_state.get("lang"),
         "me": me,
@@ -523,7 +525,6 @@ def render(ctx) -> None:
         "side": st.session_state.get("flt_side", "all"),
         "res": st.session_state.get("flt_res", "both"),
         "dist": st.session_state.get("flt_dist", "all"),
-        "page": st.session_state.get("page", "overview"),
     }
     non_default = (
         url_view["weapons"]
@@ -532,7 +533,6 @@ def render(ctx) -> None:
         or url_view["dist"] != "all"
         or url_view["side"] != "all"
         or url_view["preset"] != "all"
-        or url_view["page"] != "overview"
         or (url_view["rounds"] and tuple(url_view["rounds"]) != (1, n_rounds))
     )
     if non_default:

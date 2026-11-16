@@ -13,6 +13,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import core
+import shell
 import theme
 from context import get_round_outcomes, get_round_replay, get_timeline
 from ui.charts import PAL, style_figure
@@ -282,7 +283,7 @@ def _open_in_replay(rnd: int, tick: int, victim: str) -> None:
     """Button callback: show this duel in the 2D replay (selected, locked)."""
     st.session_state["rr_round"] = int(rnd)
     st.session_state["rr_sel"] = (int(rnd), int(tick), str(victim))
-    st.session_state["page"] = "replay"
+    shell.go_tab("replay")
 
 
 def _duel_dialog(ctx) -> None:

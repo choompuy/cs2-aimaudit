@@ -203,6 +203,66 @@ fmt = "{:.0f}"
 best = "low"
 
 # ------------------------------------------------------------------- tables
+# The unified match list (Matches page): one row per match from every
+# source. The date column sorts through a hidden raw column that carries
+# NEGATIVE timestamps (the renderer's first text-column click sorts
+# ascending, so newest-first reads as one click); the score is a badge
+# coloured by the result with the W/L/D letter inside - never colour alone.
+[table.matches]
+columns = [
+  "mmap", "mdate", "mscore", "mkills", "mdeaths", "mkdr", "macc", "msrc",
+  "mact",
+]
+extra = ["date_sort", "result_raw", "src_raw"]
+selectable = true
+
+[metric.mmap]
+kind = "text"
+label = "col_mmap"
+
+[metric.mdate]
+kind = "text"
+sort_by = "date_sort"
+help = "col_mdate_help"
+
+[metric.mscore]
+kind = "badge"
+sort_by = "result_raw"
+tones = { win = "positive", loss = "negative", tie = "info" }
+help = "col_mscore_help"
+
+[metric.mkills]
+fmt = "{:.0f}"
+best = "high"
+label = "col_kills"
+
+[metric.mdeaths]
+fmt = "{:.0f}"
+best = "low"
+label = "col_deaths"
+
+[metric.mkdr]
+fmt = "{:.2f}"
+best = "high"
+label = "col_kdr"
+help = "col_kdr_help"
+
+[metric.macc]
+fmt = "{:.1f}%"
+bar = "pct"
+tone = "context"
+best = "high"
+label = "col_accuracy"
+
+[metric.msrc]
+kind = "text"
+sort_by = "src_raw"
+label = "col_msrc"
+
+[metric.mact]
+kind = "text"
+help = "col_mact_help"
+
 # One table for both teams (Team column + subtle team tint); ~9 columns
 # by default, "All columns" adds the detail metrics.
 [table.overview]

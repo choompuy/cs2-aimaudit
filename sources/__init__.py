@@ -4,17 +4,21 @@ Match import: the facade the Matches page talks to.
     sources.list_matches("steam", cfg, 5)         -> list[MatchRecord]
     sources.fetch_demo(rec, cfg, progress=...)     -> library entry
     sources.import_local(rec, path)                -> library entry
+    sources.read_cache("steam")                    -> cached records
 
 The page never builds transports or clients itself, so tests replace these
-three functions (or the class under sources.steam) to run the whole UI
-without a network. Everything here is offline-safe: opening the page reads
-only the local cache; network calls happen on explicit actions.
+functions (or the class under sources.steam) to run the whole UI without a
+network. Everything here is offline-safe: opening the page reads only the
+local cache (read_cache / cache_time); network calls happen on explicit
+actions.
 
 Layer: this package is a leaf like core/ - no Streamlit, no views/shell
 knowledge (enforced by tests/check_ui.py). It may import store.py for paths.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timezone
 
 import store
 
@@ -58,11 +62,60 @@ __all__ = [
     "import_local",
     "list_matches",
     "fetch_demo",
+    "read_cache",
+    "write_cache",
+    "cache_time",
+    "sorted_records",
 ]
 
 
 def _live_transport() -> http.HttpTransport:
     return http.HttpTransport()
+
+
+# ------------------------------------------------------------ local cache
+# matches.json is the Matches page's local cache: opening the page reads it,
+# Refresh rewrites it. The helpers are pure store/model glue (no Streamlit)
+# so the Matches and Settings pages share them.
+def sorted_records(records: list[MatchRecord]) -> list[MatchRecord]:
+    """By date, newest first; undated records keep to the end."""
+    return sorted(
+        records,
+        key=lambda r: r.played_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+
+def read_cache(provider: str) -> list[MatchRecord]:
+    """A provider's cached match list (empty when nothing was loaded yet)."""
+    data = (store.read_matches_cache().get("providers") or {}).get(provider) or {}
+    out: list[MatchRecord] = []
+    for d in data.get("records") or []:
+        try:
+            out.append(MatchRecord.from_dict(d))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def write_cache(provider: str, records: list[MatchRecord]) -> None:
+    """Store a provider's list in the cache (newest first)."""
+    cache = store.read_matches_cache()
+    cache.setdefault("version", 1)
+    cache.setdefault("providers", {})
+    cache["providers"][provider] = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "records": [r.to_dict() for r in sorted_records(records)],
+    }
+    store.write_matches_cache(cache)
+
+
+def cache_time(provider: str) -> str | None:
+    """When a provider's cache was last written (ISO string), None if never."""
+    iso = ((store.read_matches_cache().get("providers") or {}).get(provider) or {}).get(
+        "updated_at"
+    )
+    return iso or None
 
 
 def list_matches(provider: str, cfg, n: int, *, transport=None) -> list[MatchRecord]:

@@ -2,8 +2,8 @@
 Where CS2-AimAudit keeps its own files: ONE folder next to the launcher.
 
     <app folder>/data/            (next to start.bat)
-        demos/         demos you UPLOADED (a browser hides the real path, so
-                       an upload has to be copied); plain files, drop-in works
+        demos/         demos the app downloaded itself; plain files, drop-in
+                       works too (an old browser upload was copied here)
         cache/
             unpacked/  .dem files unpacked from .bz2 / .gz / .zst / .zip
             parsed/    the parsed demo, so re-opening a demo is instant
@@ -12,7 +12,7 @@ Where CS2-AimAudit keeps its own files: ONE folder next to the launcher.
             tmp/       the temp folder           (start.bat points TEMP here)
         home/          Streamlit's own ~/.streamlit (start.bat points USERPROFILE here)
         radars/        radar images + map_data.json (start.bat fetches them)
-        tools/         the Steam helper (boiler-writter, from the Matches tab)
+        tools/         the Steam helper (boiler-writter, from Settings)
         library.json   the library: copies AND linked demos (name, path, map ...)
         state.json     the last selected demo and player
         accounts.json  match-import settings (folders, SteamID64 - no secrets)
@@ -145,6 +145,11 @@ def unpacked_dir() -> str:
 
 def parsed_dir() -> str:
     return _sub("cache", "parsed")
+
+
+def matchstats_dir() -> str:
+    """The per-match summary cache (JSON, see core/matchstats.py)."""
+    return _sub("cache", "matchstats")
 
 
 def radars_dir() -> str:
@@ -553,6 +558,7 @@ def delete_demo(demo_id: str) -> int:
         for folder, pat in (
             (parsed_dir(), re.compile(rf"^{key}-.*\.pkl(\.part)?$")),
             (unpacked_dir(), re.compile(rf".*__{key}[._].*")),
+            (matchstats_dir(), re.compile(rf"^{key}-.*\.json(\.part)?$")),
         ):
             try:
                 for f in os.listdir(folder):
@@ -666,6 +672,56 @@ def prune_parsed(max_bytes: int) -> int:
     return freed
 
 
+# --------------------------------------------------------- matchstats cache
+# The per-match summaries of the Matches table (core/matchstats.py builds
+# the content): one small JSON per demo next to the parsed cache, keyed the
+# same way (<parse_key>-<code version>.json) so a deleted demo or a code
+# change takes the cache with it.
+def _matchstats_file(path: str, code_ver: str) -> str | None:
+    key = parse_key(path)
+    if not key:
+        return None
+    return os.path.join(matchstats_dir(), f"{key}-{code_ver}.json")
+
+
+def read_matchstats(path: str, code_ver: str) -> dict | None:
+    """The cached match summary (JSON), or None (missing, stale, broken)."""
+    f = _matchstats_file(path, code_ver)
+    if not f or not os.path.isfile(f):
+        return None
+    try:
+        with open(f, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        _remove(f)
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def write_matchstats(path: str, code_ver: str, d: dict) -> bool:
+    """Cache the match summary (atomic); older code versions are dropped."""
+    f = _matchstats_file(path, code_ver)
+    if not f:
+        return False
+    tmp = f + ".part"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp, f)
+    except Exception:  # noqa: BLE001 - a full disk must never break the analysis
+        _remove(tmp)
+        return False
+    key = os.path.basename(f).split("-")[0]
+    try:
+        for other in os.listdir(matchstats_dir()):
+            full = os.path.join(matchstats_dir(), other)
+            if other.startswith(f"{key}-") and full != f:
+                _remove(full)
+    except OSError:
+        pass
+    return True
+
+
 # --------------------------------------------------------- storage panel
 def dir_size(path: str) -> int:
     total = 0
@@ -695,9 +751,10 @@ def storage_report() -> dict:
 
 
 def clear_cache() -> int:
-    """Delete the parsed and unpacked caches (demos stay); returns the bytes freed."""
+    """Delete the parsed, unpacked and match-summary caches (demos stay);
+    returns the bytes freed."""
     freed = 0
-    for folder in (parsed_dir(), unpacked_dir()):
+    for folder in (parsed_dir(), unpacked_dir(), matchstats_dir()):
         try:
             for n in os.listdir(folder):
                 freed += _remove(os.path.join(folder, n))

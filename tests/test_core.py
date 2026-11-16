@@ -4036,6 +4036,299 @@ try:
 finally:
     nativedialog.subprocess.run = _real_run
 
+
+def _write_demo_file(fname):
+    """A real temp file (unique bytes per name) for library-entry tests."""
+    import tempfile as _tf
+
+    d = _tf.mkdtemp(prefix="cs2aa_ms_")
+    p = os.path.join(d, fname)
+    with open(p, "wb") as fh:
+        fh.write(f"matchstats fake demo {fname}".encode())
+    return p
+
+
+# ------------------------------------------------------------ match list
+# core/matchlist.py: the merge behind the Matches table (pure data glue -
+# provider records, library entries, cached summaries; no parsing here).
+from datetime import datetime as _datetime, timezone as _timezone
+
+from sources import model as _sm
+from core.matchlist import build_rows, manual_demo_ready
+
+
+def _rec(mid, when=None, result="win", score=(13, 5), demo=_sm.DemoState.READY, **kw):
+    return _sm.MatchRecord(
+        provider="steam",
+        match_id=mid,
+        played_at=when,
+        map_name="de_mirage",
+        mode="Premier",
+        score=score,
+        result=result,
+        demo=demo,
+        **kw,
+    )
+
+
+def _lib(id_, *, match=None, status="ok", mode="copy", added=None, path=None, mtime_ns=None, **kw):
+    e = {
+        "id": id_,
+        "file": f"x__{id_[:8]}.dem",
+        "name": f"demo {id_}",
+        "size": 100,
+        "added": added or "2024-05-01T10:00:00+00:00",
+        "map": None,
+        "status": status,
+        "mode": mode,
+    }
+    if match:
+        e["match"] = match
+    if path:
+        e["path"] = path
+    if mtime_ns:
+        e["mtime_ns"] = mtime_ns
+    e.update(kw)
+    return e
+
+
+_T0 = _datetime(2024, 6, 1, 12, 0, tzinfo=_timezone.utc)
+_T1 = _datetime(2024, 6, 2, 12, 0, tzinfo=_timezone.utc)
+_T2 = _datetime(2024, 6, 3, 12, 0, tzinfo=_timezone.utc)
+
+# a downloaded steam demo and its provider record merge into ONE row
+rows = build_rows(
+    [_rec("m1", _T1), _rec("m2", _T0, result="loss", score=(9, 13))],
+    [
+        _lib("aaaa1111aaaa1111", match={"provider": "steam", "match_id": "m1", "mode": "Premier", "score": [13, 5], "result": "win"}),
+        _lib("bbbb2222bbbb2222"),  # your own demo: its own row
+    ],
+)
+check("matchlist: no duplicates, 3 rows for 2 records + 2 entries", len(rows) == 3, [r.key for r in rows])
+m1 = next(r for r in rows if r.key == "steam:m1")
+check("matchlist: the downloaded record is one row, bound to its entry",
+      m1.demo_id == "aaaa1111aaaa1111" and m1.entry is not None and m1.rec is not None
+      and m1.demo_state == _sm.DemoState.DOWNLOADED and not m1.missing,
+      (m1.demo_id, m1.demo_state))
+own = next(r for r in rows if r.key == "lib:bbbb2222bbbb2222")
+check("matchlist: an own demo is its own row with no provider",
+      own.provider is None and own.rec is None and own.demo_id == "bbbb2222bbbb2222"
+      and own.source == "file",
+      (own.key, own.source))
+check("matchlist: sorted newest first (record time, else the entry's)",
+      [r.key for r in rows] == ["steam:m1", "steam:m2", "lib:bbbb2222bbbb2222"],
+      [r.key for r in rows])
+
+# a library entry whose provider record fell out of the cache keeps the
+# provider binding (still one row, still Steam)
+rows = build_rows(
+    [_rec("m9", _T1)],
+    [
+        _lib("cccc3333cccc3333", match={"provider": "steam", "match_id": "m5", "mode": "Premier", "score": [13, 2], "result": "win"}),
+        _lib("dddd4444dddd4444"),
+    ],
+)
+check("matchlist: an entry without a cached record is still a Steam row",
+      any(r.key == "steam:m5" and r.demo_id == "cccc3333cccc3333" and r.source == "steam" for r in rows),
+      [r.key for r in rows])
+check("matchlist: the own demo stays separate", any(r.key == "lib:dddd4444dddd4444" for r in rows))
+
+# states: ready / expired / manual records carry their DemoState
+rows = build_rows([_rec("r1"), _rec("e1", demo=_sm.DemoState.EXPIRED)], [])
+check("matchlist: ready and expired records keep their state",
+      rows[0].demo_state == _sm.DemoState.READY and rows[1].demo_state == _sm.DemoState.EXPIRED
+      and rows[0].demo_id is None and rows[0].entry is None,
+      [(r.key, r.demo_state) for r in rows])
+
+# a linked demo whose file is gone: missing, still in the library
+rows = build_rows(
+    [],
+    [_lib("eeee5555eeee5555", mode="link", status="missing", path="Z:/gone.dem")],
+)
+check("matchlist: a moved linked demo is a missing row",
+      rows[0].missing and rows[0].demo_id == "eeee5555eeee5555" and rows[0].demo_state == _sm.DemoState.DOWNLOADED,
+      rows[0])
+
+# stats wiring: the callable feeds the summary cells, no parsing anywhere
+_stats = {"kills": 20, "deaths": 10, "kd": 2.0, "score": (16, 14), "result": "win",
+          "map": "de_dust2", "played_at": _T2, "open_win_pct": 55.0}
+
+
+def _stats_of(entry):
+    return dict(_stats, me_sid="7656") if entry["id"] == "aaaa1111aaaa1111" else None
+
+
+rows = build_rows(
+    [_rec("m1", _T1, score=None, result=None)],
+    [_lib("aaaa1111aaaa1111", match={"provider": "steam", "match_id": "m1"})],
+    stats_of=_stats_of,
+)
+m1 = rows[0]
+check("matchlist: stats fill the row's empty fields (score/result)",
+      m1.stats["kills"] == 20 and m1.score == (16, 14) and m1.result == "win",
+      (m1.score, m1.result))
+check("matchlist: the provider's time wins over the cache's",
+      m1.played_at == _T1, m1.played_at)
+check("matchlist: the provider's own fields win over the cache",
+      m1.mode == "Premier" and m1.map_name == "de_mirage", (m1.mode, m1.map_name))
+# an own demo takes everything the cache has: map, score, result, time
+rows = build_rows([], [_lib("bbbb2222bbbb2222")], stats_of=lambda e: dict(_stats))
+own = rows[0]
+check("matchlist: an own demo reads map/score/result/time from the cache",
+      own.map_name == "de_dust2" and own.score == (16, 14) and own.result == "win"
+      and own.played_at == _T2,
+      (own.map_name, own.score, own.result))
+
+# rows without stats (not analyzed yet): None cells, no crash
+rows = build_rows([_rec("m1", _T1)], [_lib("aaaa1111aaaa1111", match={"provider": "steam", "match_id": "m1"})], stats_of=lambda e: None)
+check("matchlist: no stats -> empty cells, provider score/result stand",
+      rows[0].stats is None and rows[0].score == (13, 5) and rows[0].result == "win", rows[0].score)
+
+# a broken stats cache (an exception) must not kill the list
+rows = build_rows([], [_lib("ffff6666ffff6666")], stats_of=lambda e: (_ for _ in ()).throw(ValueError("bad json")))
+check("matchlist: a broken summary cache is skipped", rows[0].stats is None, rows[0].stats)
+
+# undated rows keep to the end; a stats time can stand in for a missing one
+rows = build_rows([_rec("x", None)], [_lib("1111111111111111", match={"provider": "steam", "match_id": "x"})],
+                  stats_of=lambda e: {"played_at": _T2})
+check("matchlist: an undated record sorts by the cache time", rows[0].played_at == _T2, rows[0].played_at)
+
+# manual demos: importable only when the file really sits on disk
+_ml_dir = tempfile.mkdtemp(prefix="cs2aa_matchlist_")
+check("matchlist: a manual record without a file is not importable",
+      manual_demo_ready(_rec("m", demo=_sm.DemoState.MANUAL, demo_ref=os.path.join(_ml_dir, "nowhere.dem"))) is False)
+with open(os.path.join(_ml_dir, "manual_ok.dem"), "wb") as _fh:
+    _fh.write(b"x")
+check("matchlist: a manual record with the file on disk is importable",
+      manual_demo_ready(_rec("m", demo=_sm.DemoState.MANUAL, demo_ref=os.path.join(_ml_dir, "manual_ok.dem"))) is True)
+
+
+
+# ------------------------------------------------------------ match stats
+# core/matchstats.py: the per-match summary cache behind the Matches table
+# (existing core formulas only: player_summary, impact_stats, round winners).
+from core import matchstats as _ms
+
+_ms_demo = core.load_demo("match.dem")
+
+# who "me" is: the accounts' SteamID64 when she played, else the entry's
+# remembered me_sid, else nothing (the match view asks once)
+check(
+    "matchstats: resolve_me prefers the accounts' SteamID64",
+    _ms.resolve_me(_ms_demo, {}, {"steam_id64": S1}) == S1
+    and _ms.resolve_me(_ms_demo, {}, {"steam_id64": "76569999999999999"}) is None,
+)
+check(
+    "matchstats: resolve_me falls back to the entry's me_sid",
+    _ms.resolve_me(_ms_demo, {"me_sid": S3}, {"steam_id64": "76569999999999999"}) == S3
+    and _ms.resolve_me(_ms_demo, {"me_sid": "76569999999999999"}, {}) is None,
+)
+
+# the summary of the synthetic match: Alpha (S1) killed Charlie (S3) once
+# across the two rounds of make_match() - 1 kill, 0 deaths, kd 1.0
+_ms_sum = _ms.compute(_ms_demo, S1, played_at=_T0)
+check(
+    "matchstats: the summary carries version, me, the numbers and the date",
+    _ms_sum["version"] == _ms.STATS_VERSION
+    and _ms_sum["me_sid"] == S1
+    and _ms_sum["map"] == "de_dust2"
+    and _ms_sum["rounds"] == 2
+    and _ms_sum["kills"] == 1
+    and _ms_sum["deaths"] == 0
+    and _ms_sum["kd"] == 1.0
+    and _ms_sum["played_at"] == _T0.isoformat(),
+    {k: _ms_sum[k] for k in ("version", "me_sid", "map", "rounds", "kills", "deaths", "kd", "played_at")},
+)
+check(
+    "matchstats: every number cell is a number or None, never NaN",
+    all(
+        v is None or isinstance(v, (int, float))
+        for k, v in _ms_sum.items()
+        if k in ("kd", "adr", "hs_pct", "accuracy", "open_win_pct", "rounds", "kills", "deaths")
+    ),
+    _ms_sum,
+)
+check(
+    "matchstats: no round winners derivable from the synthetic 1-kill fake -> no score",
+    _ms_sum["score"] is None and _ms_sum["result"] is None,
+    (_ms_sum["score"], _ms_sum["result"]),
+)
+
+# the score and the result when the rounds decide them: the sides demo
+# (round 1 Alpha is T, round 2 he is CT after the swap) with the winners
+# stubbed to T then CT -> 2:0, a win from Alpha's side
+_ms_real_winners = _ms.round_winners
+_ms.round_winners = lambda demo: {1: "T", 2: "CT"}
+try:
+    _ms_win = _ms.compute(core.load_demo("sides.dem"), S1, played_at=_T0)
+finally:
+    _ms.round_winners = _ms_real_winners
+check(
+    "matchstats: round winners give the score and the result from my side",
+    _ms_win["score"] == [2, 0] and _ms_win["result"] == "win",
+    (_ms_win["score"], _ms_win["result"]),
+)
+
+# the cache: write / read / parse-back, the code version in the file name
+_ms_file = _write_demo_file("stats_test.dem")
+_ms_key = store.parse_key(_ms_file)
+_ms.write_cached(_ms_file, dict(_ms_sum, score=[16, 14], result="win"))
+check(
+    "matchstats: write_cached lands <parse_key>-<version>.json",
+    os.path.isfile(os.path.join(store.matchstats_dir(), f"{_ms_key}-{core.PARSE_VERSION}.json")),
+    sorted(os.listdir(store.matchstats_dir())),
+)
+_back = _ms.read_cached(_ms_file)
+check(
+    "matchstats: read_cached returns the whole summary",
+    _back is not None and _back["me_sid"] == S1 and _back["score"] == [16, 14],
+    _back,
+)
+_cs = _ms.cached_stats(
+    {"id": "x", "path": _ms_file, "name": "s", "size": 1, "mode": "link"}
+)
+check(
+    "matchstats: cached_stats parses the date back, keeps the score",
+    _cs is not None and _cs["played_at"] == _T0 and _cs["score"] == [16, 14],
+    (_cs["played_at"], _cs["score"]),
+)
+store.write_matchstats(_ms_file, "oldcodever", {"version": 0})
+check(
+    "matchstats: two code versions of one key coexist until the next write",
+    os.path.isfile(os.path.join(store.matchstats_dir(), f"{_ms_key}-oldcodever.json")),
+    sorted(os.listdir(store.matchstats_dir())),
+)
+_ms.write_cached(_ms_file, dict(_ms_sum))
+check(
+    "matchstats: a write drops the older code versions of the same key",
+    not any("oldcodever" in f for f in os.listdir(store.matchstats_dir())),
+    sorted(os.listdir(store.matchstats_dir())),
+)
+
+# reset with the demo: delete_demo clears the summary cache too
+_ms_entry = store.add_demo(_write_demo_file("ms_stats.dem"), "ms_stats.dem")
+_ms.write_cached(store.demo_path(_ms_entry), dict(_ms_sum, me_sid="zz"))
+check(
+    "matchstats: the cache file exists for the demo",
+    _ms.read_cached(store.demo_path(_ms_entry)) is not None,
+)
+store.delete_demo(_ms_entry["id"])
+check(
+    "matchstats: delete_demo resets the summary cache",
+    _ms.read_cached(store.demo_path(_ms_entry)) is None,
+    sorted(os.listdir(store.matchstats_dir())),
+)
+# and so does clear_cache
+_ms_entry2 = store.add_demo(_write_demo_file("ms_stats2.dem"), "ms_stats2.dem")
+_ms.write_cached(store.demo_path(_ms_entry2), dict(_ms_sum, me_sid="zz"))
+store.clear_cache()
+check(
+    "matchstats: clear_cache resets the summary cache",
+    _ms.read_cached(store.demo_path(_ms_entry2)) is None
+    and os.listdir(store.matchstats_dir()) == [],
+    sorted(os.listdir(store.matchstats_dir())),
+)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 if __name__ == "__main__":
     sys.exit(1 if FAIL else 0)

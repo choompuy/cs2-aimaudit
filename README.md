@@ -13,11 +13,14 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 
 ## Features
 
+- **Sidebar navigation** — Dashboard, **Matches**, Settings and Guide live in the left rail. A match is opened FROM the Matches list (there is no Match item): click a row, and the analysis pages become the match's tabs.
+- **Matches** — every match of every source in one dense table: map, date, score (coloured by result, with the W/L/D letter), pool (Matchmaking Competitive / Premier / FACEIT / Manual upload), your K/D, accuracy and the action. Click a row to open the match when the demo is in the library — or to download / import it when it is not (a finished download is analyzed right away). Filters (period, map, pool, result) in one row, **Refresh** and **Add match** (pick demo files) next to it.
+- **Match view** — the open match's header (back to the list, the result, the map / mode / source / date chips) with the tabs Overview · Shooting · Duels · Map · 2D replay and the analysis filters underneath.
+- **Settings** — the analysis sliders, accounts (SteamID64, the replays folder, the share-code import, the Steam helper), Library and storage (sizes, delete a demo, clear the cache) and privacy.
 - **Overview** — every player in one table: K/D, accuracy, HS%, shots on the move, "risky shots", shoots-first rate, aim error, duel duration. K/D (as kills / deaths and as a ratio), opening duels, trades and assists follow the **Side** and **Rounds** filters. Tick a row's checkbox to analyze that player; the **All columns** toggle adds the detail metrics (incl. first-shot accuracy and opening-duel winrate).
 - **Shooting** — hit zones, speed at each shot, a speed-vs-distance scatter with the acceptable-speed curve, per-weapon stats.
 - **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded. Below: your duels by map zone and how every round started (opening duels, both teams).
 - **Impact** — per player: opening duels won/lost, trade kills, traded deaths, 2k–5k rounds, assists and flash assists.
-- **Matches** — your recent Steam games with a download button that puts the demo straight into the library (see [Importing matches](#importing-matches)).
 - **Map** — where the selected player killed and died, on the radar: your position (circle), the opponent's (open diamond) and a line between them; blue = kill, red = death; works with every filter, and two-level maps (Nuke, Vertigo) get an Upper / Lower switch. Needs the radar images once, see [Radar images](#radar-images-for-the-map-page).
 - **Duels → click a duel** — a window with the chart: speed (with the moving threshold), yaw turn, pitch and held keys as coloured bars with a legend, around the duel, with the first shot and the death marked, cut at the moment of death (input recorded after death is a demo-parser artifact, not real play). The strip walks all duels (← / → hotkeys, Shift+← / → between rounds) without closing the window; a button shows the duel in the 2D replay.
 - **2D replay** — the whole round on the radar, like the spectator mini-map, for everybody: nobody is selected or highlighted. A small dot per player (blue = CT, yellow = T) with a view-direction arrow, the name, an HP bar and the weapon in hands; lines are shots, stars are hits, crosses are deaths and the side feed lists the kills of the round. The **banner above the map says who won the round and how** (bomb exploded / defused, everybody eliminated, time ran out); the bomb plant, defuse and explosion are marked on the timeline and every round chip shows how its round ended. The result comes from the demo's `round_end` when it has one and is otherwise read from the bomb events and the kills (marked as such). The panel on the left lists the players split into CT and T, sorted by nickname inside a team, with the weapon, the live speed (steady: it snaps to 5 u/s and every column keeps its width) and the HP, and an **eye** that hides the player from the map (the eye on top hides or shows everyone; the choice survives round switches). The right column holds a card for EVERY duel of the round, of every player: duels that have not happened yet are semi-transparent, past ones are solid, the selected one gets an outline. Clicking a card locks the playhead to that duel's segment and opens the **duel panel**: for both duelists the live speed, how fast the crosshair turns and the angle between the crosshair and the enemy's head, a chart of those over the whole duel with every shot, the numbers the duels table measured at the first shot, and the keys they pressed; click the chart to jump. The **speed button opens a menu from 0.1x to 4x** (on hover or click); with the timeline focused the arrows step one sample, Shift one second, `[` / `]` change the speed, Space plays. A round is bounded by its own freeze end and the round's official end, so the replay and the duel list always read the same window. The wheel zooms the radar, an LMB drag pans it, a double click resets the view; two-level maps (Nuke, Vertigo) get the upper and lower level side by side.
@@ -61,15 +64,17 @@ Then pick the file in the app.
 
 ## Importing matches
 
-The **Matches** tab lists your recent **Steam / Valve Matchmaking** games and downloads the demo you pick into the same library. Nothing happens in the background: a network request is only made when you press **Refresh**, **Download** or **Install Steam helper** — opening the page only reads the local cache. No account, key or password is needed: the helper talks to the Steam client you are already logged into.
+The **Matches** page lists your recent **Steam / Valve Matchmaking** games and your own demo files in one table, and downloads the demo you pick into the same library. Nothing happens in the background: a network request is only made when you press **Refresh** or a row's download action — opening the page only reads the local caches. No account, key or password is needed: the helper talks to the Steam client you are already logged into.
 
 Valve only exposes recent matches through the running Steam client, so the app uses [boiler-writter](https://github.com/akiver/boiler-writter) — a small MIT-licensed console tool. Press **Install Steam helper**: a pinned release is downloaded from GitHub, checked against a SHA-256 hash pinned in the code, and unpacked into `data\tools`. Your Steam password is never asked, stored or sent; for a couple of seconds your Steam status may show CS2 running — that is how the match list is fetched. The Game Coordinator returns roughly your last 8 matches, each with a direct demo link (`replay*.valve.net`, valid for about a month).
 
-- Demos you downloaded yourself in CS2 (Watch → Your Matches) are found in the `replays` folder and shown with the state *on disk*.
-- For an older match, paste its **share code** (`CSGO-…`) in the settings and press **Add by code**.
-- Set your **SteamID64** to get win/loss on the cards (the helper usually detects the logged-in account on its own).
+- Demos you downloaded yourself in CS2 (Watch → Your Matches) are found in the `replays` folder and offered with an *Import and open* action.
+- For an older match, paste its **share code** (`CSGO-…`) in *Settings → Accounts* and press **Add by code**.
+- Set your **SteamID64** in *Settings → Accounts* to get win/loss and your own numbers (the helper usually detects the logged-in account on its own).
 
-The list is ordered by date, so downloading a demo does not move its card. The **filter** above the cards shows all matches, only the ones already in the library, or only the not-downloaded ones. Every downloaded card has **Delete** (removes that demo and its caches, with a confirm step), and **Delete all demos** clears the whole library in one confirmed click.
+The table is ordered by date (newest first). The filters above it narrow it by period, map, pool (Competitive / Premier / FACEIT / Manual upload) and result; opening a match — or finishing a download — computes its summary on the way in, for free. A demo without a known "you" (no SteamID64 set, nobody picked yet) asks once when you open it; **Delete all demos** clears the whole library in one confirmed click, single demos are deleted in *Settings → Library and storage*.
+
+Where the summary numbers live: `data/cache/matchstats/` — one small JSON per demo (deleted together with the demo or with *Clear cache*). The table itself never parses demos.
 
 ### What is stored, and how to remove it
 
@@ -77,19 +82,19 @@ Everything lives inside the app's `data` folder: `accounts.json` (folders and St
 
 ## Demo library and where files are stored
 
-There is one way to open a demo: **Choose demo file…** (or **Add a folder…**) or pick one of your saved demos from the list. The last one you used opens by itself.
+There is one way into a match: the **Matches** list. **Add match** opens the file picker and puts the picked demos into the library (and opens them one by one); a Steam row's **Download** fetches the demo and analyzes it right away. The URL keeps the screen (`?m=<demo>&tab=duels`), so a refresh or a copied link reopens the exact view.
 
-- **Choose demo file / Add a folder** adds the demo **by its path**: nothing is copied, the file stays where it is, no duplicate. If it is moved, renamed or its drive is not connected, the app says so and offers **Locate the file…** or **Remove from list**. Removing a linked demo only removes the list entry and its cache, never your file.
-- **Upload** (inside *Upload instead*) copies the file into `data/demos`, because a browser never reveals where a file really is. Use it only when the file dialog is not available.
+- **Add match** adds the demo **by its path**: nothing is copied, the file stays where it is, no duplicate. If it is moved, renamed or its drive is not connected, the app says so and offers **Locate the file…** or **Remove from list**. Removing a linked demo only removes the list entry and its cache, never your file.
 - Compressed demos (`.bz2`, `.gz`, `.zst`, `.zip`) are unpacked into the cache automatically.
 
 **Everything the app stores lives in one folder next to `start.bat`, and `start.bat` keeps Python, pip and Streamlit from writing anywhere else:**
 
 ```
 data/
-  demos/        demos you uploaded (copies; you can also copy .dem files in by hand)
+  demos/        demos downloaded by the app (copies; you can also drop .dem files in by hand)
   cache/
     parsed/     parsed demos, so opening one again is instant
+    matchstats/ per-match summaries (K/D, HS%, ...) for the Matches table
     unpacked/   demos unpacked from .bz2 / .gz / .zst / .zip
     pip/        pip's download cache
     pycache/    compiled .pyc files
@@ -105,7 +110,7 @@ data/
 
 **To uninstall, delete the folder.** `start.bat` points `TEMP`, `USERPROFILE`, pip's cache and Python's `.pyc` folder into `data/`, so nothing is left in `%TEMP%`, your user profile or `%LOCALAPPDATA%`. What stays on the machine: the Python installation itself, your browser's own data for `localhost`, and the demos you linked (they are your files, in your folders).
 
-Open *Library and storage* in the app to see the folder, the sizes, remove or delete a demo, or clear the cache. You can also delete `data/cache/` by hand at any time: it is rebuilt when needed. Only `data/demos` (uploaded copies) holds something that cannot be rebuilt. Move the folder with the `AIMAUDIT_DATA_DIR` environment variable. If the app folder is read-only (for example under Program Files), data goes to `%LOCALAPPDATA%\CS2-AimAudit` and the app tells you; put the app in a writable folder to keep everything in one place. `data/` is git-ignored.
+Open *Library and storage* in the app to see the folder, the sizes, remove or delete a demo, or clear the cache. You can also delete `data/cache/` by hand at any time: it is rebuilt when needed. Only `data/demos` (downloaded copies) holds something that cannot be rebuilt. Move the folder with the `AIMAUDIT_DATA_DIR` environment variable. If the app folder is read-only (for example under Program Files), data goes to `%LOCALAPPDATA%\CS2-AimAudit` and the app tells you; put the app in a writable folder to keep everything in one place. `data/` is git-ignored.
 
 ## Radar images for the Map page
 

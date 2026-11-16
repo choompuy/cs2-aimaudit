@@ -668,6 +668,7 @@ try:
         ("overview", 9, 18),
         ("weapons", 10, 10),
         ("duels", 9, 18),
+        ("matches", 12, 12),
     ):
         cols = schema.build_cols(tid, t=lambda k, **kw: k)
         cols_all = schema.build_cols(tid, all_columns=True, t=lambda k, **kw: k)
@@ -680,6 +681,55 @@ try:
         )
 except Exception as exc:  # noqa: BLE001
     bad("schema: loads and validates", False, repr(exc))
+
+# ---- 12b. navigation: every sidebar item and match tab has its i18n label
+# in BOTH locales (the sidebar renders nav_<id>, the match tabs tab_<id>)
+try:
+    import shell  # noqa: E402
+
+    _nav_missing = [
+        f"nav_{p}"
+        for p in shell.NAV_PAGES
+        if f"nav_{p}" not in i18n.STR["en"] or f"nav_{p}" not in i18n.STR["ru"]
+    ]
+    bad(
+        "navigation: sidebar items have labels in both locales",
+        not _nav_missing,
+        _nav_missing,
+    )
+    _tab_missing = [
+        f"tab_{p}"
+        for p in shell.MATCH_TABS
+        if f"tab_{p}" not in i18n.STR["en"] or f"tab_{p}" not in i18n.STR["ru"]
+    ]
+    bad(
+        "navigation: match tabs have labels in both locales",
+        not _tab_missing,
+        _tab_missing,
+    )
+    bad(
+        "navigation: sidebar ids and match tabs do not collide",
+        not set(shell.NAV_PAGES) & set(shell.MATCH_TABS),
+        sorted(set(shell.NAV_PAGES) & set(shell.MATCH_TABS)),
+    )
+except Exception as exc:  # noqa: BLE001
+    bad("navigation: shell loads", False, repr(exc))
+
+# ---- 12c. docs/ARCHITECTURE.md stays honest: the new modules and the
+# two-level navigation must be in the map (a stale doc is a broken doc)
+_arch = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+for _needle in (
+    "views/settings.py",
+    "views/dashboard.py",
+    "core/matchlist.py",
+    "core/matchstats.py",
+    "go_match",
+    "match_tab",
+    "How to add a navigation item",
+    "How to add a match tab",
+    "The Matches table never parses demos",
+):
+    bad(f"ARCHITECTURE mentions {_needle!r}", _needle in _arch)
 
 # ---- 13. import graph: no cycles between the runtime modules
 # (the layering must stay one-way: model <- filters <- loader/metrics <-

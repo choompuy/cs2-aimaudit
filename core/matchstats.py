@@ -1,0 +1,163 @@
+"""
+The per-match summary cache: the little numbers the Matches table shows.
+
+One small JSON per demo (data/cache/matchstats/, keyed like the parsed
+cache: <parse_key>-<code version>.json, see store) so the table NEVER
+parses a demo while it renders. The values reuse core's own functions
+(player_summary, impact_stats, round_winners) - no new formulas.
+
+Who "me" is: the accounts' SteamID64 when she played in the demo, else the
+me_sid remembered in the library entry (the match view asks once per demo).
+Without a "me" there is no summary.
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+
+import pandas as pd
+
+import store
+from core.loader import PARSE_VERSION
+from core.metrics import build_duels, impact_stats, player_summary, round_winners, shots_table
+
+# the summary format itself (content changes bump PARSE_VERSION through the
+# loader hash, this marks structural changes of the JSON)
+STATS_VERSION = 1
+
+# the fixed thresholds the summary is computed with: the cache is keyed on
+# the demo only, so it must not follow the analysis sliders
+_WINDOW_S = 3.0
+_THR = 40
+_SAFE = 500
+_STRICT = 1500
+
+
+def resolve_me(demo, entry: dict, accounts: dict) -> str | None:
+    """Who "me" is in this demo: the accounts' SteamID64 when she played,
+    else the entry's remembered me_sid. None when unknown (the UI asks)."""
+    players = set(demo.players["sid"])
+    sid64 = str(accounts.get("steam_id64") or "").strip()
+    if sid64 and sid64 in players:
+        return sid64
+    me = entry.get("me_sid")
+    if me and me in players:
+        return me
+    return None
+
+
+def played_at_of(entry: dict) -> datetime | None:
+    """When the match was: the provider's time, else the file's mtime."""
+    m = entry.get("match") if isinstance(entry.get("match"), dict) else {}
+    iso = m.get("played_at")
+    if isinstance(iso, str):
+        try:
+            return datetime.fromisoformat(iso)
+        except ValueError:
+            pass
+    try:
+        return datetime.fromtimestamp(
+            os.path.getmtime(store.demo_path(entry)), tz=timezone.utc
+        )
+    except OSError:
+        return None
+
+
+def compute(demo, me_sid: str, played_at: datetime | None = None) -> dict:
+    """The summary of one player's match, from the already parsed demo.
+
+    Existing core functions only; the fixed thresholds keep the cache
+    independent of the analysis sliders (see _WINDOW_S and friends)."""
+    shots = shots_table(demo)
+    duels = build_duels(demo, _WINDOW_S)
+    summary = player_summary(demo, duels, shots, _THR, _SAFE, _STRICT)
+    row = summary[summary["sid"] == me_sid]
+    impact = impact_stats(demo)
+    irow = impact[impact["sid"] == me_sid]
+
+    def _num(col, cast=float):
+        if not len(row) or col not in row.columns:
+            return None
+        v = row[col].iloc[0]
+        try:
+            v = cast(v)
+        except (TypeError, ValueError):
+            return None
+        return None if pd.isna(v) else v
+
+    # the score from the round winners, counted from my side of the field
+    winners = round_winners(demo)
+    mine = theirs = 0
+    for r, w in winners.items():
+        if w == demo.side_at(r, me_sid):
+            mine += 1
+        else:
+            theirs += 1
+    rounds = len(demo.round_windows) or None
+    score = [mine, theirs] if winners else None
+    result = None
+    if winners:
+        result = "win" if mine > theirs else "loss" if mine < theirs else "tie"
+
+    # ADR: my enemy gun damage (demo.hurts is enemy-only already) per round
+    adr = None
+    h = demo.hurts
+    if rounds and len(h) and {"attacker_steamid", "dmg_health"} <= set(h.columns):
+        dmg = pd.to_numeric(
+            h.loc[h["attacker_steamid"] == me_sid, "dmg_health"], errors="coerce"
+        ).sum()
+        adr = round(float(dmg) / rounds, 1)
+
+    def _impact(col):
+        if not len(irow) or col not in irow.columns:
+            return None
+        v = irow[col].iloc[0]
+        try:
+            return round(float(v), 1)
+        except (TypeError, ValueError):
+            return None
+
+    kills = _num("kills", int)
+    deaths = _num("deaths", int)
+    return {
+        "version": STATS_VERSION,
+        "map": demo.header.get("map_name") or None,
+        "rounds": rounds,
+        "score": score,
+        "result": result,
+        "kills": kills,
+        "deaths": deaths,
+        "kd": _num("kd_ratio"),
+        "adr": adr,
+        "hs_pct": _num("hs_kills"),
+        "accuracy": _num("accuracy"),
+        "open_win_pct": _impact("open_rate"),
+        "me_sid": me_sid,
+        "played_at": played_at.isoformat() if played_at else None,
+    }
+
+
+def read_cached(path: str) -> dict | None:
+    """The cached summary of a demo file (None when missing or stale)."""
+    return store.read_matchstats(path, PARSE_VERSION)
+
+
+def write_cached(path: str, stats: dict) -> bool:
+    """Cache a demo's summary; older code versions are dropped."""
+    return store.write_matchstats(path, PARSE_VERSION, stats)
+
+
+def cached_stats(entry: dict) -> dict | None:
+    """The stats_of callable of core.build_rows: the cached summary of a
+    library entry, with the date and score parsed back from JSON."""
+    stats = read_cached(store.demo_path(entry))
+    if not stats:
+        return None
+    iso = stats.get("played_at")
+    if isinstance(iso, str):
+        try:
+            stats["played_at"] = datetime.fromisoformat(iso)
+        except ValueError:
+            stats["played_at"] = None
+    return stats

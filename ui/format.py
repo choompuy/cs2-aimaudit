@@ -48,3 +48,12 @@ def pct(v) -> str:
 
 def num(v, nd: int = 1) -> str:
     return f"{v:.{nd}f}" if pd.notna(v) else t("none_val")
+
+
+def map_name(name: str | None) -> str:
+    """'de_mirage' -> 'Mirage'; unknown names stay as they are."""
+    if not name:
+        return ""
+    if name.startswith("de_"):
+        return name[3:].replace("_", " ").title()
+    return name

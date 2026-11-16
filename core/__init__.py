@@ -100,6 +100,25 @@ from core.loader import (
     tickrate_from_header,
 )
 
+from core.matchlist import (
+    KINDS,
+    SOURCE_FILE,
+    MatchRow,
+    build_rows,
+    kind_of,
+    manual_demo_ready,
+)
+
+from core.matchstats import (
+    STATS_VERSION,
+    cached_stats,
+    compute,
+    played_at_of,
+    read_cached,
+    resolve_me,
+    write_cached,
+)
+
 from core.metrics import (
     _enemy_kill_rows,
     _hurts_of,

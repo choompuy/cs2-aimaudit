@@ -332,7 +332,7 @@ def fresh_at(timeout=300, **session):
 
 def register_demo(demo, fname):
     """
-    Save a fake demo into the library exactly like an upload does, and
+    Save a fake demo into the library exactly like adding one does, and
     return its library id. Unique bytes per call -> a unique id, so two
     scenarios that reuse a file name never share a cached parse.
     """
@@ -347,8 +347,10 @@ def register_demo(demo, fname):
 
 
 def open_demo(demo, fname, **session):
-    """Register a fake demo in the library and run the app on it."""
-    return fresh_at(demo_id=register_demo(demo, fname), **session)
+    """Register a fake demo in the library and run the app with it open as a
+    match (as if its Matches-list row had been clicked)."""
+    did = register_demo(demo, fname)
+    return fresh_at(demo_id=did, match=did, match_tab="overview", **session)
 
 
 def err_of(at):
@@ -404,13 +406,57 @@ def ss_get(at, key, default=None):
 
 def goto(at, page):
     """
-    Only the active page renders, so switch the page before
-    interacting with widgets that live on it.
+    Switch the page: a match tab (overview / shooting / duels / map /
+    replay, plus the retired timeline) opens the current - or last - demo as
+    a match; a top-level id navigates the sidebar (matches means the LIST,
+    exactly like shell.go_page). Only the active page renders, so switch
+    before interacting with widgets that live on it.
     """
-
-    at.session_state["page"] = page
+    if page in ("overview", "shooting", "duels", "map", "replay", "timeline"):
+        mid = ss_get(at, "match") or ss_get(at, "demo_id")
+        if mid is None:
+            mid = core.load_state().get("last_demo")
+            if mid is not None and store.get_demo(mid) is None:
+                # the last demo left the library: any saved one
+                lib = store.list_demos()
+                mid = lib[0]["id"] if lib else None
+        if mid is None:
+            # nothing to open: stay on the matches list
+            at.session_state["page"] = "matches"
+            try:
+                del at.session_state["match"]
+            except KeyError:
+                pass
+        else:
+            at.session_state["page"] = "matches"
+            at.session_state["match"] = mid
+            at.session_state["demo_id"] = mid
+            at.session_state["match_tab"] = "duels" if page == "timeline" else page
+    else:
+        at.session_state["page"] = page
+        if page == "matches":
+            # the sidebar item lands on the LIST, like shell.go_page
+            try:
+                del at.session_state["match"]
+            except KeyError:
+                pass
     at.run()
     check(f"page {page} renders", not at.exception, err_of(at))
+
+
+def open_match(at, did, name="open the match again"):
+    """Reopen a library demo as the match (what a list row click does)."""
+    act(
+        at,
+        name,
+        lambda: (
+            at.session_state.__setitem__("page", "matches"),
+            at.session_state.__setitem__("match", did),
+            at.session_state.__setitem__("demo_id", did),
+            at.session_state.__setitem__("demo_change", False),
+            at.run(),
+        ),
+    )
 
 
 def open_duel(at, i, name=None):
@@ -506,7 +552,6 @@ def scenario_one_round():
         lambda: at.selectbox(key="me").select(S1).run(),
     )
     act(at, "language ru", lambda: at.selectbox(key="lang").select("ru").run())
-    act(at, "thr slider 200", lambda: at.slider(key="thr").set_value(200).run())
     open_duel(at, 0, "duel window renders")
     check(
         "duel window: the speed/aim/keys chart now lives in Duels (one plotly chart)",
@@ -618,15 +663,22 @@ def scenario_round_replay():
         lambda: at.session_state.__setitem__("rr_round", 77) or at.run(),
     )
     check("fell back to round 1", ss_get(at, "rr_round") == 1, ss_get(at, "rr_round"))
-    # an old link / saved state that still says "timeline" lands on Duels
-    # (a fresh session: AppTest keeps the live widget value mid-session)
+    # an old link / saved state that still says "timeline" lands on the
+    # match view's Duels tab (a fresh session: AppTest keeps the live widget
+    # value mid-session)
     old_link = fresh_at(demo_id=at.session_state["demo_id"], page="timeline")
     check("old 'timeline' link renders", not old_link.exception, err_of(old_link))
-    check("old 'timeline' page is migrated to duels", ss_get(old_link, "page") == "duels", ss_get(old_link, "page"))
+    check(
+        "old 'timeline' page is migrated to the duels tab of the last match",
+        ss_get(old_link, "page") == "matches"
+        and ss_get(old_link, "match_tab") == "duels"
+        and ss_get(old_link, "match") == at.session_state["demo_id"],
+        (ss_get(old_link, "page"), ss_get(old_link, "match_tab"), ss_get(old_link, "match")),
+    )
     # the duel window's button hands the duel over: page, round, selection
     open_duel(at, 1, "open the round-2 duel")
     act(at, "show it in the 2D replay", lambda: at.button(key="du_to_replay").click().run())
-    check("switched to the replay page", ss_get(at, "page") == "replay", ss_get(at, "page"))
+    check("switched to the replay tab", ss_get(at, "match_tab") == "replay", ss_get(at, "match_tab"))
     check("on the duel's own round", ss_get(at, "rr_round") == 2, ss_get(at, "rr_round"))
     sel = ss_get(at, "rr_sel")
     check(
@@ -643,6 +695,180 @@ def scenario_round_replay():
     )
 
 
+def scenario_nav():
+    """The sidebar rail: navigation, old page ids, the ?p&m&tab URL state."""
+    print("== sidebar navigation ==")
+    at = open_demo(make_match([1, 2]), "nav.dem")
+    did = at.session_state["match"]
+    # the rail: one button per section; the keys stay stable (nav_<id>) -
+    # the active state is the button's type, not a different key
+    check(
+        "nav: four sidebar items render",
+        widget(at, "button", "nav_dashboard") is not None
+        and widget(at, "button", "nav_matches") is not None
+        and widget(at, "button", "nav_settings") is not None
+        and widget(at, "button", "nav_guide") is not None,
+    )
+    check(
+        "nav: the match view syncs ?m (and no ?p on matches)",
+        at.query_params.get("m") == did and not at.query_params.get("p"),
+        dict(at.query_params),
+    )
+    # the sidebar Matches item opens the LIST (an open match is left)
+    act(at, "nav: Matches opens the list", lambda: at.button(key="nav_matches").click().run())
+    check(
+        "nav: the list is shown, the match is closed",
+        ss_get(at, "page") == "matches" and ss_get(at, "match") is None,
+    )
+    act(at, "nav: Settings", lambda: at.button(key="nav_settings").click().run())
+    check(
+        "nav: the settings page renders",
+        ss_get(at, "page") == "settings" and not at.exception,
+        err_of(at),
+    )
+    act(at, "nav: Guide", lambda: at.button(key="nav_guide").click().run())
+    check("nav: the guide page renders without a demo", ss_get(at, "page") == "guide" and not at.exception, err_of(at))
+    act(at, "nav: Dashboard", lambda: at.button(key="nav_dashboard").click().run())
+    check(
+        "nav: the dashboard stub renders with a way to Matches",
+        ss_get(at, "page") == "dashboard" and widget(at, "button", "dash_go_matches") is not None,
+    )
+    act(at, "nav: dashboard -> Matches", lambda: at.button(key="dash_go_matches").click().run())
+    check("nav: back on the list", ss_get(at, "page") == "matches" and ss_get(at, "match") is None)
+    # old sessions / ?f= links with the single-level page ids land in the
+    # match view of the last opened demo, on the right tab
+    old = fresh_at(demo_id=did, page="overview")
+    check(
+        "nav: old 'overview' opens the last match's overview tab",
+        ss_get(old, "page") == "matches"
+        and ss_get(old, "match") == did
+        and ss_get(old, "match_tab") == "overview"
+        and not old.exception,
+        (ss_get(old, "page"), ss_get(old, "match"), ss_get(old, "match_tab")),
+    )
+    old = fresh_at(demo_id=did, page="duels")
+    check("nav: old 'duels' becomes the duels tab", ss_get(old, "match_tab") == "duels" and ss_get(old, "match") == did)
+    bad = fresh_at(demo_id=did, page="nonsense")
+    check(
+        "nav: an unknown page id falls back to the list",
+        ss_get(bad, "page") == "matches" and ss_get(bad, "match") is None and not bad.exception,
+    )
+    # ?p&m&tab: a copied link reopens the exact screen; garbage is ignored
+    at2 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at2.query_params["p"] = "settings"
+    at2.run()
+    check("nav: ?p=settings opens Settings", ss_get(at2, "page") == "settings" and not at2.exception)
+    at3 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at3.query_params["m"] = did
+    at3.query_params["tab"] = "duels"
+    at3.run()
+    check(
+        "nav: ?m=<id>&tab=duels reopens the duels tab",
+        ss_get(at3, "page") == "matches"
+        and ss_get(at3, "match") == did
+        and ss_get(at3, "match_tab") == "duels"
+        and not at3.exception,
+        err_of(at3),
+    )
+    at4 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at4.query_params["m"] = "zzzz-not-an-id"
+    at4.query_params["p"] = "sugar"
+    at4.query_params["tab"] = "nonsense"
+    at4.run()
+    check(
+        "nav: broken ?p&m&tab values fall back safely",
+        ss_get(at4, "page") == "matches" and ss_get(at4, "match") is None and not at4.exception,
+    )
+
+
+def scenario_settings():
+    """The Settings page: sections, and the sliders surviving page switches."""
+    print("== settings page ==")
+    at = open_demo(make_match([1, 2]), "settings.dem")
+    goto(at, "settings")
+    check(
+        "settings: the analysis sliders render (moved from the sidebar)",
+        widget(at, "slider", "thr") is not None
+        and widget(at, "slider", "window_s") is not None
+        and widget(at, "slider", "safe_dist") is not None
+        and widget(at, "slider", "strict_dist") is not None
+        and widget(at, "button", "btn_reset_set") is not None,
+    )
+    check(
+        "settings: no analysis slider in the sidebar anymore",
+        all(widget(at.sidebar, "slider", k) is None for k in ("thr", "window_s", "safe_dist", "strict_dist"))
+        and widget(at.sidebar, "selectbox", "lang") is not None,
+    )
+    act(at, "settings: thr to 200", lambda: at.slider(key="thr").set_value(200).run())
+    act(at, "settings: safe_dist to 1000", lambda: at.slider(key="safe_dist").set_value(1000).run())
+    # the acceptance of stage 2: the values survive Settings -> Matches -> a match
+    act(at, "settings: to the matches list", lambda: at.button(key="nav_matches").click().run())
+    check("settings: on the list", ss_get(at, "page") == "matches" and not at.exception, err_of(at))
+    check("settings: thr survived the trip to the list", ss_get(at, "thr") == 200, ss_get(at, "thr"))
+    goto(at, "overview")
+    check(
+        "settings: the match reopened with the slider values intact",
+        ss_get(at, "match") is not None
+        and ss_get(at, "thr") == 200
+        and ss_get(at, "safe_dist") == 1000
+        and not at.exception,
+        (ss_get(at, "thr"), ss_get(at, "safe_dist"), err_of(at)),
+    )
+    # the reset restores the defaults (plain keys, the sliders follow)
+    goto(at, "settings")
+    act(at, "settings: reset to defaults", lambda: at.button(key="btn_reset_set").click().run())
+    check(
+        "settings: reset restores the defaults",
+        ss_get(at, "thr") == 40 and ss_get(at, "window_s") == 3.0
+        and ss_get(at, "safe_dist") == 500 and ss_get(at, "strict_dist") == 1500,
+        (ss_get(at, "thr"), ss_get(at, "window_s"), ss_get(at, "safe_dist"), ss_get(at, "strict_dist")),
+    )
+    # accounts: the fields persist to accounts.json
+    act(
+        at,
+        "settings: steam id typed",
+        lambda: at.text_input(key="mt_steamid").set_value("76561111111111111").run(),
+    )
+    check(
+        "settings: steam id persisted to accounts.json",
+        store.read_accounts().get("steam_id64") == "76561111111111111",
+        store.read_accounts(),
+    )
+    # the Steam helper card lives here now
+    if not __import__("sources").steam.helper_installed():
+        check(
+            "settings: the Steam helper card offers the install",
+            widget(at, "button", "mt_helper_install") is not None,
+        )
+    # the library and storage section (moved from the change-demo block)
+    check(
+        "settings: the library panel renders (clear cache, per-demo delete)",
+        widget(at, "button", "lib_clear") is not None
+        and widget(at, "button", f"del_{at.session_state['match']}") is not None,
+    )
+    # privacy names the offline gate
+    check(
+        "settings: the privacy section names AIMAUDIT_OFFLINE",
+        any("AIMAUDIT_OFFLINE" in str(c.value) for c in at.caption),
+    )
+    # clear cache (the Library and storage section) keeps the demos
+    act(at, "settings: clear cache", lambda: at.button(key="lib_clear").click().run())
+    check(
+        "settings: clear cache empties the caches, demos stay",
+        store.storage_report()["parsed"] == 0 and store.get_demo(at.session_state["match"]) is not None,
+        (store.storage_report()["parsed"],),
+    )
+    # deleting the open match from the library section falls back to the list
+    did = at.session_state["match"]
+    act(at, "settings: delete: ask", lambda: at.button(key=f"del_{did}").click().run())
+    act(at, "settings: delete: confirm", lambda: at.button(key=f"delyes_{did}").click().run())
+    check(
+        "settings: deleting the open match drops it (back to the list from a match view)",
+        ss_get(at, "page") == "settings" and ss_get(at, "match") is None and store.get_demo(did) is None,
+        (ss_get(at, "page"), ss_get(at, "match")),
+    )
+
+
 def scenario_player_stepper():
     """Compact header: the demo row and the ▲/▼ player stepper."""
     print("== player stepper (compact header) ==")
@@ -654,10 +880,11 @@ def scenario_player_stepper():
         and widget(at, "button", "me_next") is not None,
     )
     check(
-        "change-demo button rendered",
-        widget(at, "button", "demo_change_btn") is not None,
+        "the match header offers the way back to the list",
+        widget(at, "button", "mt_back") is not None
+        and widget(at, "button", "demo_change_btn") is None,
     )
-    # the compact row replaces the upload block after the first load
+    # the compact row replaces the old add block after the first load
     act(at, "next player (Bravo)", lambda: at.button(key="me_next").click().run())
     check("next moved the selection", ss_get(at, "me") == S2, ss_get(at, "me"))
     caps = [c.value for c in at.caption]
@@ -684,26 +911,24 @@ def scenario_player_stepper():
         lambda: at.button(key="me_next").click().run(),
     )
     check("next wrapped to Alpha", ss_get(at, "me") == S1, ss_get(at, "me"))
-    # 'Change demo' re-opens the upload block without losing the demo
-    act(
-        at,
-        "open the change-demo panel",
-        lambda: at.button(key="demo_change_btn").click().run(),
-    )
+    # '← Матчи' leaves the match without losing it: a fresh row click on
+    # the list brings it straight back
+    act(at, "back to the matches list", lambda: at.button(key="mt_back").click().run())
     check(
-        "change panel shows the library picker",
-        widget(at, "selectbox", "lib_pick") is not None,
+        "back keeps the demo loaded, the match closed",
+        ss_get(at, "page") == "matches"
+        and ss_get(at, "match") is None
+        and ss_get(at, "demo_loaded") == _DEMO_IDS["stepper.dem"],
+        (ss_get(at, "page"), ss_get(at, "match"), ss_get(at, "demo_loaded")),
     )
-    act(
-        at,
-        "cancel the change-demo panel",
-        lambda: at.button(key="demo_cancel").click().run(),
-    )
+    open_match(at, _DEMO_IDS["stepper.dem"], "reopen the same match")
     check(
-        "cancel keeps the demo loaded",
-        ss_get(at, "demo_loaded") == _DEMO_IDS["stepper.dem"],
+        "reopen lands on the same match",
+        ss_get(at, "match") == _DEMO_IDS["stepper.dem"]
+        and ss_get(at, "demo_loaded") == _DEMO_IDS["stepper.dem"]
+        and not at.exception,
+        err_of(at),
     )
-    check("cancel closes the panel", ss_get(at, "demo_change") is False)
 
 
 def scenario_duel_strip():
@@ -736,6 +961,53 @@ def scenario_duel_strip():
         "ru: hotkey hint rendered",
         any("Shift+←" in str(c.value) for c in at.caption),
         [str(c.value)[:60] for c in at.caption][:6],
+    )
+
+
+def scenario_roundtrip():
+    """The acceptance path of stage 4: Matches -> row -> tabs -> back,
+    and nothing is lost on the way."""
+    print("== match view round trip ==")
+    at = open_demo(make_match([1, 2, 13]), "roundtrip.dem")
+    did = at.session_state["match"]
+    open_filters(at)
+    act(at, "roundtrip: first-half preset", lambda: ctl(at, "segmented_control", "flt_preset").select("first").run())
+    check("roundtrip: preset set", ss_get(at, "flt_preset") == "first", ss_get(at, "flt_preset"))
+    act(at, "roundtrip: to the duels tab", lambda: ctl(at, "segmented_control", "match_tab").select("duels").run())
+    check("roundtrip: on duels", ss_get(at, "match_tab") == "duels" and not at.exception, err_of(at))
+    act(at, "roundtrip: back to the list", lambda: at.button(key="mt_back").click().run())
+    check(
+        "roundtrip: the list is back, the demo stays loaded",
+        ss_get(at, "page") == "matches" and ss_get(at, "match") is None
+        and ss_get(at, "demo_loaded") == did and not at.exception,
+        (ss_get(at, "page"), ss_get(at, "match"), err_of(at)),
+    )
+    # the list's own filters live next to the analysis ones
+    act(at, "roundtrip: a list filter", lambda: ctl(at, "segmented_control", "mflt_result").select("tie").run())
+    check("roundtrip: the list filter set", ss_get(at, "mflt_result") == "tie", ss_get(at, "mflt_result"))
+    # back into the match: the analysis filter survived the trip through the
+    # list (a fresh row click opens it on the overview tab)
+    open_match(at, did, "roundtrip: reopen the match")
+    check(
+        "roundtrip: the analysis filter survived the list trip",
+        ss_get(at, "flt_preset") == "first" and ss_get(at, "match") == did and not at.exception,
+        (ss_get(at, "flt_preset"), ss_get(at, "match"), err_of(at)),
+    )
+    check(
+        "roundtrip: ?m and the list filters ride in the URL",
+        at.query_params.get("m") == did and at.query_params.get("fres") == "tie",
+        dict(at.query_params),
+    )
+    # a copied link reopens the exact screen: the match on its tab
+    at2 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at2.query_params["m"] = did
+    at2.query_params["tab"] = "duels"
+    at2.run()
+    check(
+        "roundtrip: ?m=<id>&tab=duels reopens the duels tab",
+        ss_get(at2, "page") == "matches" and ss_get(at2, "match") == did
+        and ss_get(at2, "match_tab") == "duels" and not at2.exception,
+        err_of(at2),
     )
 
 
@@ -1093,27 +1365,28 @@ def scenario_links():
 
     real_files, real_folder = nativedialog.pick_files, nativedialog.pick_folder
     try:
-        base_id = register_demo(make_match([1, 2]), "links_base.dem")
-        at = fresh_at(demo_id=base_id)
+        at = open_demo(make_match([1, 2]), "links_base.dem")
         check("links: base demo opens", not at.exception, err_of(at))
-        act(at, "links: open the change panel", lambda: at.button(key="demo_change_btn").click().run())
+        # the Add match button on the Matches page opens the file dialog
+        goto(at, "matches")
         check(
-            "links: the panel offers Choose file and Add folder",
-            widget(at, "button", "lib_pick_file") is not None and widget(at, "button", "lib_pick_folder") is not None,
+            "links: the Add match button is offered",
+            widget(at, "button", "mt_add") is not None,
         )
 
         # --- choosing a file links it by its path; nothing is copied
         p = _plain_demo("link_a", "my_link.dem")
         copies_before = sorted(os.listdir(store.demos_dir()))
         nativedialog.pick_files = lambda *a, **k: [p]
-        act(at, "links: choose a demo file", lambda: at.button(key="lib_pick_file").click().run())
+        act(at, "links: choose a demo file", lambda: at.button(key="mt_add").click().run())
         lid = store.link_id(p)
         e = store.get_demo(lid) or {}
         check("links: choosing a file links it by its path", e.get("mode") == "link" and e.get("path") == os.path.abspath(p), e)
         check("links: ... nothing was copied into demos/", sorted(os.listdir(store.demos_dir())) == copies_before)
         check(
-            "links: ... and the app opened it",
-            at.session_state["demo_id"] == lid and at.session_state["demo_loaded"] == lid and not at.exception,
+            "links: ... and the app opened it as the match",
+            at.session_state["demo_id"] == lid and at.session_state["match"] == lid
+            and at.session_state["demo_loaded"] == lid and not at.exception,
             err_of(at),
         )
         check("links: ... the map was remembered in the library", (store.get_demo(lid) or {}).get("map") == "de_smoke")
@@ -1121,7 +1394,7 @@ def scenario_links():
         # --- the file disappears: a clear message that names the path, not a crash
         moved = os.path.join(os.path.dirname(p), "moved_here.dem")
         os.rename(p, moved)
-        at = fresh_at(demo_id=lid)
+        at = fresh_at(demo_id=lid, match=lid)
         check("links: a missing file does not crash", not at.exception, err_of(at))
         check(
             "links: ... the error names the file",
@@ -1129,8 +1402,10 @@ def scenario_links():
             [str(x.value)[:80] for x in at.error],
         )
         check(
-            "links: ... Locate and Remove are offered",
-            widget(at, "button", "lib_locate") is not None and widget(at, "button", "lib_remove_missing") is not None,
+            "links: ... the no-file card offers Locate, Remove and the way back",
+            widget(at, "button", "lib_locate") is not None
+            and widget(at, "button", "lib_remove_missing") is not None
+            and widget(at, "button", "mt_back_missing") is not None,
         )
         check("links: ... the library lists it as missing", store.get_demo(lid)["status"] == "missing")
         FakeParser.demos[os.path.realpath(moved)] = make_match([1, 2])
@@ -1143,33 +1418,55 @@ def scenario_links():
             (e, err_of(at)),
         )
 
-        # --- removing a linked demo never deletes the user's file
-        act(at, "links: open the change panel again", lambda: at.button(key="demo_change_btn").click().run())
+        # --- the same demo's row in the Matches list: its action is
+        # "Set file...", and a row click runs it (the file moved again)
+        moved2 = os.path.join(os.path.dirname(p), "moved_twice.dem")
+        os.rename(moved, moved2)
+        FakeParser.demos[os.path.realpath(moved2)] = make_match([1, 2])
+        at2 = fresh_at(page="matches")
+        import i18n as _i18n
+
+        from views import matches as _mv
+
+        _t = _i18n.make_t("en")
+        _ml_rows = core.build_rows(_mv._all_records(), store.list_demos())
+        _ml_row = next(r for r in _ml_rows if r.demo_id == lid)
+        check(
+            "links: the list row of a moved demo offers the locate action",
+            _ml_row.missing and _mv.action_of(_t, _ml_row) == _t("act_locate"),
+            _mv.action_of(_t, _ml_row),
+        )
+        _i = _ml_rows.index(_ml_row)
+        nativedialog.pick_files = lambda *a, **k: [moved2]
+        act(
+            at2,
+            "links: a row click locates the file",
+            lambda: at2.session_state.__setitem__("mt_action_row", _i) or at2.run(),
+        )
+        e = store.get_demo(lid) or {}
+        check(
+            "links: the row click pointed the entry at the new file",
+            e.get("path") == os.path.abspath(moved2) and e.get("status") == "ok" and not at2.exception,
+            (e, err_of(at2)),
+        )
+
+        # --- removing a linked demo never deletes the user's file (the
+        # Library and storage section of Settings owns the button)
+        at = at2
+        goto(at, "settings")
         act(at, "links: remove from the list", lambda: at.button(key=f"rm_{lid}").click().run())
         check(
             "links: remove drops the entry, the user's file STAYS",
-            os.path.isfile(moved) and store.get_demo(lid) is None and not at.exception,
+            os.path.isfile(moved2) and store.get_demo(lid) is None and not at.exception,
             err_of(at),
         )
 
-        # --- a whole folder
-        d = os.path.dirname(_plain_demo("link_folder", "f1.dem"))
-        _plain_demo("link_folder", "f2.dem")
-        with open(os.path.join(d, "notes.txt"), "w") as fh:
-            fh.write("not a demo")
-        nativedialog.pick_folder = lambda *a, **k: [d]
-        act(at, "links: open the change panel (folder)", lambda: at.button(key="demo_change_btn").click().run())
-        act(at, "links: add a folder", lambda: at.button(key="lib_pick_folder").click().run())
-        linked = {x["name"] for x in store.list_demos() if x["mode"] == "link" and os.path.dirname(x["path"]) == os.path.abspath(d)}
-        check("links: add folder links every demo in it and skips other files", linked == {"f1", "f2"}, linked)
-        check("links: ... and one of them is open", at.session_state["demo_loaded"] in {store.link_id(os.path.join(d, n)) for n in ("f1.dem", "f2.dem")} and not at.exception, err_of(at))
-
         # --- no dialog available (no tkinter): a hint, never a crash
+        goto(at, "matches")
         nativedialog.pick_files = lambda *a, **k: None
-        act(at, "links: open the change panel (no dialog)", lambda: at.button(key="demo_change_btn").click().run())
-        act(at, "links: choose a file without a dialog", lambda: at.button(key="lib_pick_file").click().run())
+        act(at, "links: choose a file without a dialog", lambda: at.button(key="mt_add").click().run())
         check(
-            "links: no dialog -> a hint about the upload, not a crash",
+            "links: no dialog -> a hint, not a crash",
             not at.exception and any("tkinter" in str(w.value) for w in at.warning),
             [str(w.value)[:60] for w in at.warning],
         )
@@ -1193,32 +1490,35 @@ def scenario_bad_input():
     print("== bad input ==")
     did = register_demo(make_match([1, 2]), "vanishing.dem")
     os.remove(store.demo_path(store.get_demo(did)))  # deleted from demos/ by hand
-    at = fresh_at(demo_id=did)
+    # opened as a match (a Matches row): the vanished copy leaves the list
+    # (a copy is adopted from the folder, so its entry goes with the file) -
+    # the app must land on the list, not crash
+    at = fresh_at(demo_id=did, match=did)
     check("vanished demo file: no exception", not at.exception, err_of(at))
-    check("vanished demo file: falls back to another saved demo", not at.error)
+    check(
+        "vanished copy drops the stale match, back to the list",
+        ss_get(at, "page") == "matches" and ss_get(at, "match") is None and not at.error,
+        (ss_get(at, "page"), ss_get(at, "match")),
+    )
     with _empty_library():
         at = fresh_at()
         check("empty library: no exception", not at.exception, err_of(at))
-        check("empty library: the start card says what to do", len(at.info) >= 1 and not at.error)
+        check(
+            "empty library: the matches list says what to do",
+            len(at.subheader) >= 1 and not at.error,
+        )
 
 
 def scenario_library():
     """One input: saved demos in a list, delete, clear cache, meta, switching."""
     print("== demo library ==")
-    ida = register_demo(make_match([1, 2]), "lib_a.dem")
     idb = register_demo(make_match([1]), "lib_b.dem")
-    at = fresh_at(demo_id=ida)
+    at = open_demo(make_match([1, 2]), "lib_a.dem")
+    ida = at.session_state["match"]
     check("library demo opens", not at.exception, err_of(at))
     check(
-        "once loaded the picker is folded into the compact header",
-        widget(at, "selectbox", "lib_pick") is None and widget(at, "button", "demo_change_btn") is not None,
-    )
-    act(at, "open the change-demo panel", lambda: at.button(key="demo_change_btn").click().run())
-    sel = at.selectbox(key="lib_pick")
-    check(
-        "the saved demos are the options of the one demo picker",
-        any("lib_a" in str(o) for o in sel.options) and any("lib_b" in str(o) for o in sel.options),
-        list(sel.options)[:4],
+        "the match header is the compact way around (no picker, no change button)",
+        widget(at, "selectbox", "lib_pick") is None and widget(at, "button", "demo_change_btn") is None,
     )
     check("there is no path field any more", not any(getattr(w, "key", "") == "demo_path" for w in at.text_input))
     meta = store.get_demo(ida)
@@ -1229,32 +1529,36 @@ def scenario_library():
     )
     check("opening a demo marks it as the latest", store.list_demos()[0]["id"] == ida)
     check("the parsed demo was cached to the data folder", store.storage_report()["parsed"] > 0)
-    # switch to the other saved demo with the picker
-    act(at, "pick another saved demo", lambda: at.selectbox(key="lib_pick").select(idb).run())
-    check("picker switches the demo", at.session_state["demo_id"] == idb and not at.exception, err_of(at))
-    check("the picked demo is now the latest", store.list_demos()[0]["id"] == idb)
-    # a new browser session reopens the last demo
-    at = fresh_at()
-    check("a new session opens the last demo", at.session_state["demo_id"] == idb and not at.exception, err_of(at))
-    act(at, "open the change-demo panel again", lambda: at.button(key="demo_change_btn").click().run())
-    # clear cache keeps the demos
-    act(at, "clear cache", lambda: at.button(key="lib_clear").click().run())
-    check(
-        "clear cache empties the caches, demos stay",
-        store.storage_report()["parsed"] == 0 and store.get_demo(ida) is not None and store.get_demo(idb) is not None,
+    # switch to the other saved demo: its row in the Matches list
+    goto(at, "matches")
+    rows = core.build_rows([], store.list_demos())
+    _ib = next(i for i, r in enumerate(rows) if r.demo_id == idb)
+    act(
+        at,
+        "a list row opens the other saved demo",
+        lambda: at.session_state.__setitem__("mt_action_row", _ib) or at.run(),
     )
-    # delete needs a confirmation
-    act(at, "delete: ask", lambda: at.button(key=f"del_{idb}").click().run())
-    check("delete asks first, nothing removed yet", store.get_demo(idb) is not None and at.button(key=f"delyes_{idb}") is not None)
-    act(at, "delete: cancel", lambda: at.button(key=f"delno_{idb}").click().run())
-    check("cancel keeps the demo", store.get_demo(idb) is not None)
-    act(at, "delete: ask again", lambda: at.button(key=f"del_{idb}").click().run())
-    act(at, "delete: confirm", lambda: at.button(key=f"delyes_{idb}").click().run())
     check(
-        "delete removes the demo and the app falls back to another one",
-        store.get_demo(idb) is None and not os.path.exists(os.path.join(store.demos_dir(), f"lib_b__{idb[:8]}.dem"))
-        and at.session_state["demo_id"] == ida and not at.exception,
+        "the row click switches the match",
+        at.session_state["demo_id"] == idb and at.session_state["match"] == idb and not at.exception,
         err_of(at),
+    )
+    check("the switched demo is now the latest", store.list_demos()[0]["id"] == idb)
+    # a new browser session starts on the matches list; the last demo is
+    # one row click away
+    at = fresh_at()
+    check(
+        "a new session lands on the matches list",
+        ss_get(at, "page") == "matches" and ss_get(at, "match") is None and not at.exception,
+        err_of(at),
+    )
+    goto(at, "overview")
+    check("the last opened demo is one click away", ss_get(at, "match") == idb, ss_get(at, "match"))
+    # the clear-cache / delete buttons live on Settings now (scenario_settings
+    # locks them); here only the library state itself is checked
+    check(
+        "both demos are still in the library",
+        store.get_demo(ida) is not None and store.get_demo(idb) is not None,
     )
 
 
@@ -1273,25 +1577,25 @@ def scenario_matrix():
                 act(
                     at,
                     f"thr={thr}",
-                    lambda v=thr: at.slider(key="thr").set_value(v).run(),
+                    lambda v=thr: at.session_state.__setitem__("thr", v) or at.run(),
                 )
             for w in (1.0, 6.0):
                 act(
                     at,
                     f"window={w}",
-                    lambda v=w: at.slider(key="window_s").set_value(v).run(),
+                    lambda v=w: at.session_state.__setitem__("window_s", v) or at.run(),
                 )
             for sd in (100, 2000):
                 act(
                     at,
                     f"safe_dist={sd}",
-                    lambda v=sd: at.slider(key="safe_dist").set_value(v).run(),
+                    lambda v=sd: at.session_state.__setitem__("safe_dist", v) or at.run(),
                 )
             for sdist in (500, 4000):
                 act(
                     at,
                     f"strict_dist={sdist}",
-                    lambda v=sdist: at.slider(key="strict_dist").set_value(v).run(),
+                    lambda v=sdist: at.session_state.__setitem__("strict_dist", v) or at.run(),
                 )
             open_filters(at)
             presets = _PRESETS_BY_COUNT.get(n_presets(at)[0], ())
@@ -1865,13 +2169,108 @@ def scenario_map():
             os.environ["AIMAUDIT_RADAR_DIR"] = old
 
 
+def scenario_matchstats():
+    """The per-match summary: the ask flow, compute-at-open, and the resets."""
+    print("== match summary (matchstats) ==")
+    import i18n as _i18n
+
+    import sources
+    from views import matches as _mv
+
+    _t = _i18n.make_t("en")
+
+    def _rows():
+        return core.build_rows(
+            sources.read_cache("steam"), store.list_demos(), stats_of=core.matchstats.cached_stats
+        )
+
+    # 1) no known account: opening a match asks who you are - once
+    store.write_accounts({**store.read_accounts(), "steam_id64": ""})
+    at = open_demo(make_match([1, 2]), "ms_ask.dem")
+    did = at.session_state["match"]
+    check(
+        "ms: the ask card renders without a known 'me'",
+        widget(at, "selectbox", "mt_who_pick") is not None
+        and widget(at, "button", "mt_who_set") is not None,
+    )
+    check(
+        "ms: nothing cached before the answer",
+        core.matchstats.read_cached(store.demo_path(store.get_demo(did))) is None,
+    )
+    act(at, "ms: pick yourself (Charlie)", lambda: at.selectbox(key="mt_who_pick").select(S3).run())
+    act(at, "ms: press 'That's me'", lambda: at.button(key="mt_who_set").click().run())
+    entry = store.get_demo(did)
+    check("ms: the pick is remembered in the library", entry.get("me_sid") == S3, entry.get("me_sid"))
+    stats = core.matchstats.read_cached(store.demo_path(entry))
+    check("ms: the summary was computed right away", stats is not None and stats["me_sid"] == S3, stats)
+    check(
+        "ms: the numbers are the picked player's (Alpha killed Charlie twice)",
+        stats is not None and stats["kills"] == 0 and stats["deaths"] == 2,
+        (stats or {}).get("kills"),
+    )
+
+    # 2) the SteamID64 route: a match of the account's player never asks
+    store.write_accounts({**store.read_accounts(), "version": 1, "steam_id64": S1})
+    at = open_demo(make_match([1, 2, 13]), "ms_auto.dem")
+    did2 = at.session_state["match"]
+    check("ms: no ask card when the SteamID64 played", widget(at, "selectbox", "mt_who_pick") is None)
+    stats2 = core.matchstats.read_cached(store.demo_path(store.get_demo(did2)))
+    check(
+        "ms: the summary computed at open for the SteamID64 player",
+        stats2 is not None and stats2["me_sid"] == S1 and stats2["kills"] == 3,
+        (stats2 or {}).get("kills"),
+    )
+
+    # 3) the table rows carry the numbers; an un-analyzed row offers Analyze
+    did3 = register_demo(make_match([1]), "ms_third.dem")
+    goto(at, "matches")
+    at.run()
+    rows = _rows()
+    check(
+        "ms: the analyzed rows carry their summary",
+        next(r for r in rows if r.demo_id == did2).stats is not None
+        and next(r for r in rows if r.demo_id == did).stats is not None,
+    )
+    row3 = next(r for r in rows if r.demo_id == did3)
+    check(
+        "ms: an un-analyzed row offers Analyze, an analyzed one Open",
+        _mv.action_of(_t, row3) == _t("act_analyze")
+        and _mv.action_of(_t, next(r for r in rows if r.demo_id == did2)) == _t("mt_open"),
+        (_mv.action_of(_t, row3), _mv.action_of(_t, next(r for r in rows if r.demo_id == did2))),
+    )
+    i3 = rows.index(row3)
+    act(
+        at,
+        "ms: a row click opens (and analyzes) the match",
+        lambda: at.session_state.__setitem__("mt_action_row", i3) or at.run(),
+    )
+    check(
+        "ms: the opened match got its summary on the way in",
+        core.matchstats.read_cached(store.demo_path(store.get_demo(did3))) is not None
+        and ss_get(at, "match") == did3
+        and not at.exception,
+        (ss_get(at, "match"), err_of(at)),
+    )
+
+    # 4) the resets: clear cache and delete take the summaries with them
+    did4 = register_demo(make_match([1, 2]), "ms_fourth.dem")
+    goto(at, "settings")
+    act(at, "ms: clear the caches", lambda: at.button(key="lib_clear").click().run())
+    check(
+        "ms: clear_cache resets the summaries",
+        core.matchstats.read_cached(store.demo_path(store.get_demo(did4))) is None
+        and os.listdir(store.matchstats_dir()) == [],
+        sorted(os.listdir(store.matchstats_dir())),
+    )
+
+
 def scenario_matches():
-    """The Matches page: empty library, errors, cached list, download -> Open."""
-    print("== matches page (Steam import) ==")
+    """The Matches page: the unified table, refresh, download -> open."""
+    print("== matches page (the unified table) ==")
     import sources
     from sources import model as sm
 
-    def _rec(mid, result="win", score=(13, 5), demo=sm.DemoState.READY):
+    def _rec(mid, result="win", score=(13, 5), demo=sm.DemoState.READY, **kw):
         from datetime import datetime, timezone
 
         return sm.MatchRecord(
@@ -1883,7 +2282,19 @@ def scenario_matches():
             score=score,
             result=result,
             demo=demo,
+            **kw,
         )
+
+    def _rows():
+        return core.build_rows(sources.read_cache("steam"), store.list_demos())
+
+    def _shown_of(at):
+        """(x, y) from the 'Showing x of y' counter line."""
+        for c in at.caption:
+            m = re.search(r"(?:Showing|Показано) (\d+) (?:of|из) (\d+)", str(c.value))
+            if m:
+                return int(m.group(1)), int(m.group(2))
+        return None
 
     # 1) empty library, nothing set up: the page must open and stay friendly
     with _empty_library():
@@ -1891,11 +2302,18 @@ def scenario_matches():
         check("matches: renders on an empty library", not at.exception, err_of(at))
         check("matches: refresh button offered", widget(at, "button", "mt_refresh") is not None)
         check(
-            "matches: the Steam helper card with the install button",
-            widget(at, "button", "mt_helper_install") is not None
-            and any("boiler-writter" in str(s.value) for s in at.subheader),
+            "matches: the add-match button is offered",
+            widget(at, "button", "mt_add") is not None,
         )
-        check("matches: no error without any interaction", not at.error)
+        check(
+            "matches: the helper status points at Settings",
+            widget(at, "button", "mt_configure") is not None
+            and widget(at, "button", "mt_helper_install") is None,
+        )
+        check(
+            "matches: the empty state says what to do",
+            len(at.subheader) >= 1 and not at.error,
+        )
 
         # 2) a failing refresh keeps the page usable
         def _boom(provider, cfg, n, **kw):
@@ -1909,17 +2327,19 @@ def scenario_matches():
         finally:
             sources.list_matches = _orig_list
 
-        # 3) the real flow with a fake provider: refresh -> cards -> download -> open
+        # 3) the real flow with a fake provider: refresh -> table -> download -> open
         store.write_accounts({"version": 1, "match_count": 5})
 
         def _fake_list(provider, cfg, n, **kw):
             if provider != "steam":
                 return []
-            return [
+            recs = [
                 _rec("m1"),
                 _rec("m2", result="loss", score=(9, 13)),
                 _rec("m3", result="tie", score=(12, 12)),
             ]
+            recs += [_rec(f"m{i}") for i in range(4, 31)]  # past the Show-more cut
+            return recs
 
         def _fake_fetch(rec, cfg, *, progress=None, cancel=None, **kw):
             src = os.path.join(DEMO_DIR, f"steam_{rec.match_id}.dem")
@@ -1936,56 +2356,116 @@ def scenario_matches():
         sources.inbox.replays_records = lambda *a, **k: []
         try:
             act(at, "refresh loads the list", lambda: at.button(key="mt_refresh").click().run())
-            md = "\n".join(m.value for m in at.markdown)
-            check("matches: cards list the games", md.count("de_mirage") >= 3, md[:200])
-            check("matches: win/loss/tie badges rendered",
-                  "Win" in md and "Loss" in md and "Tie" in md, md[:300])
-            check("matches: cached to matches.json",
-                  len(store.read_matches_cache().get("providers", {}).get("steam", {}).get("records", [])) == 3)
-            check("matches: download buttons offered",
-                  widget(at, "button", "mt_dl_steam_m1") is not None)
+            check("matches: cached to matches.json", len(sources.read_cache("steam")) == 30)
+            rows = _rows()
+            check(
+                "matches: one row per game, results win/loss/tie in the list",
+                len(rows) == 30 and {"win", "loss", "tie"} <= {r.result for r in rows},
+                [(r.key, r.result) for r in rows[:3]],
+            )
+            check(
+                "matches: the counter shows the first page (25 of 30)",
+                _shown_of(at) == (25, 30),
+                _shown_of(at),
+            )
+            check("matches: the Show more button is offered", widget(at, "button", "mt_more") is not None)
+            act(at, "show more", lambda: at.button(key="mt_more").click().run())
+            check("matches: the second page completes the table", _shown_of(at) == (30, 30), _shown_of(at))
 
-            act(at, "download the demo", lambda: at.button(key="mt_dl_steam_m1").click().run())
+            # a row click downloads the demo (the deferred action the row
+            # trigger records - the same path the component callback takes)
+            rows = _rows()
+            i_m1 = next(i for i, r in enumerate(rows) if r.match_id == "m1")
+            act(
+                at,
+                "row click downloads the demo",
+                lambda: at.session_state.__setitem__("mt_action_row", i_m1) or at.run(),
+            )
             entry = store.find_by_match("steam", "m1")
-            check("matches: demo bound in the library", entry is not None, entry)
-            if entry:
-                check("matches: file named after the match", "steam_m1" in entry["file"], entry["file"])
-                FakeParser.demos[os.path.realpath(store.demo_path(entry))] = make_match([1, 2])
-                act(at, "open the downloaded demo", lambda: at.button(key="mt_open_steam_m1").click().run())
-                check("matches: open switches to the analysis", ss_get(at, "page") == "overview" and not at.exception, (ss_get(at, "page"), err_of(at)))
-                check("matches: the demo is the loaded one", ss_get(at, "demo_id") == entry["id"], ss_get(at, "demo_id"))
-                check("matches: back to the matches page still works", goto(at, "matches") or True)
+            check("matches: download bound the demo in the library", entry is not None and "steam_m1" in entry["file"], entry)
+            rows = _rows()
+            m1row = next(r for r in rows if r.match_id == "m1")
+            check(
+                "matches: the row is in-library now, one row still (no dupes)",
+                m1row.demo_id == entry["id"] and m1row.demo_state == sm.DemoState.DOWNLOADED
+                and sum(1 for r in rows if r.match_id == "m1") == 1,
+                (m1row.demo_id, m1row.demo_state),
+            )
 
-            # 3b) the downloaded/not-downloaded filter
-            act(at, "filter not downloaded", lambda: ctl(at, "segmented_control", "mt_filter").select("todo").run())
-            check("matches: todo filter hides the downloaded",
-                  widget(at, "button", "mt_open_steam_m1") is None
-                  and widget(at, "button", "mt_dl_steam_m2") is not None)
-            act(at, "filter in library", lambda: ctl(at, "segmented_control", "mt_filter").select("down").run())
-            check("matches: down filter keeps only the downloaded",
-                  widget(at, "button", "mt_dl_steam_m2") is None
-                  and widget(at, "button", "mt_open_steam_m1") is not None)
-            act(at, "filter all", lambda: ctl(at, "segmented_control", "mt_filter").select("all").run())
+            # a row click opens the match
+            FakeParser.demos[os.path.realpath(store.demo_path(entry))] = make_match([1, 2])
+            act(
+                at,
+                "row click opens the match",
+                lambda: at.session_state.__setitem__("mt_action_row", i_m1) or at.run(),
+            )
+            check(
+                "matches: open lands in the match view (overview tab)",
+                ss_get(at, "page") == "matches"
+                and ss_get(at, "match") == entry["id"]
+                and ss_get(at, "match_tab") == "overview"
+                and not at.exception,
+                (ss_get(at, "page"), ss_get(at, "match_tab"), err_of(at)),
+            )
+            check("matches: the demo is the loaded one", ss_get(at, "demo_id") == entry["id"], ss_get(at, "demo_id"))
+            check("matches: back to the matches list still works", goto(at, "matches") or True)
+            open_match(at, entry["id"], "continue: reopen the last match")
+            check(
+                "matches: reopen lands back in the match view",
+                ss_get(at, "match") == entry["id"] and not at.exception,
+                (ss_get(at, "match"), err_of(at)),
+            )
+            goto(at, "matches")
 
-            # 3c) delete the demo from its card (with a confirm step)
-            if entry:
-                check("matches: card offers delete", widget(at, "button", f"mt_del_{entry['id']}") is not None)
-                act(at, "ask delete", lambda: at.button(key=f"mt_del_{entry['id']}").click().run())
-                check("matches: delete asks to confirm", widget(at, "button", f"mt_delyes_{entry['id']}") is not None)
-                act(at, "confirm delete", lambda: at.button(key=f"mt_delyes_{entry['id']}").click().run())
-                check("matches: demo gone from the library",
-                      store.find_by_match("steam", "m1") is None and store.get_demo(entry["id"]) is None)
-                check("matches: freed size reported", any("Freed" in str(s.value) for s in at.success))
+            # an own demo joins the table as its own row (source: File)
+            own_id = register_demo(make_match([1, 2]), "own_demo.dem")
+            at.run()
+            rows = _rows()
+            check(
+                "matches: an own demo is its own row with the File source",
+                any(r.demo_id == own_id and r.source == "file" and r.provider is None for r in rows),
+                [r.key for r in rows[:4]],
+            )
+            check("matches: the counter counts it (31 rows)", _shown_of(at) == (31, 31), _shown_of(at))
+            check(
+                "matches: rows classify into pools (competitive / manual)",
+                {r.kind for r in rows} == {"competitive", "manual"},
+                sorted({r.kind for r in rows}),
+            )
 
-            # 3d) clear the whole library at once
-            act(at, "download m2", lambda: at.button(key="mt_dl_steam_m2").click().run())
-            entry2 = store.find_by_match("steam", "m2")
-            check("matches: second demo bound", entry2 is not None)
+            # filters: result / pool + the counter + the URL (the tie
+            # filter keeps one row, safely under the Show-more cut)
+            act(at, "filter: ties only", lambda: ctl(at, "segmented_control", "mflt_result").select("tie").run())
+            check("matches: the result filter narrows the table", _shown_of(at) == (1, 31), _shown_of(at))
+            check("matches: the filters ride in the URL", at.query_params.get("fres") == "tie", dict(at.query_params))
+            act(at, "filter: reset", lambda: at.button(key="mflt_reset").click().run())
+            check("matches: reset restores the table (a fresh 25-row page)", _shown_of(at) == (25, 31), _shown_of(at))
+            check("matches: reset clears the URL", "fres" not in at.query_params, dict(at.query_params))
+            act(
+                at,
+                "filter: manual uploads only",
+                lambda: ctl(at, "selectbox", "mflt_kind").select("manual").run(),
+            )
+            check("matches: the pool filter keeps only your files", _shown_of(at) == (1, 31), _shown_of(at))
+            check("matches: the pool filter rides in the URL", at.query_params.get("fkind") == "manual", dict(at.query_params))
+            act(at, "filter: reset again", lambda: at.button(key="mflt_reset").click().run())
+
+            # a copied link restores the filter in a fresh session
+            at5 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+            at5.query_params["fres"] = "tie"
+            at5.run()
+            check(
+                "matches: ?fres=tie restores the filter",
+                ss_get(at5, "mflt_result") == "tie" and not at5.exception,
+                (ss_get(at5, "mflt_result"), err_of(at5)),
+            )
+
+            # delete the whole library at once (the provider rows stay)
             act(at, "ask clear", lambda: at.button(key="mt_clear").click().run())
             check("matches: clear asks to confirm", widget(at, "button", "mt_clear_yes") is not None)
             act(at, "confirm clear", lambda: at.button(key="mt_clear_yes").click().run())
             check("matches: library empty after clear", store.list_demos() == [])
-            check("matches: cards survive clearing", not at.exception, err_of(at))
+            check("matches: the table survives clearing (download rows)", not at.exception, err_of(at))
 
             # 4) refresh error after a successful load: the cached list stays
             def _boom2(provider, cfg, n, **kw):
@@ -1993,10 +2473,12 @@ def scenario_matches():
 
             sources.list_matches = _boom2
             act(at, "refresh hits the rate limit", lambda: at.button(key="mt_refresh").click().run())
-            check("matches: rate limit message shown",
-                  any("42" in str(e.value) for e in at.error), [str(e.value)[:70] for e in at.error])
-            md = "\n".join(m.value for m in at.markdown)
-            check("matches: cached cards survive the error", md.count("de_mirage") >= 2, md[:200])
+            check(
+                "matches: rate limit message shown",
+                any("42" in str(e.value) for e in at.error),
+                [str(e.value)[:70] for e in at.error],
+            )
+            check("matches: the cached rows survive the error", len(sources.read_cache("steam")) >= 2)
         finally:
             sources.list_matches = _orig_list
             sources.fetch_demo = _orig_fetch
@@ -2016,7 +2498,10 @@ def main():
         # name is patched too for direct core.DemoParser calls.
         core.DemoParser = core.loader.DemoParser = core.replay.DemoParser = FakeParser
         scenario_one_round()
+        scenario_nav()
+        scenario_settings()
         scenario_round_replay()
+        scenario_roundtrip()
         scenario_player_stepper()
         scenario_duel_strip()
         scenario_two_rounds()
@@ -2032,6 +2517,7 @@ def main():
         scenario_impact()
         scenario_scoreboard()
         scenario_map()
+        scenario_matchstats()
         scenario_matches()
         if arg == "--all":
             scenario_matrix()

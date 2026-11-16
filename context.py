@@ -120,7 +120,6 @@ class Ctx:
     state = None  # persistent state.json dict
     status = None  # the st.status plate while loading
     entry = None  # the library entry of the open demo
-    change_open = None  # the "Change demo" panel is open
     demo = None  # core.Demo
     path = None  # unpacked demo path (cache key part)
     mtime = None  # its mtime (cache key part)
@@ -135,14 +134,14 @@ class Ctx:
     duels_f = None
     hurts_f = None
     res_sel = None  # kill/death filter (duels pages)
-    hdr = None  # the sticky header container
+    # match_shell(ctx)
+    hdr = None  # the sticky header container (back button + tabs + filter bar)
+    tab = None  # the active match tab (overview / shooting / ...)
     # page_metrics(ctx)
     summary = None
     my_duels = None
     openings = None
     impact = None
-    # nav(ctx)
-    page = None  # the selected page id
 
 
 def page_metrics(ctx) -> None:
