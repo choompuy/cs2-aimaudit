@@ -96,6 +96,8 @@ def round_payload(
     sel: int | None = None,
     labels: Mapping[str, str] | None = None,
     colors: Mapping[str, str] | None = None,
+    weapon_info: Callable[[str], dict] | None = None,
+    icon_of: Callable[[str], Sequence | None] | None = None,
 ) -> dict:
     """
     JSON-ready model of the 2D replay (pure function: unit-testable).
@@ -119,6 +121,14 @@ def round_payload(
     array. Every duel carries ``tel``: both duelists' speed / turn rate /
     crosshair-to-head angle and the distance per replay sample inside the
     duel's segment (core.duel_telemetry).
+
+    ``weapon_info`` (ui.icons.weapon_info) maps a demo weapon name to its
+    icon key / data URI / size / display label, ``icon_of`` resolves a
+    status icon key ("bomb", "headshot", ...) to [data-uri, w, h]. With
+    them the payload carries ``icons`` - ONLY the icons this round needs,
+    one dict entry each - and ``wlab``, the localized weapon names for the
+    tooltips. Without them (no icon set installed) both stay empty and the
+    front end shows plain text names, exactly like before.
     """
     import core as _core  # lazy: keeps the payload builder import-light
 
@@ -127,6 +137,30 @@ def round_payload(
     grid = np.arange(t0, t1 + 1, step)
     keys = list(data.get("keys") or ())
     two_level = bool(radar and radar.get("lower"))
+
+    # the icon set of THIS round: {key: [data-uri, w, h]}, filled lazily by
+    # _weapon() / _badge() below; wlab carries the localized weapon names
+    icons_out: dict[str, list] = {}
+    wlab: dict[str, str] = {}
+
+    def _weapon(name: Any) -> str:
+        """The short weapon name for the payload, registering its icon."""
+        short = _wshort(name)
+        if weapon_info is not None and short:
+            info = weapon_info(short)
+            if info.get("key") and info.get("uri"):
+                icons_out.setdefault(info["key"], [info["uri"], info["w"], info["h"]])
+            if info.get("label"):
+                wlab[short] = info["label"]
+        return short
+
+    def _badge(key: str) -> None:
+        """Register a status icon (bomb, headshot, ...) when it exists."""
+        if icon_of is None:
+            return
+        v = icon_of(key)
+        if v:
+            icons_out.setdefault(key, list(v))
 
     def _name(sid: str) -> str:
         return str(names.get(sid, sid))
@@ -173,7 +207,7 @@ def round_payload(
             for tick, val in zip(grid, g["active_weapon_name"].ffill().bfill().to_numpy()):
                 cur = None if val is None or (isinstance(val, float) and math.isnan(val)) else str(val)
                 if cur != last:
-                    changes.append([int(tick), _wshort(cur)])
+                    changes.append([int(tick), _weapon(cur)])
                     last = cur
             p["w"] = changes
         kb = np.zeros(len(grid), dtype=np.int64)
@@ -195,7 +229,7 @@ def round_payload(
 
     shots = [[int(t), _pi(s), str(w)] for t, s, w in (data.get("shots") or [])]
     kills = [
-        [int(t), _pi(a), _pi(v), str(w), bool(hs)]
+        [int(t), _pi(a), _pi(v), _weapon(w), bool(hs)]
         for t, a, v, w, hs in (data.get("kills") or [])
     ]
     hits = [[int(t), _pi(a), _pi(v)] for t, a, v in (data.get("hits") or [])]
@@ -213,8 +247,12 @@ def round_payload(
             "vi": _pi(v),
             "kn": _name(k),
             "vn": _name(v),
-            "w": str(x.get("weapon") or ""),
+            "w": _weapon(x.get("weapon") or ""),
             "hs": bool(x.get("hs")),
+            "ns": bool(x.get("ns")),
+            "sm": bool(x.get("sm")),
+            "bl": bool(x.get("bl")),
+            "wb": bool(x.get("wb")),
             "dur": _r1(x.get("dur")),
             "dist": x.get("dist"),
             "first": str(x.get("first") or ""),
@@ -254,7 +292,6 @@ def round_payload(
         ]
         for r in rounds
     ]
-
     # how THIS round ended: the demo's own round_end (winner + reason); a
     # winner the rounds bar knows from the elimination guess fills the gap
     info = dict(data.get("info") or {})
@@ -276,6 +313,34 @@ def round_payload(
         for tk, kind, sid in bomb_src
         if t0 <= int(tk) <= t1
     ]
+
+    # the status icons this round needs: the bomb story, the round results,
+    # headshots, deaths (the skull in the player list) and the clock
+    for _kind in {str(kd) for _, kd, _ in bomb}:
+        _badge({"plant": "bomb", "defuse": "defuse", "boom": "bomb_explode"}.get(_kind, ""))
+    for _why in {why for _, _, why in rd} | ({why} if (why := out["why"]) else set()):
+        _badge(
+            {
+                "bomb": "bomb_explode",
+                "defuse": "defuse",
+                "elim": "skull",
+                "time": "hourglass",
+            }.get(_why, "")
+        )
+    if any(k[4] for k in kills) or any(z.get("hs") for z in du):
+        _badge("headshot")
+    if kills or any(p.get("al") and 0 in p["al"] for p in players):
+        _badge("skull")
+    _badge("timer")
+    for z in du:  # the kill modifiers, when the demo carries them
+        if z["ns"]:
+            _badge("noscope")
+        if z["sm"]:
+            _badge("smoke_kill")
+        if z["bl"]:
+            _badge("flashed_kill")
+        if z["wb"]:
+            _badge("wallbang")
 
     rp: dict | None = None
     if radar:
@@ -320,6 +385,8 @@ def round_payload(
         "keys": keys,
         "lab": {k: str(v or "") for k, v in (labels or {}).items()},
         "col": {k: str(v or "") for k, v in (colors or {}).items()},
+        "icons": icons_out,
+        "wlab": wlab,
     }
 
 

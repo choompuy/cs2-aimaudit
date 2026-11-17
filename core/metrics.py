@@ -549,6 +549,26 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
     return pd.concat(parts).sort_values("tick").reset_index(drop=True)
 
 
+def _top_weapon(de: pd.DataFrame, ok: np.ndarray, who: str) -> dict[str, str]:
+    """sid -> the weapon carried by the most of this player's rows in
+    de[ok] (enemy kills / deaths); ties break alphabetically."""
+    if "weapon" not in de.columns or not len(de):
+        return {}
+    sub = de.loc[ok, [who, "weapon"]]
+    sub = sub[sub["weapon"].astype(str).str.len() > 0]
+    if not len(sub):
+        return {}
+    top = (
+        sub.groupby([who, "weapon"])
+        .size()
+        .rename("n")
+        .reset_index()
+        .sort_values([who, "n", "weapon"], ascending=[True, False, True])
+        .drop_duplicates(who)
+    )
+    return dict(zip(top[who], top["weapon"]))
+
+
 def _enemy_kill_rows(demo: Demo) -> pd.DataFrame:
     """
     Deaths with a known attacker of the ENEMY team (suicides / world /
@@ -921,8 +941,11 @@ def player_summary(
     keep = _round_side_keep(demo, f)
     kills_by: dict = {}
     deaths_by: dict = {}
+    best_w: dict[str, str] = {}  # sid -> the weapon the most kills came from
+    died_w: dict[str, str] = {}  # sid -> the weapon the most deaths came from
+    de = _enemy_kill_rows(demo) if have_d else pd.DataFrame()
+    k_ok = v_ok = None
     if keep is not None:
-        de = _enemy_kill_rows(demo)
         if len(de):
             rd = (de["round_idx"] + 1).astype(int)
             k_ok = np.array(
@@ -934,6 +957,12 @@ def player_summary(
             )
             kills_by = de[k_ok].groupby("attacker_steamid").size().to_dict()
             deaths_by = de[v_ok].groupby("user_steamid").size().to_dict()
+            best_w = _top_weapon(de, k_ok, "attacker_steamid")
+            died_w = _top_weapon(de, v_ok, "user_steamid")
+    elif len(de):  # no round/side filter: every enemy kill counts
+        k_ok = np.ones(len(de), dtype=bool)
+        best_w = _top_weapon(de, k_ok, "attacker_steamid")
+        died_w = _top_weapon(de, k_ok, "user_steamid")
     for p in demo.players.itertuples():
         sh = shots[shots["sid"] == p.sid]
         hi = _hurts_of(demo, p.sid, hurts)
@@ -1022,6 +1051,9 @@ def player_summary(
                     else np.nan
                 ),
                 "duration": round(dd["duration_s"].median(), 2) if len(dd) else np.nan,
+                # icon columns: the favorite weapon and the one dying to
+                "best_weapon": best_w.get(p.sid, ""),
+                "died_to": died_w.get(p.sid, ""),
             }
         )
     return (

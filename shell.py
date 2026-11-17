@@ -421,6 +421,14 @@ def _clear_cache() -> None:
     st.session_state["_freed"] = store.clear_cache()
 
 
+def _clear_icons() -> None:
+    """The icons are re-downloadable art, not cache: their own button."""
+    st.session_state["_freed"] = store.clear_icons()
+    import ui.icons
+
+    ui.icons.reset_cache()
+
+
 def locate_demo(t, did: str) -> None:
     """A linked demo was moved: ask where it is now and point the entry there."""
     chosen = nativedialog.pick_files(
@@ -456,6 +464,7 @@ def library_panel(t, entries: list[dict]) -> None:
             parsed=store.human_size(rep["parsed"]),
             unpacked=store.human_size(rep["unpacked"]),
             radars=store.human_size(rep["radars"]),
+            icons=store.human_size(rep["icons"]),
         )
     )
     st.caption(t("lib_by_hand"))
@@ -510,6 +519,12 @@ def library_panel(t, entries: list[dict]) -> None:
         key="lib_clear",
         on_click=_clear_cache,
         help=t("lib_clear_help"),
+    )
+    st.button(
+        t("lib_clear_icons"),
+        key="lib_clear_icons",
+        on_click=_clear_icons,
+        help=t("lib_clear_icons_help"),
     )
     if "_freed" in st.session_state:
         st.success(

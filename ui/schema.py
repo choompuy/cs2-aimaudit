@@ -39,8 +39,9 @@ _ATTRS = (
     "sort_by",
     "sticky",
     "tones",
+    "title_by",
 )
-_KINDS = ("num", "text", "badge")
+_KINDS = ("num", "text", "badge", "icon")
 _BARS = ("none", "pct", "rel")
 _BESTS = ("none", "high", "low")
 # tone names the renderer understands (ui/table.py); _-prefixed there, but
@@ -113,6 +114,7 @@ def build_cols(table_id: str, *, all_columns: bool = False, t=None) -> list[Col]
                 tones=m.get("tones"),
                 sticky=bool(m.get("sticky", False)),
                 grade=_grade(m.get("grade")),
+                title_by=_norm(m.get("title_by"), "none"),
             )
         )
     return cols
@@ -134,9 +136,11 @@ def table(
     all_columns: bool = False,
     t=None,
     empty: str = "",
+    icons: dict | None = None,
 ) -> None:
     """One call instead of a hand-written data_table(...): cols, stripe and
-    height come from tables.toml; selected/on_click are runtime values."""
+    height come from tables.toml; selected/on_click are runtime values.
+    ``icons`` is the {key: [data-uri, w, h]} set for the icon columns."""
     spec = _load()["table"].get(table_id)
     if spec is None:
         raise KeyError(f"unknown table {table_id!r}")
@@ -159,6 +163,7 @@ def table(
         on_click=on_click,
         max_height=spec.get("max_height", 620),
         empty=empty,
+        icons=icons,
     )
 
 
@@ -252,6 +257,8 @@ def validate(spec: dict | None = None) -> list[str]:
         _grade_errs(m.get("grade"), where, errs)
         if m.get("grade", "none") not in ("none", "auto") and kind != "num":
             errs.append(f"{where}: grade is ignored for kind={kind}")
+        if kind == "icon" and m.get("tones") is not None:
+            errs.append(f"{where}: tones is ignored for kind=icon")
         if m.get("tone", "accent") and not _tone_ok(m.get("tone", "accent")):
             errs.append(f"{where}: unknown tone/token {m.get('tone')!r}")
         if m.get("tones") is not None:
@@ -263,6 +270,15 @@ def validate(spec: dict | None = None) -> list[str]:
                         errs.append(f"{where}: tones[{val!r}] unknown tone {tone!r}")
         if not isinstance(m.get("sticky", False), bool):
             errs.append(f"{where}: sticky must be a boolean")
+        if kind == "icon":
+            # the tooltip / fallback text column is what makes an icon cell
+            # usable without the icon set - it must resolve in every table
+            # that shows the column (checked below, like sort_by)
+            tb = _norm(m.get("title_by"), "none")
+            if tb is None:
+                errs.append(f"{where}: kind=icon needs title_by (the tooltip column)")
+        elif m.get("title_by") is not None and _norm(m.get("title_by"), "none") is not None:
+            errs.append(f"{where}: title_by is ignored for kind={kind}")
 
     for tid, tbl in tables.items():
         where = f"[table.{tid}]"
@@ -307,8 +323,8 @@ def validate(spec: dict | None = None) -> list[str]:
             errs.append(f"{where}: max_height must be a positive int")
         if not isinstance(tbl.get("selectable", False), bool):
             errs.append(f"{where}: selectable must be a boolean")
-        # sort_by must resolve inside this table (checked per column, the
-        # metric alone does not know which tables show it)
+        # sort_by and title_by must resolve inside this table (checked per
+        # column, the metric alone does not know which tables show it)
         for c in cols:
             if c not in metrics:
                 continue
@@ -316,4 +332,7 @@ def validate(spec: dict | None = None) -> list[str]:
             sb = _norm(m.get("sort_by"), "none")
             if sb is not None and sb not in avail:
                 errs.append(f"{where}: sort_by {sb!r} of column {c!r} unknown")
+            tb = _norm(m.get("title_by"), "none")
+            if tb is not None and tb not in avail:
+                errs.append(f"{where}: title_by {tb!r} of column {c!r} unknown")
     return errs

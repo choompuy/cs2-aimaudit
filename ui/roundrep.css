@@ -168,7 +168,47 @@
   overflow: hidden;
 }
 .rr-fe b { font-weight: var(--font-weight-semibold); overflow: hidden; text-overflow: ellipsis; }
-.rr-fe .rr-w { color: var(--text-secondary); }
+.rr-fe .rr-w { color: var(--text-secondary); display: inline-flex; align-items: center; }
+.rr-fe .rr-hs { color: var(--text-secondary); }
+
+/*
+ * A kill-feed icon: the SVG data URI is the alpha MASK of a box painted
+ * with --icol (default: the text colour). The file's own fill never
+ * matters - grenades / the bomb / the defuse kit carry no white fill and
+ * would stay black if we relied on it.
+ */
+.rr-ico {
+  display: inline-block;
+  vertical-align: text-bottom;
+  width: calc(var(--h, 12px) * var(--ar, 1));
+  height: var(--h, 12px);
+  background-color: var(--icol, var(--text-primary));
+  -webkit-mask: var(--ico) center / contain no-repeat;
+  mask: var(--ico) center / contain no-repeat;
+  flex: none;
+}
+.rr-cmeta { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
+.rr-cmeta > span:not(.rr-ico) { color: var(--text-secondary); }
+/* the weapon of a player row: icon first, text only without the icon set */
+.rr-pw { overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 0.25rem; }
+.rr-pwi { display: inline-flex; align-items: center; }
+.rr-pwt { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
+/* the duel panel's weapon chip */
+.rr-dpw { display: inline-flex; align-items: center; color: var(--text-secondary); margin-left: 0.5rem; }
+/* the floating tooltip over the canvas (the canvas has no title attr) */
+.rr-tip {
+  position: absolute;
+  z-index: 5;
+  max-width: 170px;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-3) 92%, transparent);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
 .rr-ctl {
   display: flex;
   align-items: center;

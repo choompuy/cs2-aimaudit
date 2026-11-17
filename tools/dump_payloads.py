@@ -47,6 +47,7 @@ def _recording_data_table(rows, cols, *, key, **kw):
         clickable=kw.get("on_click") is not None,
         max_height=kw.get("max_height", 620),
         empty=kw.get("empty", ""),
+        icons=kw.get("icons"),
     )
     if LABEL[0]:
         RECORD[LABEL[0]] = payload

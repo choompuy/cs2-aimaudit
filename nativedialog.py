@@ -45,10 +45,11 @@ print(json.dumps([path] if path else []))
 
 def _initial_dir() -> str:
     """A folder the dialog can actually open in. start.bat's portable mode
-    points USERPROFILE into data\\home, where ~/Desktop does not exist -
+    points the profile into data\\home, where ~/Desktop does not exist -
     Windows then answers 'Location is not available' before the dialog
-    even shows. The real Desktop comes from the registry; the fallbacks
-    are folders that always exist."""
+    even shows. The real Desktop comes from the registry; the fallback is
+    the app folder (a folder that always exists, and store.py stays the
+    one module that knows locations)."""
     try:
         import winreg
 
@@ -62,9 +63,6 @@ def _initial_dir() -> str:
             return desktop
     except Exception:  # noqa: BLE001 - non-Windows / locked registry: fall through
         pass
-    for c in (os.path.expanduser("~"), os.getcwd()):
-        if os.path.isdir(c):
-            return c
     return os.getcwd()
 
 

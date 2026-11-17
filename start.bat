@@ -69,12 +69,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem The Map page draws on the real radars. They are downloaded once into
-rem data\radars and never again; with no internet the app still works on a
-rem plain grid and this step retries tomorrow. To skip the download for good:
-rem set AIMAUDIT_NO_RADARS=1 (the Windows setx command makes it permanent).
-echo [3/4] Checking the radar images for the Map page ...
+rem The Map page draws on the real radars, and the tables / the 2D replay
+rem show the weapon and status silhouettes of the CS2 kill feed. Both are
+rem Valve's art and never committed here: they are downloaded once into
+rem data\radars and data\icons and never again; without internet the app
+rem still works (a plain grid, weapon names as text) and this step retries
+rem tomorrow. To skip a download for good: set AIMAUDIT_NO_RADARS=1 /
+rem AIMAUDIT_NO_ICONS=1 (the Windows setx command makes them permanent).
+echo [3/4] Checking the radar images and the weapon icons ...
 if not defined AIMAUDIT_NO_RADARS python tools\fetch_radars.py --if-missing
+if not defined AIMAUDIT_NO_ICONS python tools\fetch_icons.py --if-missing
 
 rem Streamlit asks for an email on its very first run and waits for Enter,
 rem the window then looks frozen. An empty credentials file skips that prompt.

@@ -17,13 +17,13 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 - **Matches** — every match of every source in one dense table: map, date, score (coloured by result, with the W/L/D letter), pool (Matchmaking Competitive / Premier / FACEIT / Manual upload), your K/D, accuracy and the action. Click a row to open the match when the demo is in the library — or to download / import it when it is not (a finished download is analyzed right away). Filters (period, map, pool, result) in one row, **Refresh** and **Add match** (pick demo files) next to it.
 - **Match view** — the open match's header (back to the list, the result, the map / mode / source / date chips) with the tabs Overview · Shooting · Duels · Map · 2D replay and the analysis filters underneath.
 - **Settings** — the analysis sliders, accounts (SteamID64, the replays folder, the share-code import, the Steam helper), Library and storage (sizes, delete a demo, clear the cache) and privacy.
-- **Overview** — every player in one table: K/D, accuracy, HS%, shots on the move, "risky shots", shoots-first rate, aim error, duel duration. K/D (as kills / deaths and as a ratio), opening duels, trades and assists follow the **Side** and **Rounds** filters. Tick a row's checkbox to analyze that player; the **All columns** toggle adds the detail metrics (incl. first-shot accuracy and opening-duel winrate).
+- **Overview** — every player in one table: K/D, accuracy, HS%, shots on the move, "risky shots", shoots-first rate, aim error, duel duration, and the best / most-died-to weapon as kill-feed silhouettes (the localized name in the tooltip and as the text fallback). K/D (as kills / deaths and as a ratio), opening duels, trades and assists follow the **Side** and **Rounds** filters. Tick a row's checkbox to analyze that player; the **All columns** toggle adds the detail metrics (incl. first-shot accuracy and opening-duel winrate).
 - **Shooting** — hit zones, speed at each shot, a speed-vs-distance scatter with the acceptable-speed curve, per-weapon stats.
 - **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded. Below: your duels by map zone and how every round started (opening duels, both teams).
 - **Impact** — per player: opening duels won/lost, trade kills, traded deaths, 2k–5k rounds, assists and flash assists.
 - **Map** — where the selected player killed and died, on the radar: your position (circle), the opponent's (open diamond) and a line between them; blue = kill, red = death; works with every filter, and two-level maps (Nuke, Vertigo) get an Upper / Lower switch. Needs the radar images once, see [Radar images](#radar-images-for-the-map-page).
 - **Duels → click a duel** — a window with the chart: speed (with the moving threshold), yaw turn, pitch and held keys as coloured bars with a legend, around the duel, with the first shot and the death marked, cut at the moment of death (input recorded after death is a demo-parser artifact, not real play). The strip walks all duels (← / → hotkeys, Shift+← / → between rounds) without closing the window; a button shows the duel in the 2D replay.
-- **2D replay** — the whole round on the radar, like the spectator mini-map, for everybody: nobody is selected or highlighted. A small dot per player (blue = CT, yellow = T) with a view-direction arrow, the name, an HP bar and the weapon in hands; lines are shots, stars are hits, crosses are deaths and the side feed lists the kills of the round. The **banner above the map says who won the round and how** (bomb exploded / defused, everybody eliminated, time ran out); the bomb plant, defuse and explosion are marked on the timeline and every round chip shows how its round ended. The result comes from the demo's `round_end` when it has one and is otherwise read from the bomb events and the kills (marked as such). The panel on the left lists the players split into CT and T, sorted by nickname inside a team, with the weapon, the live speed (steady: it snaps to 5 u/s and every column keeps its width) and the HP, and an **eye** that hides the player from the map (the eye on top hides or shows everyone; the choice survives round switches). The right column holds a card for EVERY duel of the round, of every player: duels that have not happened yet are semi-transparent, past ones are solid, the selected one gets an outline. Clicking a card locks the playhead to that duel's segment and opens the **duel panel**: for both duelists the live speed, how fast the crosshair turns and the angle between the crosshair and the enemy's head, a chart of those over the whole duel with every shot, the numbers the duels table measured at the first shot, and the keys they pressed; click the chart to jump. The **speed button opens a menu from 0.1x to 4x** (on hover or click); with the timeline focused the arrows step one sample, Shift one second, `[` / `]` change the speed, Space plays. A round is bounded by its own freeze end and the round's official end, so the replay and the duel list always read the same window. The wheel zooms the radar, an LMB drag pans it, a double click resets the view; two-level maps (Nuke, Vertigo) get the upper and lower level side by side.
+- **2D replay** — the whole round on the radar, like the spectator mini-map, for everybody: nobody is selected or highlighted. A small dot per player (blue = CT, yellow = T) with a view-direction arrow, a name plate carrying the weapon silhouette (the plain weapon name without the icon set) and an HP bar; lines are shots, stars are hits, crosses are deaths and the side feed lists the kills of the round with the weapon and the headshot mark. The **banner above the map says who won the round and how** (bomb exploded / defused, everybody eliminated, time ran out); the bomb plant, defuse and explosion are marked on the timeline and every round chip shows how its round ended. The result comes from the demo's `round_end` when it has one and is otherwise read from the bomb events and the kills (marked as such). The panel on the left lists the players split into CT and T, sorted by nickname inside a team, with the weapon, the live speed (steady: it snaps to 5 u/s and every column keeps its width) and the HP, and an **eye** that hides the player from the map (the eye on top hides or shows everyone; the choice survives round switches). The right column holds a card for EVERY duel of the round, of every player: duels that have not happened yet are semi-transparent, past ones are solid, the selected one gets an outline. Clicking a card locks the playhead to that duel's segment and opens the **duel panel**: for both duelists the live speed, how fast the crosshair turns and the angle between the crosshair and the enemy's head, a chart of those over the whole duel with every shot, the numbers the duels table measured at the first shot, and the keys they pressed; click the chart to jump. The **speed button opens a menu from 0.1x to 4x** (on hover or click); with the timeline focused the arrows step one sample, Shift one second, `[` / `]` change the speed, Space plays. A round is bounded by its own freeze end and the round's official end, so the replay and the duel list always read the same window. The wheel zooms the radar, an LMB drag pans it, a double click resets the view; two-level maps (Nuke, Vertigo) get the upper and lower level side by side.
 - **Risk model** — a shot is _risky_ when your speed exceeded what is acceptable at that distance to the nearest living enemy: any speed point-blank, near-stationary at long range. Both distances are configurable.
 - **Data report** — built-in anomaly checks (impossible speeds, unresolved SteamIDs, missing positions…) plus a JSON export to attach to bug reports.
 - Warmup, team damage and non-gun events are excluded automatically.
@@ -37,7 +37,7 @@ Double-click `start.bat`. It prints what it is doing and pauses on any error:
 
 1. checks for Python 3.13 (it also finds it through the `py` launcher),
 2. creates `.venv` and installs the packages (the first run takes 1–3 min),
-3. downloads the radar images for the Map page, once (about 3 MB, see [below](#radar-images-for-the-map-page)),
+3. downloads the radar images for the Map page and the weapon / status icons, once (about 3 MB together, see [below](#radar-images-for-the-map-page) and [Weapon and status icons](#weapon-and-status-icons)),
 4. starts the app and opens a browser tab.
 
 Or manually, in a terminal in the project folder:
@@ -49,6 +49,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 python tools\fetch_radars.py
+python tools\fetch_icons.py
 streamlit run app.py
 ```
 
@@ -101,6 +102,7 @@ data/
     tmp/        the temp folder (TEMP / TMP point here)
   home/         Streamlit's own ~/.streamlit (USERPROFILE points here)
   radars/       radar images (downloaded by start.bat)
+  icons/        weapon / status icons (downloaded by start.bat)
   tools/        the Steam helper (boiler-writter, installed from the Matches tab)
   accounts.json match-import accounts (nickname, folders - no secrets)
   matches.json  the cached match lists
@@ -120,11 +122,20 @@ The Map page draws points on the real radar. The radar images are Valve's artwor
 - Download or update by hand: `python tools\fetch_radars.py`.
 - The app finds the radars in `data\radars`, in an existing awpy cache (`~\.awpy`) or in the folder set by `AIMAUDIT_RADAR_DIR`.
 
+## Weapon and status icons
+
+The tables and the 2D replay show weapons and events the way the CS2 kill feed does: flat white silhouettes, tinted by the UI. The icons are Valve's artwork and are not part of this repository, so **`start.bat` downloads them for you the first time** (about 1 MB from the public [cs2-react-hud](https://github.com/lexogrine/cs2-react-hud) project into `data\icons` next to `start.bat`, verified against SHA-256 hashes pinned in the code). After that nothing is downloaded again. Without the icons the app still works: every slot shows the localized weapon / event name as text, and `start.bat` tries again the next day. See [docs/ASSETS.md](docs/ASSETS.md) for the provenance and the security model (the SVGs are sanitized and hash-verified before use).
+
+- Skip the download for good: set the environment variable `AIMAUDIT_NO_ICONS=1` (for example `setx AIMAUDIT_NO_ICONS 1`).
+- Download or update by hand: `python tools\fetch_icons.py`.
+- Newer weapons than the pinned set: `python tools\fetch_icons.py --source game` decompiles the icons straight out of your installed CS2 (needs [Source2Viewer-CLI](https://github.com/ValveResourceFormat/Source2Viewer-CLI) on PATH or at `AIMAUDIT_S2V`; the folder can be set with `--cs2-dir` / `AIMAUDIT_CS2_DIR`).
+- The app reads the icons from `data\icons` or from the folder set by `AIMAUDIT_ICON_DIR`; *Settings → Library and storage* shows their size and can delete them.
+
 ## Privacy
 
 All parsing and analysis happen inside the app on your machine, and the app itself makes no requests on its own. The only network activity is explicit and listed here:
 
-- the one-time radar download of `start.bat` / `tools\fetch_radars.py` (switch it off with `AIMAUDIT_NO_RADARS=1`);
+- the one-time radar and icon downloads of `start.bat` / `tools\fetch_radars.py` / `tools\fetch_icons.py` (switch them off with `AIMAUDIT_NO_RADARS=1` / `AIMAUDIT_NO_ICONS=1`);
 - the **Matches** tab, and only on a button press: `replay*.valve.net` (Valve demo files) and `github.com` (only while installing the Steam helper, after a SHA-256 check). Set `AIMAUDIT_OFFLINE=1` to disable all of it.
 
 No telemetry is collected and your demos are not uploaded anywhere; the match import needs no accounts, keys or passwords. The bundled `.streamlit/config.toml` also disables Streamlit's own anonymous usage statistics (`gatherUsageStats = false`) — if you copy or replace that file, keep the setting.
@@ -151,6 +162,7 @@ Open the **Data report / debug** expander at the bottom of the page. The built-i
 ```bat
 python tests/test_core.py        # synthetic match, no .dem file needed
 python tests/test_sources.py     # match import (Steam), no network
+python tests/test_icons.py       # icon sanitizer / aliases / fallbacks
 python tests/check_ui.py         # i18n / schema / layering guardrails
 python tests/smoke_app.py --fast # AppTest end-to-end (fake parser)
 ```
@@ -171,7 +183,7 @@ Pull requests are welcome. Bug reports with the debug JSON attached are especial
 
 ## Name and trademarks
 
-CS2-AimAudit is an independent open-source project. It is not affiliated with, endorsed by, or connected to Valve Corporation, Counter-Strike 2, or the Aimlabs (Aim Lab) aim trainer.
+CS2-AimAudit is an independent open-source project. It is not affiliated with, endorsed by, or connected to Valve Corporation, Counter-Strike 2, or the Aimlabs (Aim Lab) aim trainer. The radar images and the weapon / status icons are Valve's artwork and are never committed to this repository (see [docs/ASSETS.md](docs/ASSETS.md) and NOTICE).
 
 ## License
 

@@ -2,6 +2,7 @@
 
 import streamlit as st
 
+from ui import icons
 from ui import schema
 
 # One table for both teams (Team column + subtle team tint); ~8 columns
@@ -39,6 +40,11 @@ def render(ctx) -> None:
     ov_sids = ov["sid"].tolist()
     sel_row = ov_sids.index(me) if me in ov_sids else None
 
+    # the icon columns: the weapon silhouettes themselves come from the
+    # icon set (ui/icons.py); the labels are the tooltips / text fallback
+    bw_vals, bw_labels, bw_icons = icons.weapon_cells(ov["best_weapon"])
+    dt_vals, dt_labels, dt_icons = icons.weapon_cells(ov["died_to"])
+
     ov_cells = {
         "player": [
             ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"])
@@ -60,6 +66,10 @@ def render(ctx) -> None:
         "sides": ov["sides"].to_numpy(),
         "aim_err": ov["aim_err"].to_numpy(),
         "duration": ov["duration"].to_numpy(),
+        "best_weapon": bw_vals,
+        "died_to": dt_vals,
+        "best_weapon_disp": bw_labels,
+        "died_to_disp": dt_labels,
     }
 
     def _pick_player_row(i):
@@ -74,4 +84,5 @@ def render(ctx) -> None:
         selected=sel_row,
         on_click=_pick_player_row,
         all_columns=ov_full,
+        icons={**bw_icons, **dt_icons},
     )

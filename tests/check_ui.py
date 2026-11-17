@@ -665,10 +665,10 @@ try:
     )
     # the migrated grids really build through the schema
     for tid, n_basic, n_all in (
-        ("overview", 9, 18),
+        ("overview", 9, 20),
         ("weapons", 10, 10),
         ("duels", 9, 18),
-        ("matches", 12, 12),
+        ("matches", 9, 9),
     ):
         cols = schema.build_cols(tid, t=lambda k, **kw: k)
         cols_all = schema.build_cols(tid, all_columns=True, t=lambda k, **kw: k)

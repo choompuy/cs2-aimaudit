@@ -34,7 +34,7 @@ class Col:
     key: str  # rows[key] -> display source
     label: str
     fmt: str = "{}"  # str.format spec for numbers, e.g. "{:.1f}%"
-    kind: str = "num"  # num | text | badge
+    kind: str = "num"  # num | text | badge | icon
     bar: str | None = None  # None | "pct" (0..100) | "rel" (share of the column max)
     tone: str = "accent"  # bar colour
     best: str | None = None  # "high" | "low": what sorts first
@@ -42,6 +42,9 @@ class Col:
     sort: str | None = None  # rows[sort] -> raw value used for sorting
     tones: Mapping[str, str] | None = None  # badge colour by raw/display text
     sticky: bool = False
+    # rows[title_by] -> the label of an icon cell: its tooltip AND its text
+    # fallback when the icon set is not installed ("N/A" for no weapon)
+    title_by: str | None = None
     # colour of the VALUE by quality, from tier tokens (bad -> poor -> mid -> text -> good -> elite):
     #   None                  no colouring
     #   "auto"                position inside this column (best value = greenest);
@@ -101,8 +104,14 @@ def table_payload(
     clickable: bool = False,
     max_height: int = 620,
     empty: str = "",
+    icons: Mapping[str, Sequence] | None = None,
 ) -> dict:
-    """JSON-ready model of the table (pure function: unit-testable)."""
+    """JSON-ready model of the table (pure function: unit-testable).
+
+    ``icons`` is {icon key: [data-uri, w, h]} for every icon the icon-kind
+    cells of THIS table reference (ui/icons.py builds it); it travels with
+    the payload so the renderer can deduplicate and the SVG never lands
+    in the DOM as anything but an <img>/mask source."""
     n = len(next(iter(rows.values()))) if rows else 0
     col_max: dict[str, float] = {}
     for c in cols:
@@ -148,6 +157,18 @@ def table_payload(
                 tone = None
                 lo, hi = col_rng.get(c.key, (None, None))
                 score = _score(x, c.grade, lo, hi, c.best)
+            elif c.kind == "icon":
+                # raw: the icon key (or the plain name when no icon exists);
+                # disp: the localized name - the tooltip, and the visible
+                # text when the icon set is missing ("N/A" for no weapon)
+                name = "" if src is None else str(src)
+                disp = (
+                    str(rows[c.title_by][i])
+                    if c.title_by and rows[c.title_by][i] is not None
+                    else name
+                ) or "—"
+                raw = name or None
+                frac = tone = score = None
             else:
                 score = None
                 disp = "" if src is None else str(src)
@@ -171,6 +192,7 @@ def table_payload(
         "click": bool(clickable),
         "maxh": int(max_height),
         "empty": empty,
+        "icons": {str(k): list(v) for k, v in (icons or {}).items()},
     }
 
 
@@ -191,6 +213,7 @@ def data_table(
     on_click: Callable[[int], None] | None = None,
     max_height: int = 620,
     empty: str = "",
+    icons: Mapping[str, Sequence] | None = None,
 ) -> None:
     payload = table_payload(
         rows,
@@ -200,6 +223,7 @@ def data_table(
         clickable=on_click is not None,
         max_height=max_height,
         empty=empty,
+        icons=icons,
     )
     kwargs: dict = {}
     if on_click is not None:
@@ -273,6 +297,17 @@ _CSS = """
   font-weight: var(--font-weight-semibold);
   color: var(--tone, var(--text-primary));
   background: color-mix(in srgb, var(--tone, var(--text-secondary)) 16%, transparent);
+}
+/* an icon cell: the silhouette is the mask of a text-coloured box, so the
+   file's own fill never matters (grenades would stay black otherwise) */
+.aa-t .ic {
+  display: inline-block;
+  height: 1.2em;
+  width: calc(1.2em * var(--ar, 3));
+  vertical-align: text-bottom;
+  background-color: var(--text-primary);
+  -webkit-mask: var(--ico) center / contain no-repeat;
+  mask: var(--ico) center / contain no-repeat;
 }
 .aa-t tbody tr:hover td { background: var(--surface-2); }
 .aa-t tbody tr.clk { cursor: pointer; }
@@ -408,7 +443,18 @@ export default function (component) {
           fill.style.width = (cell[2] * 100).toFixed(1) + "%";
           box.appendChild(fill);
         }
-        if (c.t === "badge" && cell[1] !== "") {
+        const ico = c.t === "icon" && cell[0] && data.icons && data.icons[cell[0]];
+        if (ico) {
+          // icon only: the name is the tooltip (title + aria-label), never
+          // visible text next to the silhouette
+          const im = el("span", "ic");
+          im.style.setProperty("--ico", 'url("' + ico[0] + '")');
+          im.style.setProperty("--ar", String(ico[1] && ico[2] ? (ico[1] / ico[2]) : 3));
+          im.title = cell[1];
+          im.setAttribute("aria-label", cell[1]);
+          im.setAttribute("role", "img");
+          box.appendChild(im);
+        } else if (c.t === "badge" && cell[1] !== "") {
           box.appendChild(el("span", "badge" + (cell[3] ? " tone-" + cell[3] : ""), cell[1]));
         } else {
           const val = el("span", "val", cell[1]);

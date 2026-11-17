@@ -129,8 +129,9 @@ if (payload.bomb.length) {
   assert.strictEqual($$(".rr-bmk").length, payload.bomb.length + (payload.out.end != null ? 1 : 0));
   ok("bomb events + the round end are marked on the timeline (" + $$(".rr-bmk").length + ")");
 }
-// rounds bar chips carry how the round ended
-assert.ok($$(".rr-rd .rr-rg").length > 0);
+// rounds bar chips carry how the round ended (the icon when the set has
+// one, the glyph otherwise)
+assert.ok($$(".rr-rd .rr-rg").length > 0 || $$(".rr-rd .rr-ico").length > 0);
 ok("round chips are marked with how the round ended");
 
 // the speed menu inside a shadow root (how Streamlit hosts a component): a press on a menu
@@ -248,6 +249,62 @@ assert.ok(root.__rr.st.t >= payload.at);
 click($$(".rr-sbtn")[0]);  // pause
 assert.strictEqual(triggers.length, 0);
 ok("playback runs in the browser (no Streamlit trigger)");
+
+// ---------- the icons (payload.icons rides along from the fixture set) ----
+if (Object.keys(payload.icons || {}).length) {
+  // the feed lists only the kills that already happened: jump near the end
+  seekFrac(0.95);
+  // the kill feed: weapon icon per kill + the headshot mark on kill 1
+  const feedIcons = $$(".rr-fe .rr-ico");
+  assert.strictEqual(feedIcons.length, 3, "feed icons: " + feedIcons.length);  // ak47+hs, awp
+  const ar = feedIcons[0].style.getPropertyValue("--ar");
+  assert.ok(Math.abs(parseFloat(ar) - 100 / 32) < 0.01, "aspect ratio var: " + ar);
+  assert.ok(feedIcons[0].style.getPropertyValue("--ico").startsWith("url("));
+  assert.strictEqual(feedIcons[0].getAttribute("role"), "img");
+  ok("kill feed: weapon + headshot icons, aspect-ratio var, role=img");
+
+  // duel cards: weapon + headshot + the kill modifiers of duel 1
+  const metas = $$(".rr-card .rr-cmeta");
+  assert.strictEqual(metas[0].querySelectorAll(".rr-ico").length, 5,
+    "duel 1 meta icons: " + metas[0].innerHTML);  // ak47, hs, wallbang, noscope, flashed
+  assert.strictEqual(metas[1].querySelectorAll(".rr-ico").length, 1);   // awp only
+  ok("duel cards: weapon + headshot + wallbang / noscope / flashed icons on duel 1");
+
+  // the player list carries the live weapon icon; the dead get the skull
+  seekFrac(0.9);
+  assert.ok($$(".rr-prow .rr-pw .rr-ico").length > 0);
+  const dead = $$(".rr-prow.dead");
+  assert.ok(dead.length > 0);
+  assert.ok(dead[0].querySelector(".rr-php .rr-ico"), "dead player hp cell: " + dead[0].innerHTML);
+  ok("player list: live weapon icons; the dead player gets the skull icon");
+
+  // the outcome banner, the round chips and the timeline markers
+  assert.ok($(".rr-out .rr-why .rr-ico"), "outcome why icon missing");
+  assert.ok($$(".rr-rd .rr-ico").length > 0, "round chip icons missing");
+  assert.ok($$(".rr-bmk .rr-ico").length >= 3, "timeline marker icons missing");
+  ok("outcome banner, round chips and bomb timeline markers carry icons");
+
+  // the duel panel names the weapon with its silhouette
+  click($$(".rr-card")[0]);
+  assert.ok($(".rr-duelp .rr-dpw .rr-ico"), "duel panel weapon icon missing");
+  click($(".rr-sbtn.exit"));
+  ok("the duel panel shows the duel's weapon icon");
+
+  // the hover tooltip exists (hidden until the pointer is over a plate)
+  assert.ok($(".rr-tip") && $(".rr-tip").hidden);
+  ok("the canvas hover tooltip is in place (hidden)");
+
+  // the no-icon fallback: same payload without icons -> plain text everywhere
+  cleanup();
+  cleanup = mount({ ...payload, icons: {}, wlab: {} });
+  await new Promise((r) => setTimeout(r, 120));
+  seekFrac(0.95);
+  assert.strictEqual($$(".rr-ico").length, 0);
+  const feedTxt = $$(".rr-fe").map((n) => n.textContent).join(" ");
+  assert.ok(feedTxt.includes("ak47") && feedTxt.includes("awp"), "feed text: " + feedTxt);
+  assert.ok($$(".rr-pw").some((n) => n.textContent.trim() === "ak47"));
+  ok("without the icon set everything falls back to text (no .rr-ico at all)");
+}
 
 cleanup();
 console.log("JS OK");

@@ -6,6 +6,34 @@ import pandas as pd
 import streamlit as st
 
 import core
+from ui import icons as ui_icons
+
+# the status icons the legend lists (weapons are self-explanatory; these
+# are the ones a reader may want decoded) - every entry is i18n icon_<key>
+LEGEND_KEYS = (
+    "headshot", "skull", "bomb", "defuse", "bomb_explode", "c4",
+    "timer", "hourglass", "wallbang", "noscope", "smoke_kill",
+    "flashed_kill", "suicide", "blind", "burning", "health",
+    "armor_full", "armor_half", "armor_half_helmet", "armor_helmet", "armor_none",
+)
+
+
+def _icon_chip(key: str, label: str) -> str:
+    """One legend chip - the real silhouette (mask-image, tinted by the
+    text colour) next to its name; the same markup the tables use."""
+    ic = ui_icons.icon(key)
+    if not ic:
+        return ""
+    ar = ic["w"] / ic["h"] if ic["h"] else 1.0
+    return (
+        '<span style="display:inline-flex;align-items:center;gap:.4rem;'
+        'margin:.1rem .9rem .1rem 0;white-space:nowrap;">'
+        '<span style="display:inline-block;height:1.1em;'
+        f'width:{1.1 * ar:.2f}em;vertical-align:text-bottom;'
+        "background-color:currentColor;"
+        f"-webkit-mask:url('{ic['uri']}') center/contain no-repeat;"
+        f"mask:url('{ic['uri']}') center/contain no-repeat;\"></span>{label}</span>"
+    )
 
 
 def guide(ctx) -> None:
@@ -31,6 +59,14 @@ def guide(ctx) -> None:
             ("m_dur", "m_dur_help"),
         ):
             st.markdown(f"**{t(_mk)}** — {t(_hk)}")
+
+    # the icon legend: only the icons that are really installed (without
+    # the set the intro text alone explains the text fallback)
+    chips = [c for c in (_icon_chip(k, t(f"icon_{k}")) for k in LEGEND_KEYS) if c]
+    if chips:
+        with st.expander(t("icons_legend_title")):
+            st.caption(t("icons_legend_intro"))
+            st.markdown("".join(chips), unsafe_allow_html=True)
 
 
 def debug(ctx) -> None:

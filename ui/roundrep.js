@@ -36,10 +36,45 @@ export default function (component) {
   const lab = d.lab || {};
   const C = d.col || {};
   const P = d.players || [];
-  // glyphs of how a round ended / what the bomb did (icons never stand alone:
-  // every use also carries a title / text label)
+  // glyphs of how a round ended / what the bomb did - the FALLBACK when the
+  // icon of a badge is missing; every use also carries a title / text label
   const WHY_GLYPH = { bomb: "\u{1F4A5}", defuse: "\u2702", elim: "\u2620", time: "\u23F1", surrender: "\u2691" };
   const BOMB_GLYPH = { plant: "\u{1F4A3}", defuse: "\u2702", boom: "\u{1F4A5}" };
+  // the icons of the same things (ui/icons.py): silhouettes in the CS2
+  // kill-feed style, delivered in d.icons for exactly this round
+  const WHY_ICON = { bomb: "bomb_explode", defuse: "defuse", elim: "skull", time: "hourglass" };
+  const BOMB_ICON = { plant: "bomb", defuse: "defuse", boom: "bomb_explode" };
+  const IC = d.icons || {};
+  const WLAB = d.wlab || {};
+  const wl = (w) => (w ? (WLAB[w] || w) : "");
+
+  // an icon in the DOM: the SVG is never inlined - only its data URI, as
+  // the alpha MASK of a colour box (fill inside the file never matters:
+  // grenades, the bomb, the defuse kit and the timer carry no white fill
+  // and would stay black otherwise)
+  const iconEl = (key, title, h, color) => {
+    const m = IC[key];
+    if (!m) return null;
+    const s = el("span", "rr-ico");
+    s.style.setProperty("--ico", 'url("' + m[0] + '")');
+    s.style.setProperty("--ar", String(m[1] && m[2] ? m[1] / m[2] : 1));
+    if (h) s.style.setProperty("--h", h + "px");
+    if (color) s.style.setProperty("--icol", color);
+    if (title) {
+      s.title = title;
+      s.setAttribute("aria-label", title);
+      s.setAttribute("role", "img");
+    }
+    return s;
+  };
+  // the icon if there is one, else the plain text (the no-icon fallback)
+  const icoOrText = (key, text, title, h, color) =>
+    iconEl(key, title, h, color) || el("span", null, text);
+  const whyIco = (why, title) => {
+    if (why && WHY_ICON[why] && IC[WHY_ICON[why]]) return iconEl(WHY_ICON[why], title, 13);
+    if (why && WHY_GLYPH[why]) return el("i", "rr-wg", WHY_GLYPH[why]);
+    return null;
+  };
 
   let host = root.querySelector(".rr-host");
   if (!host) { host = el("div", "rr-host"); root.appendChild(host); }
@@ -99,7 +134,9 @@ export default function (component) {
       head.appendChild(el("b", "rr-owin", o.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")));
       if (o.why) {
         const w = el("span", "rr-why");
-        w.append(el("i", "rr-wg", WHY_GLYPH[o.why] || "\u00B7"), " " + (lab["why_" + o.why] || o.why));
+        const wg = whyIco(o.why, lab["why_" + o.why] || o.why);
+        if (wg) w.appendChild(wg);
+        w.appendChild(document.createTextNode(" " + (lab["why_" + o.why] || o.why)));
         head.appendChild(w);
       }
     } else {
@@ -110,7 +147,14 @@ export default function (component) {
       inf.title = lab.out_inferred || "";
       head.appendChild(inf);
     }
-    if (o.end != null) head.appendChild(el("span", "rr-outt", "\u23F1 " + fmtT((o.end - d.t0) / d.tr)));
+    if (o.end != null) {
+      const ot = el("span", "rr-outt");
+      const ti = iconEl("timer", lab.time || "time", 11);
+      if (ti) ot.appendChild(ti);
+      else ot.appendChild(document.createTextNode("\u23F1 "));
+      ot.appendChild(document.createTextNode(fmtT((o.end - d.t0) / d.tr)));
+      head.appendChild(ot);
+    }
     outEl.appendChild(head);
     // the bomb story of the round (plant / defuse / explosion with the time and the player)
     const parts = [];
@@ -119,9 +163,17 @@ export default function (component) {
       if (!BOMB_GLYPH[key]) continue;
       // the explosion's player is only the planter: not worth repeating
       const who = key !== "boom" && b[2] >= 0 && P[b[2]] ? P[b[2]].name : "";
-      parts.push(BOMB_GLYPH[key] + " " + (lab["b_" + key] || key) + " " + fmtT((b[0] - d.t0) / d.tr) + (who ? " \u00B7 " + who : ""));
+      const text = (lab["b_" + key] || key) + " " + fmtT((b[0] - d.t0) / d.tr) + (who ? " \u00B7 " + who : "");
+      parts.push(icoOrText(BOMB_ICON[key], BOMB_GLYPH[key] + " " + text, text, 13));
     }
-    if (parts.length) outEl.appendChild(el("div", "rr-out2", parts.join("   ")));
+    if (parts.length) {
+      const o2 = el("div", "rr-out2");
+      parts.forEach((p, i) => {
+        if (i) o2.appendChild(document.createTextNode("   "));
+        o2.appendChild(p);
+      });
+      outEl.appendChild(o2);
+    }
   }
 
   // ---------- controls --------------------------------------------------------------------
@@ -290,9 +342,13 @@ export default function (component) {
   const sideOf = (i) => (i >= 0 && P[i] ? P[i].side : "?");
   // a row above the track: bomb plant / defuse / explosion and the end of the round
   const bm = el("div", "rr-bm");
-  const addBm = (tick, glyph, title) => {
+  const addBm = (tick, glyph, title, iconKey) => {
     if (tick == null || tick < d.t0 || tick > d.t1) return;
-    const m = el("span", "rr-bmk", glyph);
+    const m = el("span", "rr-bmk");
+    const ic = iconKey ? iconEl(iconKey, title, 12) : null;
+    if (ic) m.appendChild(ic);
+    else if (glyph) m.textContent = glyph;
+    else return;
     m.style.left = (pct(tick) * 100) + "%";
     m.title = title;
     bm.appendChild(m);
@@ -300,11 +356,12 @@ export default function (component) {
   for (const b of d.bomb || []) {
     if (!BOMB_GLYPH[b[1]]) continue;
     const who = b[1] !== "boom" && b[2] >= 0 && P[b[2]] ? " \u00B7 " + P[b[2]].name : "";
-    addBm(b[0], BOMB_GLYPH[b[1]], (lab["b_" + b[1]] || b[1]) + " " + fmtT((b[0] - d.t0) / d.tr) + who);
+    addBm(b[0], BOMB_GLYPH[b[1]], (lab["b_" + b[1]] || b[1]) + " " + fmtT((b[0] - d.t0) / d.tr) + who, BOMB_ICON[b[1]]);
   }
   if (d.out && d.out.end != null && d.out.win) {
     addBm(d.out.end, WHY_GLYPH[d.out.why] || "\u2691",
-      (d.out.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")) + (d.out.why ? " \u00B7 " + (lab["why_" + d.out.why] || "") : ""));
+      (d.out.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")) + (d.out.why ? " \u00B7 " + (lab["why_" + d.out.why] || "") : ""),
+      WHY_ICON[d.out.why]);
   }
   const track = el("div", "rr-track");
   track.tabIndex = 0;
@@ -376,7 +433,12 @@ export default function (component) {
         "rr-rd" + (w === "CT" ? " wct" : w === "T" ? " wt" : "") + (n === d.round ? " cur" : ""));
       b.type = "button";
       b.appendChild(document.createTextNode(String(n)));
-      if (why && WHY_GLYPH[why]) b.appendChild(el("i", "rr-rg", WHY_GLYPH[why]));
+      if (why && WHY_GLYPH[why]) {
+        const rg = WHY_ICON[why] && IC[WHY_ICON[why]]
+          ? iconEl(WHY_ICON[why], lab["why_" + why] || why, 10)
+          : el("i", "rr-rg", WHY_GLYPH[why]);
+        b.appendChild(rg);
+      }
       let tip = (lab.round || "R") + " " + n;
       if (w === "CT") tip += " \u00B7 " + (lab.won_ct || "");
       else if (w === "T") tip += " \u00B7 " + (lab.won_t || "");
@@ -411,12 +473,35 @@ export default function (component) {
       kn.style.color = sideCol(sideOf(z.ki));
       vn.style.color = sideCol(sideOf(z.vi));
       top.append(kn, el("span", "rr-ar", "\u25B8"), vn, el("span", "rr-ctm2", fmtT((z.tk - d.t0) / d.tr)));
-      const bits = [z.w];
-      if (z.hs) bits.push(lab.hs || "HS");
-      if (z.dist != null) bits.push(z.dist + "u");
-      if (z.dur != null) bits.push(z.dur + "s");
-      const meta = el("div", "rr-cmeta", bits.filter(Boolean).join(" \u00B7 "));
-      c.title = z.kn + " > " + z.vn + " \u00B7 " + bits.filter(Boolean).join(" \u00B7 ");
+      // the meta line: the weapon icon (tooltip = name), the headshot icon
+      // and the modifier icons, then the numbers; text only without icons
+      const meta = el("div", "rr-cmeta");
+      const wIco = iconEl(z.w, wl(z.w), 11);
+      if (wIco) meta.appendChild(wIco);
+      else if (z.w) meta.appendChild(el("span", null, z.w));
+      if (z.hs) {
+        const hsIco = iconEl("headshot", lab.hs || "HS", 11);
+        meta.appendChild(hsIco || el("span", null, lab.hs || "HS"));
+      }
+      for (const [flag, key, text] of [
+        [z.wb, "wallbang", lab.wallbang || "wallbang"],
+        [z.ns, "noscope", lab.noscope || "noscope"],
+        [z.sm, "smoke_kill", lab.smoke_kill || "through smoke"],
+        [z.bl, "flashed_kill", lab.flashed_kill || "flashed"],
+      ]) {
+        if (!flag) continue;
+        const f = iconEl(key, text, 11);
+        if (f) meta.appendChild(f);
+        else meta.appendChild(el("span", null, text));
+      }
+      const nums = [(z.dist != null ? z.dist + "u" : ""), (z.dur != null ? z.dur + "s" : "")]
+        .filter(Boolean).join(" \u00B7 ");
+      if (nums) meta.appendChild(el("span", null, nums));
+      const tipBits = [wl(z.w) || z.w, z.hs ? (lab.hs || "HS") : "",
+        z.wb ? (lab.wallbang || "") : "", z.ns ? (lab.noscope || "") : "",
+        z.sm ? (lab.smoke_kill || "") : "", z.bl ? (lab.flashed_kill || "") : "", nums]
+        .filter(Boolean).join(" \u00B7 ");
+      c.title = z.kn + " > " + z.vn + (tipBits ? " \u00B7 " + tipBits : "");
       c.setAttribute("aria-label", c.title);
       c.append(top, meta);
       c.addEventListener("click", () => toggleDuel(i));
@@ -426,8 +511,10 @@ export default function (component) {
   }
 
   // ---------- left: players, one list sorted by nickname, an eye each -----------------------------
-  const EYE_ON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
-  const EYE_OFF = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 5c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  // Lucide (ISC License, see THIRD_PARTY_LICENSES.md) - static markup, no
+  // data inside, so the innerHTML here is safe by construction
+  const EYE_ON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>';
   const lrows = [];
   let masterEye = null;
   function setEye(b, on, title) {
@@ -472,14 +559,19 @@ export default function (component) {
       const nm = el("span", "rr-pname", p.name);
       nm.title = p.name;
       const sub = el("span", "rr-psub");
-      const wp = el("span", "rr-pw", "");
+      // the weapon of the moment: the silhouette (tooltip = name), text
+      // only when the icon set is missing
+      const wp = el("span", "rr-pw");
+      const wpIco = el("span", "rr-pwi");
+      const wpTxt = el("span", "rr-pwt");
+      wp.append(wpIco, wpTxt);
       const sp = el("span", "rr-psp", "");
       sub.append(wp, sp);
       body.append(nm, sub);
       const hp = el("span", "rr-php", "");
       row.append(eye, dot, body, hp);
       left.appendChild(row);
-      lrows.push({ p: p, row: row, eye: eye, wp: wp, sp: sp, hp: hp });
+      lrows.push({ p: p, row: row, eye: eye, wp: wp, wpIco: wpIco, wpTxt: wpTxt, sp: sp, hp: hp });
     }
     applyHidden();
   }
@@ -501,15 +593,25 @@ export default function (component) {
       lr.row.classList.toggle("dead", !alive);
       const hp = s && s.hp != null ? s.hp : null;
       if (!alive) {
-        lr.hp.textContent = "\u2715";
+        // the skull icon when there is one, the crossed text otherwise
+        const sk = iconEl("skull", lab.dead || "dead", 13);
+        lr.hp.replaceChildren(sk || document.createTextNode("\u2715"));
         lr.hp.className = "rr-php";
       } else {
         lr.hp.textContent = hp == null ? "" : String(hp);
         lr.hp.className = "rr-php" + (hp != null && hp > 0 ? (hp < 30 ? " low" : hp < 70 ? " mid" : "") : "");
       }
-      const w = weaponAt(lr.p, t);
-      lr.wp.textContent = alive ? w : "";
-      lr.wp.title = w;
+      // weapon: icon with the localized tooltip, plain text without icons
+      const w = alive ? weaponAt(lr.p, t) : "";
+      const wIco = w ? iconEl(w, wl(w), 11) : null;
+      if (wIco) {
+        lr.wpIco.replaceChildren(wIco);
+        lr.wpTxt.textContent = "";
+      } else {
+        lr.wpIco.replaceChildren();
+        lr.wpTxt.textContent = w || "";
+      }
+      lr.wp.title = w ? wl(w) : "";
       const v = alive ? speedAt(lr.p, t) : null;
       lr.sp.textContent = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
     }
@@ -570,6 +672,14 @@ export default function (component) {
       if (fl[z.first]) head.appendChild(el("span", "rr-dpf", fl[z.first]));
     }
     if (z.dist != null) head.appendChild(el("span", "rr-dpf", (lab.tel_dist || "distance") + " " + z.dist + " u"));
+    // the duel's weapon: the silhouette between the duelists' names, its
+    // localized name as the tooltip (text only when icons are missing)
+    const wh = el("span", "rr-dpw");
+    const wIco = iconEl(z.w, wl(z.w), 12);
+    if (wIco) wh.appendChild(wIco);
+    else if (z.w) wh.appendChild(document.createTextNode(wl(z.w) || z.w));
+    wh.title = wl(z.w) || z.w || "";
+    if (z.w) head.appendChild(wh);
     duelWrap.appendChild(head);
     const cols = el("div", "rr-dpc");
     duelWrap.appendChild(cols);
@@ -820,6 +930,44 @@ export default function (component) {
   cvs.addEventListener("pointercancel", endPan);
   cvs.addEventListener("dblclick", resetView);
 
+  // ---------- the canvas hover tooltip: name / weapon / hp of a plate ----
+  // (a canvas has no title attribute: the hit-test draws a floating tip
+  // that names the weapon icon over the player's plate)
+  const tip = el("div", "rr-tip");
+  tip.hidden = true;
+  wrap.appendChild(tip);
+  const plateAt = (mx, my) => {
+    for (const b of plates) {
+      if (Math.abs(mx - b.x) <= b.w / 2 + 2 && my >= b.y - 13 && my <= b.y + b.h + 2) return b;
+    }
+    return null;
+  };
+  let tipFor = "";
+  cvs.addEventListener("pointermove", (e) => {
+    const b = plateAt(e.offsetX, e.offsetY);
+    if (!b) {
+      if (!tip.hidden) { tip.hidden = true; tip.textContent = ""; }
+      return;
+    }
+    const lines = [b.p.name];
+    if (!b.al) lines.push(lab.dead || "dead");
+    else {
+      if (b.w) lines.push(wl(b.w) || b.w);
+      if (b.hp != null) lines.push("HP " + b.hp);
+    }
+    const txt = lines.join(" \u00B7 ");
+    if (txt !== tipFor) {
+      tipFor = txt;
+      tip.textContent = txt;
+      tip.setAttribute("aria-label", txt);
+    }
+    tip.hidden = false;
+    const r = wrap.getBoundingClientRect();
+    tip.style.left = Math.min(e.offsetX + 12, Math.max(4, r.width - 170)) + "px";
+    tip.style.top = Math.max(2, e.offsetY - 26) + "px";
+  });
+  cvs.addEventListener("pointerleave", () => { tip.hidden = true; tipFor = ""; });
+
   // ---------- interpolated player state -------------------------------------------------------------------------
   function state(p, tick) {
     const n = p.x.length;
@@ -872,6 +1020,71 @@ export default function (component) {
   };
   const hpCol = (hp) => (hp < 30 ? C.bad : hp < 70 ? (C.warn || C.bad) : C.good);
 
+  // ---------- weapon icons on the canvas --------------------------------------------------
+  // The silhouettes are TINTED through the alpha mask, never through the
+  // file's own fill (grenades carry none and would stay black): the icon is
+  // drawn into a throwaway canvas, then `source-in` with the team colour
+  // keeps exactly the painted pixels and recolours them.
+  const iconImgs = {};   // key -> HTMLImageElement (loading promise cached)
+  const iconTinted = {}; // "key|color" -> canvas of the tinted silhouette
+  const loadIconImg = (key) => {
+    const m = IC[key];
+    if (!m) return Promise.resolve(null);
+    if (iconImgs[key]) return iconImgs[key];
+    iconImgs[key] = new Promise((res) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => res(null);
+      im.src = m[0];
+    });
+    return iconImgs[key];
+  };
+  function tintedIcon(key, color, h) {
+    if (!IC[key] || !color) return null;
+    const ck = key + "|" + color + "|" + h;
+    if (iconTinted[ck]) return iconTinted[ck];
+    const m = IC[key];
+    const ar = (m[1] && m[2]) ? m[1] / m[2] : 1;
+    const w = Math.max(1, Math.round(h * ar));
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    return (iconTinted[ck] = { c: cv, x: cv.getContext("2d"), w: w, h: h, ready: false, im: null });
+  }
+  // the icon cache is filled while the radar images load; draw() runs again
+  // on every Image.onload, so the icons pop in with the same mechanism
+  let iconsLoading = false;
+  function loadIcons() {
+    if (iconsLoading) return;
+    iconsLoading = true;
+    Object.keys(IC).forEach((key) => { loadIconImg(key); });
+  }
+  loadIcons();
+  function drawIcon(key, x, y, color, h) {
+    // draws the silhouette centered on (x, y); returns true when painted
+    const t = tintedIcon(key, color, h);
+    if (!t) return false;
+    if (!t.ready) {
+      // not tinted yet: tint as soon as the source image has loaded
+      if (!t.im) {
+        loadIconImg(key).then((im) => {
+          if (!im) { t.ready = true; return; }
+          t.im = im;
+          t.x.drawImage(im, 0, 0, t.w, t.h);
+          t.x.globalCompositeOperation = "source-in";
+          t.x.fillStyle = color;
+          t.x.fillRect(0, 0, t.w, t.h);
+          t.x.globalCompositeOperation = "source-over";
+          t.ready = true;
+          draw();
+        });
+      }
+      return false;
+    }
+    if (!t.im) return false;
+    ctx.drawImage(t.c, Math.round(x - t.w / 2), Math.round(y - t.h / 2));
+    return true;
+  }
+
   function drawBg() {
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = C.bg || "transparent";
@@ -913,6 +1126,17 @@ export default function (component) {
     ctx.fillText(text, x, y);
   }
 
+  // a rounded rect path (the name plate of a player on the map)
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
   function drawTracers() {
     const fade = 0.22 * d.tr;
     for (const sh of d.shots) {
@@ -934,6 +1158,7 @@ export default function (component) {
   function drawPlayers() {
     const R = Math.max(5, Math.min(7.5, W / 110));  // small dots: the map stays readable
     ctx.textAlign = "center";
+    plates = [];
     const z = duelAt(sel);
     for (const p of P) {
       if (!visible(p)) continue;
@@ -969,7 +1194,9 @@ export default function (component) {
           ctx.beginPath(); ctx.arc(px, py, R + 6.5, 0, Math.PI * 2);
           ctx.strokeStyle = C.acc; ctx.lineWidth = 1.6; ctx.stroke();
         }
-        // HP bar + weapon under the dot
+        // HP bar under the dot; the NAME sits above it in a dark rounded
+        // plate in the team colour, and the weapon SILHOUETTE sits on top
+        // of the plate (kill-feed style, tinted by the same alpha mask)
         if (s.hp != null && s.hp > 0) {
           const bw = 16, bx = px - bw / 2, by = py + R + 3;
           ctx.fillStyle = rgba(C.bg, 0.75);
@@ -978,12 +1205,26 @@ export default function (component) {
           ctx.fillRect(bx, by, bw * Math.min(1, s.hp / 100), 3);
         }
         const w = weaponAt(p, t);
-        if (w) {
+        ctx.font = "600 10px " + FF;
+        const nmW = ctx.measureText(p.name).width;
+        const plateW = nmW + 10, plateH = PLATE_H, plateY = py - R - 8 - plateH;
+        // the plate: team colour at low alpha over the dark surface
+        const bc = p.side === "CT" ? C.ctb : p.side === "T" ? C.ttb : C.bg;
+        if (bc) {
+          ctx.fillStyle = bc;
+          roundRect(ctx, px - plateW / 2, plateY, plateW, plateH, 4);
+          ctx.fill();
+        }
+        ctx.fillStyle = C.text;
+        ctx.fillText(p.name, px, plateY + 10.5);
+        // the weapon icon above the plate (fallback: the old text under
+        // the dot, so a missing icon set changes nothing semantically)
+        const ICO_H = 11;  // ~10-12 px, like the spectator HUD
+        if (w && !drawIcon(w, px, plateY - ICO_H / 2 - 1, col, ICO_H)) {
           ctx.font = "9px " + FF; ctx.fillStyle = C.text2;
           halo(w, px, py + R + 14);
         }
-        ctx.font = "600 10px " + FF; ctx.fillStyle = C.text;
-        halo(p.name, px, py - R - 5);
+        plates.push({ x: px, y: plateY, w: plateW, h: plateH, p: p, w: w, hp: s.hp, al: true });
       } else {
         ctx.strokeStyle = C.dead || C.text2; ctx.lineWidth = 2;
         ctx.beginPath();
@@ -992,8 +1233,17 @@ export default function (component) {
         ctx.stroke();
         ctx.font = "600 10px " + FF; ctx.fillStyle = C.dead || C.text2;
         halo(p.name, px, py - R - 5);
+        plates.push({ x: px, y: py - R - 15, w: plateWFor(p), h: PLATE_H, p: p, w: "", hp: s.hp, al: false });
       }
     }
+  }
+  // the name plates of the current frame, for the canvas hover tooltip
+  // (the canvas has no DOM title: the hit-test draws its own floating tip)
+  let plates = [];
+  const PLATE_H = 14;
+  function plateWFor(p) {
+    ctx.font = "600 10px " + FF;
+    return ctx.measureText(p.name).width + 10;
   }
 
   function drawImpacts() {
@@ -1039,7 +1289,23 @@ export default function (component) {
       const vn = el("b", null, v ? v.name : "?");
       an.style.color = a ? sideCol(a.side) : "";
       vn.style.color = v ? sideCol(v.side) : "";
-      row.append(an, el("span", "rr-w", (k[3] ? "[" + k[3] + "]" : "") + (k[4] ? " \u25CE" : "")), vn);
+      row.append(an);
+      // the weapon (icon first, the raw name when there is none) and the
+      // headshot badge after it; every icon carries the name as its title
+      const wMid = el("span", "rr-w");
+      const wIco = iconEl(k[3], wl(k[3]), 10);
+      if (wIco) wMid.appendChild(wIco);
+      else if (k[3]) wMid.appendChild(document.createTextNode("[" + k[3] + "]"));
+      row.appendChild(wMid);
+      if (k[4]) {
+        const hsIco = iconEl("headshot", lab.hs || "HS", 10);
+        if (hsIco) row.appendChild(hsIco);
+        else row.appendChild(el("span", "rr-hs", "\u25CE"));
+      }
+      row.appendChild(vn);
+      row.title = (a ? a.name : "?") + " > " + (v ? v.name : "?")
+        + (k[3] ? " \u00B7 " + wl(k[3]) : "") + (k[4] ? " \u00B7 " + (lab.hs || "HS") : "");
+      row.setAttribute("aria-label", row.title);
       feed.appendChild(row);
     }
   }

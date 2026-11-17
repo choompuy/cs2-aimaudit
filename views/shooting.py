@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import core
+from ui import icons
 from ui import schema
 from ui.charts import PAL, style_figure
 from ui.format import fmt_result, num, pct
@@ -425,9 +426,13 @@ def render(ctx) -> None:
     w = core.weapon_stats(demo, shots_f, me, thr, safe_dist, strict_dist, hurts=hurts_f)
     if len(w):
         # same table conventions as the other tables - units in the
-        # numbers, progress bars for percentages, weapon name pinned.
+        # numbers, progress bars for percentages, weapon name pinned; the
+        # name itself is the silhouette (tooltip carries the display name)
+        w_vals, w_labels, w_icons = icons.weapon_cells(w["weapon"])
+        cells = {c: w[c].to_numpy() for c in schema.columns("weapons")}
         schema.table(
             "weapons",
-            {c: w[c].to_numpy() for c in schema.columns("weapons")},
+            {**cells, "weapon": w_vals, "weapon_disp": w_labels},
             key="w_grid",
+            icons=w_icons,
         )

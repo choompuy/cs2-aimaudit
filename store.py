@@ -12,6 +12,7 @@ Where CS2-AimAudit keeps its own files: ONE folder next to the launcher.
             tmp/       the temp folder           (start.bat points TEMP here)
         home/          Streamlit's own ~/.streamlit (start.bat points USERPROFILE here)
         radars/        radar images + map_data.json (start.bat fetches them)
+        icons/         weapon / status icons + manifest.json (start.bat fetches them)
         tools/         the Steam helper (boiler-writter, from Settings)
         library.json   the library: copies AND linked demos (name, path, map ...)
         state.json     the last selected demo and player
@@ -154,6 +155,11 @@ def matchstats_dir() -> str:
 
 def radars_dir() -> str:
     return _sub("radars")
+
+
+def icons_dir() -> str:
+    """Weapon / status icons + manifest.json (tools/fetch_icons.py)."""
+    return _sub("icons")
 
 
 def library_path() -> str:
@@ -747,6 +753,7 @@ def storage_report() -> dict:
         "parsed": dir_size(parsed_dir()),
         "unpacked": dir_size(unpacked_dir()),
         "radars": dir_size(radars_dir()),
+        "icons": dir_size(icons_dir()),
     }
 
 
@@ -760,6 +767,18 @@ def clear_cache() -> int:
                 freed += _remove(os.path.join(folder, n))
         except OSError:
             pass
+    return freed
+
+
+def clear_icons() -> int:
+    """Delete the downloaded weapon / status icons (re-downloadable art,
+    not cache); returns the bytes freed."""
+    freed = 0
+    try:
+        for n in os.listdir(icons_dir()):
+            freed += _remove(os.path.join(icons_dir(), n))
+    except OSError:
+        pass
     return freed
 
 

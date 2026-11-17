@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 import core
+from ui import icons
 from ui import schema
 from ui.format import fmt_first, fmt_result
 
@@ -43,12 +44,16 @@ def render(ctx) -> None:
         _tcol, _ = st.columns([1, 2])
         with _tcol:
             du_full = st.toggle(t("all_columns"), key="du_full")
+        # the weapon column is a silhouette (ui/icons.py); the label is the
+        # tooltip and the plain-text fallback when icons are missing
+        w_vals, w_labels, w_icons = icons.weapon_cells(ddf["weapon"])
         du_cells = {
             "round": ddf["round"].to_numpy(),
             "round_sec": ddf["round_sec"].to_numpy(),
             "result": [fmt_result(v) for v in ddf["result"]],
             "opponent": [name_of.get(s, s) for s in ddf["opponent"]],
-            "weapon": ddf["weapon"].to_numpy(),
+            "weapon": w_vals,
+            "weapon_disp": w_labels,
             "hs": ["✓" if v else "" for v in ddf["headshot"]],
             "distance": ddf["distance"].to_numpy(),
             "zone": [z if z else "—" for z in ddf["my_zone"]],
@@ -83,6 +88,7 @@ def render(ctx) -> None:
             key="du_grid",
             on_click=_duel_click_row,
             all_columns=du_full,
+            icons=w_icons,
         )
         st.caption(t("du_click_hint"))
 

@@ -19,24 +19,25 @@ written here, so the doc and the guardrails stay honest.
 | `views/overview.py`               |        77 | Overview page (one grid for both teams).                                                                                                     |
 | `views/shooting.py`               |       433 | Shooting page: metric tiles, Top-3 issues, charts, the weapons grid.                                                                         |
 | `views/duels.py`                  |       198 | Duels page: the duels grid, the by-zone table, the openings table.                                                                           |
-| `views/replay.py`                 |       504 | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart).                                                      |
+| `views/replay.py`                 |       518 | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart); feeds the round's icons into `round_payload`.             |
 | `views/map.py`                    |       104 | Map page (`@st.fragment`, radar plot).                                                                                                       |
-| `views/extras.py`                 |        80 | Guide page and the debug expander rendered under every match tab.                                                                            |
+| `views/extras.py`                 |       116 | Guide page (incl. the icon legend) and the debug expander rendered under every match tab.                                                    |
 | `core/matchlist.py`               |       201 | The unified match list: provider records + library entries + summaries merged into `MatchRow`s (no Streamlit, no parsing).                   |
 | `core/matchstats.py`              |       163 | The per-match summary cache behind the Matches table (compute from a parsed demo, read/write the JSON cache, resolve "me").                 |
 | `core/model.py`                   |       601 | Constants, the `Demo` container, pure helpers (weapons, angles, `wilson_ci`, `rank_in_lobby`).                                               |
 | `core/filters.py`                 |       203 | `Filters`, round halves/pistol rounds, `apply_filters`.                                                                                      |
 | `core/loader.py`                  |       897 | Demo unpacking, path resolution, `state.json`, `load_demo` and data preparation.                                                             |
-| `core/metrics.py`                 |       964 | `shots_table`, risk model, `build_duels`, `openings_table`, `impact_stats`, `player_summary`, `weapon_stats`.                                |
-| `core/replay.py`                  |       674 | `timeline_data`, `replay_data`, `round_replay_data`, `round_duels`, `duel_telemetry`, radar transforms.                                      |
+| `core/metrics.py`                 |      1114 | `shots_table`, risk model, `build_duels`, `openings_table`, `impact_stats`, `player_summary` (incl. best / died-to weapons), `weapon_stats`.   |
+| `core/replay.py`                  |       720 | `timeline_data`, `replay_data`, `round_replay_data`, `round_duels` (incl. kill-modifier flags), `duel_telemetry`, radar transforms.            |
 | `core/checks.py`                  |       353 | `data_checks`, `debug_report`.                                                                                                               |
 | `core/__init__.py`                |       153 | Facade: re-exports the public API so `import core` / `core.X` keep working.                                                                  |
-| `ui/table.py`                     |       432 | The universal grid renderer: `Col`, `table_payload`, `data_table` (custom component).                                                        |
-| `ui/schema.py` + `ui/tables.toml` | 317 + 371 | The table schema: loader, `build_cols`, `table`, `validate`; the TOML is the single source of truth for grids (incl. `[table.matches]`).     |
+| `ui/table.py`                     |       478 | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells), `data_table` (custom component).                       |
+| `ui/schema.py` + `ui/tables.toml` | 338 + 354 | The table schema: loader, `build_cols`, `table`, `validate`; the TOML is the single source of truth for grids (incl. `[table.matches]`).     |
 | `ui/charts.py`                    |        86 | `style_figure` and shared chart builders.                                                                                                    |
 | `ui/format.py`                    |        63 | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`, `map_name`.                                                                           |
 | `ui/strip.py`                     |       352 | The duel navigation strip (Timeline).                                                                                                        |
-| `ui/roundrep.py`                  |       353 | 2D replay component: `round_payload` (pure JSON model) + `round_replay`; front end in `roundrep.js` / `.css`.                                |
+| `ui/icons.py`                     |       360 | The icon set loader: SVG sanitizer, SHA-256 verification, weapon-name aliases, `weapon_info` / `weapon_cells` / `payload` for grids and the replay. |
+| `ui/roundrep.py`                  |       421 | 2D replay component: `round_payload` (pure JSON model, carries the round's `icons` / `wlab`) + `round_replay`; front end in `roundrep.js` / `.css`. |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css` (incl. the sidebar rail), the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `sources/model.py`                |       162 | The match-import model: `MatchRecord`, `DemoState`, the Steam config and the localized `ProviderError` family.                               |
 | `sources/http.py`                 |       214 | Shared urllib transport: timeouts, 429/Retry-After and 5xx retries, streaming downloads to `.part`, https-only, `AIMAUDIT_OFFLINE`.           |
@@ -45,16 +46,19 @@ written here, so the doc and the guardrails stay honest.
 | `sources/inbox.py`                |       162 | The CS2 replays folder (Watch -> Your Matches) as a match source (registry + libraryfolders.vdf).                                            |
 | `sources/__init__.py`             |       169 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package - plus the `matches.json` cache glue (`read_cache` / `write_cache` / `cache_time`). |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
-| `i18n.py`                         |    1 275 | English/Russian strings; every UI text goes through `t("key")` literals.                                                                     |
-| `store.py`                        |       817 | The ONE place that knows where files live: the `data/` folder next to `start.bat`, the demo library (copies + linked demos), caches (parsed / unpacked / matchstats), parse keys. |
+| `i18n.py`                         |    1 413 | English/Russian strings; every UI text goes through `t("key")` literals.                                                                     |
+| `store.py`                        |       836 | The ONE place that knows where files live: the `data/` folder next to `start.bat`, the demo library (copies + linked demos), caches (parsed / unpacked / matchstats / icons), parse keys. |
 | `nativedialog.py`                 |        78 | Native Windows file / folder dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
 
 Support: `tests/test_core.py` (synthetic-match unit tests),
 `tests/test_sources.py` (match import: transport, providers, protobuf,
-share codes, inbox, privacy), `tests/smoke_app.py` (AppTest end-to-end
-scenarios), `tests/check_ui.py` (static guardrails), `tools/`
-(`dump_payloads.py` golden grid payloads, `api_snapshot.py` core API
-snapshot, `fetch_radars.py`, `inspect_rounds.py`, `sync_theme.py`).
+share codes, inbox, privacy), `tests/test_icons.py` (icon sanitizer,
+aliases, manifest and fallbacks), `tests/smoke_app.py` (AppTest
+end-to-end scenarios), `tests/check_ui.py` (static guardrails),
+`tests/check_roundrep_js.py` + `tests/js` (front-end unit tests),
+`tools/` (`dump_payloads.py` golden grid payloads, `api_snapshot.py`
+core API snapshot, `fetch_radars.py`, `fetch_icons.py`,
+`inspect_rounds.py`, `sync_theme.py`).
 
 ## Navigation and state
 
@@ -94,8 +98,9 @@ library entry (the match view asks once).
 Nothing may be written outside the app folder: `start.bat` points `TEMP`,
 `USERPROFILE`, pip's cache and Python's `.pyc` folder into `data/`, and
 `store.py` is the only module that decides locations. Everything else asks
-`store` (`demos_dir`, `unpacked_dir`, `parsed_dir`, `radars_dir`, `state_path`)
-and never calls `tempfile.gettempdir`, `mkdtemp`, `Path.home` or reads
+`store` (`demos_dir`, `unpacked_dir`, `parsed_dir`, `radars_dir`,
+`icons_dir`, `state_path`) and never calls `tempfile.gettempdir`,
+`mkdtemp`, `Path.home` or reads
 `APPDATA` / `LOCALAPPDATA` / `USERPROFILE` itself (`tests/check_ui.py`
 enforces it). Demos are added **by path** (a linked entry, nothing copied);
 only a browser upload is copied into `data/demos`. Removing a linked demo
@@ -145,12 +150,14 @@ every UI string through `t("key")` literals, no new widget or
 Grids are described by data, not by hand-built `Col(...)` lists in the
 pages. Three layers:
 
-- `[metric.<id>]` — one column definition: `kind` (`num | text | badge`),
-  `fmt` (a `str.format` spec, units inside: `"{:.1f}%"`, `"{:.0f} u"`),
-  `best` (`high | low | none` — what sorts first), `grade`, `bar`, `tone`,
-  `sort_by` (another data column holding the raw sort value), `sticky`,
-  `label` (an i18n key, default `col_<id>`), `help`, and `tones` for badges
-  (raw value → tone token).
+- `[metric.<id>]` — one column definition: `kind` (`num | text | badge |
+  icon`), `fmt` (a `str.format` spec, units inside: `"{:.1f}%"`,
+  `"{:.0f} u"`), `best` (`high | low | none` — what sorts first), `grade`,
+  `bar`, `tone`, `sort_by` (another data column holding the raw sort
+  value), `sticky`, `label` (an i18n key, default `col_<id>`), `help`,
+  `title_by` (for `icon` columns: the data column holding the display
+  name — the tooltip AND the no-icon text fallback) and `tones` for
+  badges (raw value → tone token).
 - `[table.<id>]` — the column order, the `basic` subset for the
   Basic/All-columns switch, the `stripe` rule (row tint by a data field),
   `max_height`, `selectable`, and `extra` (data columns rows carry but
@@ -181,6 +188,38 @@ Four small tables remain plain `st.dataframe` calls on purpose (they show
 data the grids do not): the by-zone and openings tables in
 `views/duels.py` and the two Top-3 evidence popovers in
 `views/shooting.py`.
+
+## Weapon and status icons (`ui/icons.py`)
+
+The tables (an `icon` cell shows the weapon silhouette) and the 2D replay
+(kill feed, duel cards, player list, the canvas name plates) draw flat
+white silhouettes in the CS2 kill-feed style. The art is Valve's and is
+NEVER committed: `tools/fetch_icons.py` downloads it once into
+`data/icons` (pinned SHA-256 per file, sanitized content; `--source game`
+can instead decompile newer icons straight out of an installed CS2 via
+Source2Viewer-CLI — see docs/ASSETS.md for the whole provenance story,
+including what could not be verified against a real install).
+
+`ui/icons.py` is the one loader everything asks:
+
+- `sanitize_svg()` runs when the fetcher saves AND again when the loader
+  reads — scripts, `on*` handlers, `foreignObject`, external references
+  and DOCTYPEs never survive; a hash mismatch means "no icon", never an
+  exception.
+- `weapon_key()` / `weapon_info()` / `weapon_cells()` map demo weapon
+  names to icon keys (with aliases: `usp` → `usp_silencer`, `p2000` →
+  `hkp2000`, `knife_*` → `knife`) plus the localized label.
+- `payload(keys)` / `badge_payload(keys)` build the `{key: [data-uri, w,
+  h]}` dicts for the grid and replay payloads — only the keys asked for,
+  only the ones that exist, so payloads stay small.
+
+Rendering rule: an icon is NEVER inlined as raw SVG. It enters the DOM as
+a base64 data URI behind CSS `mask-image` (colour = `background-color`)
+or is tinted on canvas through an alpha-mask `source-in` composite — part
+of the art carries no white `fill` and would render black otherwise.
+Without the icon set every call answers "none" and the UI falls back to
+the localized weapon / event name as text; `AIMAUDIT_NO_ICONS=1` opts out
+of the download, `AIMAUDIT_ICON_DIR` points tests at a fixture folder.
 
 ## How to add a metric (a `tables.toml` row)
 
@@ -304,7 +343,9 @@ needed to start. `views/dashboard.py` is the stub that will host it.
 ```bash
 python tests/test_core.py        # 444 checks, synthetic match, no .dem needed
 python tests/test_sources.py     # 135 checks, match import, no network
+python tests/test_icons.py       # sanitizer / aliases / manifest / fallbacks
 python tests/check_ui.py         # guardrails: i18n, schema, layering, sizes
+python tests/check_roundrep_js.py # front-end unit tests (node, tests/js)
 python tests/smoke_app.py --fast # 285 AppTest checks against a fake parser
 python tests/smoke_app.py --all  # full matrix, longer
 ```

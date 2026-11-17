@@ -4,7 +4,9 @@ Optional headless check of the 2D replay front end (ui/roundrep.js).
 Builds a synthetic 10-player round with the REAL ui.roundrep.round_payload,
 then runs the JS under jsdom with a real canvas (tests/js/roundrep.test.mjs):
 nickname order, every duel as a card, the eye (hide a player), the duel lock,
-the rounds bar trigger, playback without reruns.
+the rounds bar trigger, playback without reruns - and the weapon / status
+ICONS (a small verified fixture set rides along through AIMAUDIT_ICON_DIR;
+tests/js/icons.test.mjs separately proves the canvas alpha-mask tint).
 
     cd tests/js && npm install     # once: jsdom + @napi-rs/canvas
     python tests/check_roundrep_js.py
@@ -29,10 +31,55 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 import core  # noqa: E402
+from ui import icons as ui_icons  # noqa: E402
+from ui.icons import sanitize_svg  # noqa: E402
 from ui.roundrep import round_payload  # noqa: E402
 
 KEYS = ["FORWARD", "LEFT", "BACK", "RIGHT", "WALK", "DUCK", "JUMP", "FIRE"]
 NAMES = ["zeta", "Alpha", "bravo", "Charlie", "delta", "Echo", "foxtrot", "Golf", "hotel", "India"]
+
+# the icon fixture: sanitized SVGs + a manifest pinning their hashes (the
+# same shape tools/fetch_icons.py writes) - enough keys for every icon slot
+# of this round: the weapons, the bomb story, the headshot, the skull, the
+# clock and the kill modifiers of duel 1
+ICON_FIXTURE = {
+    "ak47": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 32" width="100" height="32"><path fill="white" d="M0 10h100v12H0z"/></svg>',
+    "awp": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 32" width="100" height="32"><path fill="white" d="M4 12h92v8H4z"/></svg>',
+    "headshot": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle fill="white" cx="12" cy="12" r="9"/></svg>',
+    "skull": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path d="M12 2l4 8-4 12-4-12z"/></svg>',
+    "bomb": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle fill="white" cx="12" cy="14" r="8"/></svg>',
+    "bomb_explode": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M12 2l3 7 7 3-7 3-3 7-3-7-7-3 7-3z"/></svg>',
+    "defuse": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="4" y="8" width="16" height="8"/></svg>',
+    "timer": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle fill="white" cx="12" cy="12" r="10"/></svg>',
+    "hourglass": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M6 3h12l-6 9zM6 21h12l-6-9z"/></svg>',
+    "wallbang": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M2 11h20v2H2z"/></svg>',
+    "noscope": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle fill="white" cx="12" cy="12" r="7"/></svg>',
+    "smoke_kill": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M4 16a6 6 0 0 1 12-6 5 5 0 0 1 4 5z"/></svg>',
+    "flashed_kill": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M12 4l8 14H4z"/></svg>',
+}
+
+
+def write_icon_fixture(dest: str) -> str:
+    """The verified fixture set + manifest; AIMAUDIT_ICON_DIR must point
+    here BEFORE the payload is built (ui.icons caches per folder)."""
+    import hashlib
+    import json
+
+    os.makedirs(dest, exist_ok=True)
+    manifest = {}
+    for key, svg in ICON_FIXTURE.items():
+        text = sanitize_svg(svg)
+        with open(os.path.join(dest, f"{key}.svg"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        manifest[key] = {
+            "file": f"{key}.svg", "w": 100 if key in ("ak47", "awp") else 24,
+            "h": 32 if key in ("ak47", "awp") else 24,
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "source": "mirror",
+        }
+    with open(os.path.join(dest, "manifest.json"), "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh)
+    return dest
 
 
 def build_payload() -> dict:
@@ -78,12 +125,14 @@ def build_payload() -> dict:
              "headshot": True, "duration_s": 1.4, "killer_first_tick": t0 + 4 * 300,
              "victim_first_tick": None, "first": "killer", "distance": 740.0,
              "killer_speed": 12.0, "victim_speed": 180.0, "killer_err": 1.8,
-             "victim_err": 9.4, "killer_shots": 3, "victim_shots": 0},
+             "victim_err": 9.4, "killer_shots": 3, "victim_shots": 0,
+             "noscope": True, "thrusmoke": False, "attackerblind": True, "penetrated": True},
             {"tick": t0 + 4 * 480, "killer": sids[5], "victim": sids[6], "weapon": "awp",
              "headshot": False, "duration_s": 0.6, "killer_first_tick": None,
              "victim_first_tick": t0 + 4 * 470, "first": "victim", "distance": 420.0,
              "killer_speed": 90.0, "victim_speed": 5.0, "killer_err": 6.1,
-             "victim_err": 2.2, "killer_shots": 1, "victim_shots": 2},
+             "victim_err": 2.2, "killer_shots": 1, "victim_shots": 2,
+             "noscope": False, "thrusmoke": False, "attackerblind": False, "penetrated": False},
         ]
     )
     data["info"] = {
@@ -97,6 +146,10 @@ def build_payload() -> dict:
         duels=core.round_duels(duel_rows, (t0, t1), tr),
         rounds=[{"n": i, "win": ["CT", "T", ""][i % 3], "why": ["defuse", "bomb", ""][i % 3]}
                 for i in range(1, 25)],
+        weapon_info=ui_icons.weapon_info,
+        icon_of=lambda key: (
+            (lambda ic: [ic["uri"], ic["w"], ic["h"]] if ic else None)(ui_icons.icon(key))
+        ),
         labels={"players": "Players", "rounds": "Rounds", "locked": "Duel", "exit": "Exit duel",
                 "round_prev": "Previous round", "round_next": "Next round", "round": "Round",
                 "won_ct": "Counter-Terrorists won", "won_t": "Terrorists won",
@@ -120,19 +173,42 @@ def main() -> int:
         print("skipped: needs node and `npm install` in tests/js (jsdom, @napi-rs/canvas)")
         return 0
     with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "payload.json")
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(build_payload(), fh)
-        res = subprocess.run(
-            [node, os.path.join(js_dir, "roundrep.test.mjs"), path],
-            capture_output=True, text=True, cwd=js_dir,
-        )
-    sys.stdout.write(res.stdout)
-    if res.returncode:
-        sys.stdout.write(res.stderr[-2000:])
-        print("FAIL: roundrep.js")
-        return 1
-    return 0
+        # the icon fixture rides along: the payload is built WITH icons
+        icon_dir = write_icon_fixture(os.path.join(tmp, "icons"))
+        old_dir = os.environ.get("AIMAUDIT_ICON_DIR")
+        os.environ["AIMAUDIT_ICON_DIR"] = icon_dir
+        ui_icons.reset_cache()
+        try:
+            payload = build_payload()
+            path = os.path.join(tmp, "payload.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            res = subprocess.run(
+                [node, os.path.join(js_dir, "roundrep.test.mjs"), path],
+                capture_output=True, text=True, cwd=js_dir,
+            )
+            ok = res.returncode == 0
+            sys.stdout.write(res.stdout)
+            if res.returncode:
+                sys.stdout.write(res.stderr[-2000:])
+                print("FAIL: roundrep.js")
+            # the canvas tint of the icons (alpha mask + source-in), standalone
+            res2 = subprocess.run(
+                [node, os.path.join(js_dir, "icons.test.mjs"), icon_dir],
+                capture_output=True, text=True, cwd=js_dir,
+            )
+            ok = ok and res2.returncode == 0
+            sys.stdout.write(res2.stdout)
+            if res2.returncode:
+                sys.stdout.write(res2.stderr[-2000:])
+                print("FAIL: icons.test.mjs")
+        finally:
+            if old_dir is None:
+                os.environ.pop("AIMAUDIT_ICON_DIR", None)
+            else:
+                os.environ["AIMAUDIT_ICON_DIR"] = old_dir
+            ui_icons.reset_cache()
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

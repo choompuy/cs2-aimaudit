@@ -565,6 +565,15 @@ def round_duels(
         v = getattr(r, name, None)
         return None if v is None or pd.isna(v) else int(v)
 
+    def _flag(r, name) -> bool:
+        """A duel modifier column (noscope, thrusmoke, ...): False when the
+        column is missing (an older demo) or NaN, never bool(NaN)."""
+        v = getattr(r, name, None)
+        try:
+            return False if v is None or pd.isna(v) else bool(v)
+        except (TypeError, ValueError):  # noqa: BLE001 - garbage: not a flag
+            return False
+
     out: list[dict] = []
     for r in d.itertuples(index=False):
         tk = int(r.tick)
@@ -583,6 +592,12 @@ def round_duels(
                 "dur": _num(r, "duration_s", 2),
                 "dist": _num(r, "distance", 0),
                 "first": str(getattr(r, "first", "") or ""),
+                # kill modifiers for the icons (wallbang / noscope / through
+                # smoke / a flashed attacker), when the demo carries them
+                "ns": _flag(r, "noscope"),
+                "sm": _flag(r, "thrusmoke"),
+                "bl": _flag(r, "attackerblind"),
+                "wb": _flag(r, "penetrated"),
                 "kft": kft,
                 "vft": vft,
                 "ksp": _num(r, "killer_speed", 0),

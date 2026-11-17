@@ -133,7 +133,27 @@ fmt = "{:.2f} s"
 best = "low"
 
 [metric.weapon]
-kind = "text"
+# the weapon silhouette (CS2 kill-feed style): icon only, the localized
+# name rides in the tooltip (title) and replaces the icon as plain text
+# when the icon set is not installed; rows carry the name in weapon_disp
+kind = "icon"
+title_by = "weapon_disp"
+sort_by = "weapon_disp"
+
+# icon columns of the overview: the favorite weapon and the one dying to
+[metric.best_weapon]
+kind = "icon"
+title_by = "best_weapon_disp"
+sort_by = "best_weapon_disp"
+label = "col_best_weapon"
+help = "col_best_weapon_help"
+
+[metric.died_to]
+kind = "icon"
+title_by = "died_to_disp"
+sort_by = "died_to_disp"
+label = "col_died_to"
+help = "col_died_to_help"
 
 [metric.median_speed]
 fmt = "{:.0f} u/s"
@@ -269,14 +289,14 @@ help = "col_mact_help"
 columns = [
   "player", "team", "kdr", "kills", "deaths", "shots", "hits", "accuracy",
   "hs_hits", "hs_kills", "moving", "risky", "first_shot", "first_acc",
-  "open_rate", "sides", "aim_err", "duration",
+  "open_rate", "sides", "aim_err", "duration", "best_weapon", "died_to",
 ]
 basic = [
   "player", "team", "kdr", "kills", "deaths", "accuracy", "hs_hits",
   "risky", "first_shot",
 ]
 stripe = { field = "team", map = { T = "warning", CT = "info" } }
-extra = ["player_raw"]
+extra = ["player_raw", "best_weapon_disp", "died_to_disp"]
 selectable = true
 
 # K/D gets a fixed grading scale only here: below 0.7 slides to red,
@@ -290,6 +310,7 @@ columns = [
   "weapon", "shots", "median_speed", "median_dist", "moving", "risky",
   "hits", "hs", "accuracy", "first_acc",
 ]
+extra = ["weapon_disp"]
 
 [table.weapons.override.weapon]
 sticky = true
@@ -325,7 +346,7 @@ basic = [
   "first", "aim_err",
 ]
 stripe = { field = "result_raw", map = { kill = "positive", death = "negative" }, default = "negative" }
-extra = ["result_raw", "first_raw", "hs_raw"]
+extra = ["result_raw", "first_raw", "hs_raw", "weapon_disp"]
 max_height = 720
 selectable = true
 
