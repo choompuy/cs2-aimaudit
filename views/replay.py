@@ -14,6 +14,7 @@ from plotly.subplots import make_subplots
 
 import core
 import shell
+import state
 import theme
 from context import get_round_outcomes, get_round_replay, get_timeline
 from ui import icons as ui_icons
@@ -54,67 +55,13 @@ def _key_runs(on: np.ndarray, xs: np.ndarray, row: int, tick_dur: float):
     return bx, [row if v is not None else None for v in bx]
 
 
-def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
-    """Speed / yaw / pitch / held keys around one duel (plotly)."""
-    t = ctx.t
-    thr = ctx.thr
-    tr = ctx.demo.tickrate
-    shots_f = ctx.shots_f
-    hurts_f = ctx.hurts_f
-    me = ctx.me
-    btn_cols = [b for b in core.BUTTONS if b in tdf.columns]
-    x = (tdf["tick"] - tick) / tr
-    xs = x.to_numpy()
-    tick_dur = 1.0 / tr
-    speed = (
-        tdf["speed"]
-        if "speed" in tdf.columns
-        else pd.Series(np.nan, index=tdf.index)
-    )
-    # Yaw is shown as the turn relative to the aim at the event moment: the
-    # absolute angle is an arbitrary map direction (and the unwrapped value
-    # drifts past +-180), the turn is what matters. Pitch stays absolute -
-    # 0 is the horizon.
-    yaw_abs = np.degrees(np.unwrap(np.radians(tdf["yaw"].astype(float))))
-    yaw = yaw_abs - yaw_abs[int(np.argmin(np.abs(xs)))]
-    pitch = np.degrees(np.unwrap(np.radians(tdf["pitch"].astype(float))))
-
-    # one colour per ROLE, never reused across rows with another meaning:
-    # speed = you (accent), yaw / pitch = their own hues, dashed yellow =
-    # the moving threshold, keys by key group
+def _signal_traces(fig, t, x, xs, speed, yaw, pitch, thr, unit) -> None:
+    """Speed / threshold / yaw / pitch lines (rows 1-3 of the figure).
+    One colour per ROLE, never reused across rows with another meaning:
+    speed = you (accent), yaw / pitch = their own hues, dashed yellow =
+    the moving threshold, keys by key group."""
     c_speed, c_thr = PAL["you"], theme.tok("warning")
     c_yaw, c_pitch = theme.tok("chart-4"), theme.tok("chart-3")
-    key_group = {
-        "FORWARD": "move", "LEFT": "move", "BACK": "move", "RIGHT": "move",
-        "WALK": "stance", "DUCK": "stance", "JUMP": "stance",
-        "RIGHTCLICK": "weapon", "FIRE": "weapon", "RELOAD": "weapon",
-    }
-    group_style = {
-        "move": (theme.tok("tier.good"), t("tl_grp_move")),
-        "stance": (theme.tok("warning"), t("tl_grp_stance")),
-        "weapon": (PAL["you"], t("tl_grp_weapon")),
-    }
-    rows_n = 4 if btn_cols else 3
-    fig = make_subplots(
-        rows=rows_n,
-        cols=1,
-        shared_xaxes=True,
-        row_heights=[0.22, 0.22, 0.22, 0.34] if rows_n == 4 else [0.34, 0.33, 0.33],
-        subplot_titles=[t("ch_speed"), t("ch_yaw"), t("ch_pitch")]
-        + ([t("ch_keys")] if btn_cols else []),
-    )
-    # the aim at the event moment (yaw) and the horizon (pitch): added BEFORE
-    # the traces so the data lines draw on top of them
-    fig.add_hline(y=0, line_color=theme.tok("chart-grid"), row=2, col=1)
-    fig.add_hline(
-        y=0,
-        line_color=theme.tok("chart-grid"),
-        annotation_text=t("tl_horizon"),
-        annotation_position="bottom left",
-        row=3,
-        col=1,
-    )
-    unit = "%{y:.0f} units/s<extra>" + t("ch_speed") + "</extra>"
     fig.add_trace(
         go.Scatter(
             x=x, y=speed, mode="lines", name=t("ch_speed"), legendgroup="signals",
@@ -147,7 +94,13 @@ def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
         ),
         row=3, col=1,
     )
-    # shot / hit markers on the speed chart (within the shown window)
+
+
+def _event_marker_traces(ctx, r, tdf, tick, fig, unit) -> None:
+    """Shot / hit markers on the speed chart (within the shown window)."""
+    t = ctx.t
+    me = ctx.me
+    tr = ctx.demo.tickrate
     w_lo, w_hi = int(tdf["tick"].min()), int(tdf["tick"].max())
     sp_by_tick = dict(zip(tdf["tick"].astype(int), tdf["speed"])) if "speed" in tdf.columns else {}
 
@@ -155,14 +108,14 @@ def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
         pts = [((int(tk) - tick) / tr, sp_by_tick.get(int(tk))) for tk in ticks]
         return [p for p in pts if p[1] is not None and pd.notna(p[1])]
 
-    my_fire = shots_f[(shots_f["sid"] == me) & shots_f["tick"].between(w_lo, w_hi)]
+    my_fire = ctx.shots_f[(ctx.shots_f["sid"] == me) & ctx.shots_f["tick"].between(w_lo, w_hi)]
     fire_pts = _on_speed(my_fire["tick"])
     hit_pts = []
-    if len(hurts_f) and "user_steamid" in hurts_f.columns:
-        my_hits = hurts_f[
-            (hurts_f["attacker_steamid"] == me)
-            & (hurts_f["user_steamid"] == r["opponent"])
-            & hurts_f["tick"].between(w_lo, w_hi)
+    if len(ctx.hurts_f) and "user_steamid" in ctx.hurts_f.columns:
+        my_hits = ctx.hurts_f[
+            (ctx.hurts_f["attacker_steamid"] == me)
+            & (ctx.hurts_f["user_steamid"] == r["opponent"])
+            & ctx.hurts_f["tick"].between(w_lo, w_hi)
         ]
         hit_pts = _on_speed(my_hits["tick"])
     for pts, name_key, marker in (
@@ -178,34 +131,52 @@ def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
                 ),
                 row=1, col=1,
             )
-    # keys: a bar for every stretch a key was held; colour = key group,
-    # named in the legend
-    if btn_cols:
-        seen_groups: set[str] = set()
-        for k, b in enumerate(btn_cols):
-            bx, by = _key_runs((tdf[b].fillna(0) != 0).to_numpy(), xs, k, tick_dur)
-            if not bx:
-                continue
-            grp = key_group.get(b, "stance")
-            colour, grp_title = group_style[grp]
-            fig.add_trace(
-                go.Scatter(
-                    x=bx, y=by, mode="lines", name=t(f"k_{b}"), legendgroup=grp,
-                    legendgrouptitle_text=grp_title if grp not in seen_groups else None,
-                    line=dict(color=colour, width=11), connectgaps=False, hoverinfo="skip",
-                ),
-                row=4, col=1,
-            )
-            seen_groups.add(grp)
-        fig.update_yaxes(
-            tickmode="array",
-            tickvals=list(range(len(btn_cols))),
-            ticktext=[t(f"k_{b}") for b in btn_cols],
-            range=[len(btn_cols) - 0.5, -0.5],  # W on top
-            row=4,
-            col=1,
+
+
+_KEY_GROUP = {
+    "FORWARD": "move", "LEFT": "move", "BACK": "move", "RIGHT": "move",
+    "WALK": "stance", "DUCK": "stance", "JUMP": "stance",
+    "RIGHTCLICK": "weapon", "FIRE": "weapon", "RELOAD": "weapon",
+}
+
+
+def _key_traces(fig, tdf, xs, btn_cols, tick_dur, t) -> None:
+    """Keys: a bar for every stretch a key was held; colour = key group,
+    named in the legend."""
+    group_style = {
+        "move": (theme.tok("tier.good"), t("tl_grp_move")),
+        "stance": (theme.tok("warning"), t("tl_grp_stance")),
+        "weapon": (PAL["you"], t("tl_grp_weapon")),
+    }
+    seen_groups: set[str] = set()
+    for k, b in enumerate(btn_cols):
+        bx, by = _key_runs((tdf[b].fillna(0) != 0).to_numpy(), xs, k, tick_dur)
+        if not bx:
+            continue
+        grp = _KEY_GROUP.get(b, "stance")
+        colour, grp_title = group_style[grp]
+        fig.add_trace(
+            go.Scatter(
+                x=bx, y=by, mode="lines", name=t(f"k_{b}"), legendgroup=grp,
+                legendgrouptitle_text=grp_title if grp not in seen_groups else None,
+                line=dict(color=colour, width=11), connectgaps=False, hoverinfo="skip",
+            ),
+            row=4, col=1,
         )
-    # reference lines: the event, the first shot, the death
+        seen_groups.add(grp)
+    fig.update_yaxes(
+        tickmode="array",
+        tickvals=list(range(len(btn_cols))),
+        ticktext=[t(f"k_{b}") for b in btn_cols],
+        range=[len(btn_cols) - 0.5, -0.5],  # W on top
+        row=4,
+        col=1,
+    )
+
+
+def _reference_lines(fig, r, xs, tick, tr, death_x, tick_dur, t, rows_n) -> None:
+    """Reference lines: the event, the first shot, the death."""
+    c_thr = theme.tok("warning")
     first_x = None
     if pd.notna(r["my_first_tick"]):
         fx = (int(r["my_first_tick"]) - tick) / tr
@@ -240,6 +211,56 @@ def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
                 text=t("tl_death"), x=0.0, xanchor="left", yanchor="bottom", y=0,
                 yref="y domain", showarrow=False, row=1, col=1,
             )
+
+
+def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
+    """Speed / yaw / pitch / held keys around one duel (plotly)."""
+    t = ctx.t
+    thr = ctx.thr
+    tr = ctx.demo.tickrate
+    btn_cols = [b for b in core.BUTTONS if b in tdf.columns]
+    x = (tdf["tick"] - tick) / tr
+    xs = x.to_numpy()
+    tick_dur = 1.0 / tr
+    speed = (
+        tdf["speed"]
+        if "speed" in tdf.columns
+        else pd.Series(np.nan, index=tdf.index)
+    )
+    # Yaw is shown as the turn relative to the aim at the event moment: the
+    # absolute angle is an arbitrary map direction (and the unwrapped value
+    # drifts past +-180), the turn is what matters. Pitch stays absolute -
+    # 0 is the horizon.
+    yaw_abs = np.degrees(np.unwrap(np.radians(tdf["yaw"].astype(float))))
+    yaw = yaw_abs - yaw_abs[int(np.argmin(np.abs(xs)))]
+    pitch = np.degrees(np.unwrap(np.radians(tdf["pitch"].astype(float))))
+
+    rows_n = 4 if btn_cols else 3
+    fig = make_subplots(
+        rows=rows_n,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.22, 0.22, 0.22, 0.34] if rows_n == 4 else [0.34, 0.33, 0.33],
+        subplot_titles=[t("ch_speed"), t("ch_yaw"), t("ch_pitch")]
+        + ([t("ch_keys")] if btn_cols else []),
+    )
+    # the aim at the event moment (yaw) and the horizon (pitch): added BEFORE
+    # the traces so the data lines draw on top of them
+    fig.add_hline(y=0, line_color=theme.tok("chart-grid"), row=2, col=1)
+    fig.add_hline(
+        y=0,
+        line_color=theme.tok("chart-grid"),
+        annotation_text=t("tl_horizon"),
+        annotation_position="bottom left",
+        row=3,
+        col=1,
+    )
+    unit = "%{y:.0f} units/s<extra>" + t("ch_speed") + "</extra>"
+    _signal_traces(fig, t, x, xs, speed, yaw, pitch, thr, unit)
+    _event_marker_traces(ctx, r, tdf, tick, fig, unit)
+    if btn_cols:
+        _key_traces(fig, tdf, xs, btn_cols, tick_dur, t)
+    _reference_lines(fig, r, xs, tick, tr, death_x, tick_dur, t, rows_n)
     # units on every axis - a bare number was the whole complaint
     fig.update_yaxes(title_text=t("tl_ax_speed"), row=1, col=1)
     fig.update_yaxes(title_text=t("tl_ax_yaw"), row=2, col=1)
@@ -295,29 +316,14 @@ def _open_in_replay(rnd: int, tick: int, victim: str) -> None:
     shell.go_tab("replay")
 
 
-def _duel_dialog(ctx) -> None:
-    """A duel opened from the Duels table: the verdict and the chart.
-
-    Left/Right (the strip) walk all duels of the table without leaving the
-    window; a dialog is a fragment, so every step reruns only this window."""
+def _duel_strip(ctx) -> pd.Series:
+    """The Left/Right duel selector strip (walks all duels of the table
+    without leaving the window); returns the selected duel's row."""
     t = ctx.t
-    demo = ctx.demo
-    me = ctx.me
-    mtime = ctx.mtime
     my_duels = ctx.my_duels
-    name_of = ctx.name_of
-    path = ctx.path
-    window_s = ctx.window_s
-    if not len(my_duels):
-        st.info(t("du_none"))
-        return
-    if not isinstance(st.session_state.get("tl_duel"), int) or not (
-        0 <= st.session_state["tl_duel"] < len(my_duels)
-    ):
-        st.session_state["tl_duel"] = 0
 
     def _pick(i: int):
-        st.session_state["tl_duel"] = int(i)
+        state.set_tl_duel(i)
 
     labels = [duel_label(my_duels.iloc[i]) for i in range(len(my_duels))]
     duel_strip(
@@ -325,7 +331,7 @@ def _duel_dialog(ctx) -> None:
             {"round": rd, "result": w, "tip": lab}
             for rd, w, lab in zip(my_duels["round"], my_duels["result"], labels)
         ],
-        st.session_state["tl_duel"],
+        state.get_tl_duel(),
         key="tl_strip",
         on_select=_pick,
         round_label=lambda rd, n: t("tl_strip_round", r=(rd if rd is not None else "?"), n=n),
@@ -340,9 +346,13 @@ def _duel_dialog(ctx) -> None:
         },
     )
     st.caption(t("tl_strip_hint"))
-    r = my_duels.iloc[st.session_state["tl_duel"]]
-    tick = int(r["tick"])
+    return my_duels.iloc[state.get_tl_duel()]
 
+
+def _duel_summary_card(ctx, r) -> None:
+    """The verdict card: result line, quick numbers, plain-words reasons."""
+    t = ctx.t
+    name_of = ctx.name_of
     with st.container(border=True):
         st.markdown(
             t(
@@ -362,21 +372,11 @@ def _duel_dialog(ctx) -> None:
         verdict = _duel_verdict(ctx, r)
         if verdict:
             st.caption(" · ".join(verdict))
-    # the same window the replay plays decides the round of this duel
-    rnd = core.round_of_tick(demo.round_windows, tick) or int(r["round"])
-    victim = me if r["result"] == "death" else r["opponent"]
-    if rnd in (demo.round_windows or {}):
-        if st.button(t("du_open_replay"), key="du_to_replay", on_click=_open_in_replay, args=(rnd, tick, victim)):
-            st.rerun()  # the callback picked the page; a full run shows it
 
-    with st.spinner(t("tl_loading")):
-        tdf, missing = get_timeline(path, mtime, me, tick, window_s, demo.tickrate)
-    if missing:
-        st.warning(t("tl_no_buttons", keys=", ".join(t(f"k_{b}") for b in missing)))
-    if tdf is None or tdf.empty:
-        st.info(t("tl_empty"))
-        return
-    btn_cols = [b for b in core.BUTTONS if b in tdf.columns]
+
+def _first_shot_keys(ctx, r, tdf, btn_cols) -> None:
+    """The first shot's speed / aim error and the keys held at it."""
+    t = ctx.t
     if pd.notna(r["my_first_tick"]):
         st.markdown(t("tl_first", speed=num(r["my_speed"], 0), err=num(r["my_err"], 1)))
         frow = tdf[tdf["tick"] == int(r["my_first_tick"])] if btn_cols else tdf.iloc[0:0]
@@ -388,6 +388,42 @@ def _duel_dialog(ctx) -> None:
                 if held
                 else t("tl_buttons_none")
             )
+
+
+def _duel_dialog(ctx) -> None:
+    """A duel opened from the Duels table: the verdict and the chart.
+
+    Left/Right (the strip) walk all duels of the table without leaving the
+    window; a dialog is a fragment, so every step reruns only this window."""
+    t = ctx.t
+    demo = ctx.demo
+    me = ctx.me
+    my_duels = ctx.my_duels
+    if not len(my_duels):
+        st.info(t("du_none"))
+        return
+    if state.get_tl_duel() is None or not (0 <= state.get_tl_duel() < len(my_duels)):
+        state.set_tl_duel(0)
+
+    r = _duel_strip(ctx)
+    tick = int(r["tick"])
+    _duel_summary_card(ctx, r)
+    # the same window the replay plays decides the round of this duel
+    rnd = core.round_of_tick(demo.round_windows, tick) or int(r["round"])
+    victim = me if r["result"] == "death" else r["opponent"]
+    if rnd in (demo.round_windows or {}):
+        if st.button(t("du_open_replay"), key="du_to_replay", on_click=_open_in_replay, args=(rnd, tick, victim)):
+            st.rerun()  # the callback picked the page; a full run shows it
+
+    with st.spinner(t("tl_loading")):
+        tdf, missing = get_timeline(ctx.path, ctx.mtime, me, tick, ctx.window_s, demo.tickrate)
+    if missing:
+        st.warning(t("tl_no_buttons", keys=", ".join(t(f"k_{b}") for b in missing)))
+    if tdf is None or tdf.empty:
+        st.info(t("tl_empty"))
+        return
+    btn_cols = [b for b in core.BUTTONS if b in tdf.columns]
+    _first_shot_keys(ctx, r, tdf, btn_cols)
     tdf, death_x = _cut_at_death(tdf, tick, demo.tickrate)
     if death_x is not None:
         st.caption(t("tl_dead_cut"))
@@ -400,6 +436,68 @@ def open_duel_dialog(ctx) -> None:
     st.dialog(ctx.t("du_dialog_title"), width="large")(_duel_dialog)(ctx)
 
 
+_RR_LABEL_KEYS = (
+    "play", "pause", "restart", "duel_prev", "duel_next", "speed",
+    "time", "dead", "shot", "hit", "lvl0", "lvl1", "howto", "players",
+    "players_hide", "players_show", "duels", "no_duels",
+    "locked", "rounds", "round", "won_ct", "won_t", "leg_ct", "leg_t",
+    "view_reset", "round_prev", "round_next", "eye_hide", "eye_show",
+    "eye_all", "eye_none", "u_s", "out_unknown",
+    "out_inferred", "why_bomb", "why_defuse", "why_elim", "why_time",
+    "why_surrender", "why_hostage", "why_draw", "why_other",
+    "b_plant", "b_defuse", "b_boom", "duel_panel", "first_killer",
+    "first_victim", "first_sim", "role_killer", "role_victim",
+    "tel_speed", "tel_turn", "tel_err", "tel_dist", "tel_first",
+    "tel_shots", "tel_leg_speed", "tel_leg_err", "tel_leg_shot",
+)
+
+
+def _replay_labels(t, data: dict) -> dict:
+    """The replay front end's label bundle (every UI string it shows)."""
+    return {
+        **{k: t(f"rr_{k}") for k in _RR_LABEL_KEYS},
+        "exit": t("rr_exit_duel"),
+        "hs": t("col_hs"),
+        # the kill-modifier tooltips on the duel cards / the kill feed
+        "wallbang": t("icon_wallbang"),
+        "noscope": t("icon_noscope"),
+        "smoke_kill": t("icon_smoke_kill"),
+        "flashed_kill": t("icon_flashed_kill"),
+        **{f"k_{k}": t(f"k_{k}") for k in (data.get("keys") or [])},
+    }
+
+
+def _replay_colors() -> dict:
+    """The replay front end's colour bundle (theme tokens + palette)."""
+    return {
+        "ct": theme.tok("info"),
+        "t": theme.tok("warning"),
+        "ctb": theme.tok("team-ct"),
+        "ttb": theme.tok("team-t"),
+        "dead": PAL["bad"],
+        "hit": theme.tok("chart-5"),
+        "flash": theme.tok("text-primary"),
+        "good": theme.tok("positive"),
+        "bad": PAL["bad"],
+        "warn": theme.tok("warning"),
+        "bg": theme.tok("bg-app"),
+        "grid": theme.tok("border-subtle"),
+        "text": theme.tok("text-primary"),
+        "text2": theme.tok("text-secondary"),
+        "acc": theme.tok("accent"),
+    }
+
+
+def _picked_duel(duels: list, pick, round_no: int) -> int:
+    """The index of the duel a Duels window handed over (-1: none)."""
+    if not pick or int(pick[0]) != int(round_no):
+        return -1
+    for pos, z in enumerate(duels):
+        if z["tick"] == int(pick[1]) and z["victim"] == str(pick[2]):
+            return pos
+    return -1
+
+
 @st.fragment
 def _replay_fragment(ctx) -> None:
     """2D replay: the whole round on the radar (ui/roundrep.py).
@@ -409,9 +507,7 @@ def _replay_fragment(ctx) -> None:
     fragment rerun per switch)."""
     t = ctx.t
     demo = ctx.demo
-    duels_all = ctx.duels_all
     mtime = ctx.mtime
-    name_of = ctx.name_of
     path = ctx.path
     st.subheader(t("tab_replay"))
     windows = demo.round_windows or {}
@@ -431,14 +527,8 @@ def _replay_fragment(ctx) -> None:
 
     # the duels of the round by the SAME window the replay plays: a kill can
     # never show up under another round
-    duels = core.round_duels(duels_all, windows[int(round_no)], demo.tickrate)
-    sel = -1
-    pick = st.session_state.get("rr_sel")  # a duel handed over by the Duels window
-    if pick and int(pick[0]) == int(round_no):
-        for pos, z in enumerate(duels):
-            if z["tick"] == int(pick[1]) and z["victim"] == str(pick[2]):
-                sel = pos
-                break
+    duels = core.round_duels(ctx.duels_all, windows[int(round_no)], demo.tickrate)
+    sel = _picked_duel(duels, st.session_state.get("rr_sel"), int(round_no))
 
     # how every round ended: the demo's round_end when it has one, else read
     # from the bomb events and the kills (core.round_outcomes)
@@ -446,7 +536,7 @@ def _replay_fragment(ctx) -> None:
     data["info"] = {**(data.get("info") or {}), **outcomes.get(int(round_no), {})}
     payload = round_payload(
         data,
-        names=name_of,
+        names=ctx.name_of,
         side_of=lambda s: demo.side_at(int(round_no), s),
         radar=core.load_radar(str(demo.header.get("map_name") or "")),
         duels=duels,
@@ -457,50 +547,8 @@ def _replay_fragment(ctx) -> None:
         sel=sel,
         weapon_info=ui_icons.weapon_info,
         icon_of=_icon_of,
-        labels={
-            **{
-                k: t(f"rr_{k}")
-                for k in (
-                    "play", "pause", "restart", "duel_prev", "duel_next", "speed",
-                    "time", "dead", "shot", "hit", "lvl0", "lvl1", "howto", "players",
-                    "players_hide", "players_show", "duels", "no_duels",
-                    "locked", "rounds", "round", "won_ct", "won_t", "leg_ct", "leg_t",
-                    "view_reset", "round_prev", "round_next", "eye_hide", "eye_show",
-                    "eye_all", "eye_none", "u_s", "out_unknown",
-                    "out_inferred", "why_bomb", "why_defuse", "why_elim", "why_time",
-                    "why_surrender", "why_hostage", "why_draw", "why_other",
-                    "b_plant", "b_defuse", "b_boom", "duel_panel", "first_killer",
-                    "first_victim", "first_sim", "role_killer", "role_victim",
-                    "tel_speed", "tel_turn", "tel_err", "tel_dist", "tel_first",
-                    "tel_shots", "tel_leg_speed", "tel_leg_err", "tel_leg_shot",
-                )
-            },
-            "exit": t("rr_exit_duel"),
-            "hs": t("col_hs"),
-            # the kill-modifier tooltips on the duel cards / the kill feed
-            "wallbang": t("icon_wallbang"),
-            "noscope": t("icon_noscope"),
-            "smoke_kill": t("icon_smoke_kill"),
-            "flashed_kill": t("icon_flashed_kill"),
-            **{f"k_{k}": t(f"k_{k}") for k in (data.get("keys") or [])},
-        },
-        colors={
-            "ct": theme.tok("info"),
-            "t": theme.tok("warning"),
-            "ctb": theme.tok("team-ct"),
-            "ttb": theme.tok("team-t"),
-            "dead": PAL["bad"],
-            "hit": theme.tok("chart-5"),
-            "flash": theme.tok("text-primary"),
-            "good": theme.tok("positive"),
-            "bad": PAL["bad"],
-            "warn": theme.tok("warning"),
-            "bg": theme.tok("bg-app"),
-            "grid": theme.tok("border-subtle"),
-            "text": theme.tok("text-primary"),
-            "text2": theme.tok("text-secondary"),
-            "acc": theme.tok("accent"),
-        },
+        labels=_replay_labels(t, data),
+        colors=_replay_colors(),
     )
     if not payload["players"]:
         st.info(t("rr_no_data"))

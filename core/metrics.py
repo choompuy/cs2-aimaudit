@@ -6,7 +6,7 @@ impact, per-player and per-weapon stats.
 from __future__ import annotations
 
 import bisect
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -155,18 +155,8 @@ def _match_hits(shots: pd.DataFrame, hurts: pd.DataFrame) -> np.ndarray:
     return hit
 
 
-def shots_table(demo: Demo) -> pd.DataFrame:
-    """
-    One row per gun shot: tick, sid, weapon, round, speed, position,
-    dist (nearest living enemy, approx) and hit (damaged an enemy, approx:
-    a hurt event within HIT_WINDOW ticks after the shot; shotgun pellets count once).
-
-    Shot/duel context columns: `zone` (the game's named place at the shot,
-    '' unknown), `round_sec` (seconds into the live round, NaN unknown),
-    `flashed` / `slowed` (shooter state at the fire tick; NA when the
-    demo/parser does not provide the prop - missing is never False).
-    """
-
+def _fire_rows(demo: Demo) -> pd.DataFrame:
+    """The fire events with round / named zone / seconds-into-round."""
     ctx = [
         c
         for c in ("user_last_place_name", "game_time", "round_start_time")
@@ -197,10 +187,15 @@ def shots_table(demo: Demo) -> pd.DataFrame:
         s["round_sec"] = rs.where((rs >= 0) & (rs <= ROUND_SEC_MAX)).round(2)
     else:
         s["round_sec"] = np.nan
-    s = s.drop(
+    return s.drop(
         columns=["user_last_place_name", "game_time", "round_start_time"],
         errors="ignore",
     )
+
+
+def _shot_frames(demo: Demo, s: pd.DataFrame) -> pd.DataFrame:
+    """Fire rows joined with the shooter's tick frame (speed, position,
+    state), the tick-before speed, counter-strafe flags, dist and hit."""
     tcols = ["tick", "steamid", "speed", "X", "Y", "Z"] + [
         c for c in ("flash_duration", "velo_modifier") if c in demo.ticks.columns
     ]
@@ -217,13 +212,18 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     )
     rows = demo.rows
     out["counter_strafe"] = [
-        _counter_strafe_tap(rows.get((int(t), s)), rows.get((int(t) - 1, s)))
-        for t, s in zip(out["tick"], out["sid"])
+        _counter_strafe_tap(rows.get((int(tk), sid)), rows.get((int(tk) - 1, sid)))
+        for tk, sid in zip(out["tick"], out["sid"])
     ]
     out["dist"] = _nearest_enemy_dist(demo, out)
     out["hit"] = _match_hits(out, demo.hurts)
-    # shooter state at the fire tick: True/False when known, NA when the
-    # prop is unavailable (an old demo must not look like "0% flashed")
+    return out
+
+
+def _state_flags(out: pd.DataFrame) -> None:
+    """flashed / slowed: True/False when the prop is known, NA when the
+    demo/parser does not provide it (an old demo must not look like
+    "0% flashed")."""
     if "flash_duration" in out.columns:
         fd = pd.to_numeric(out["flash_duration"], errors="coerce")
     else:
@@ -240,25 +240,45 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     _sok = vm.notna()
     sw[_sok] = (vm[_sok] < SLOWED_MAX).to_numpy()
     out["slowed"] = sw
-    # first shot of an engagement (gap > ENGAGE_GAP_TICKS since the same
-    # sid's previous shot) and the mouse movement that preceded it: the
-    # sum of |dx|+|dy| over the FLICK_WIN_TICKS ticks before the shot.
-    # first_shot is always known; flick_move is NA for spray follow-ups
-    # (recoil control is not aim) and when the demo/parser has no usercmd
-    # props (missing is never 0, the buttons lesson).
+
+
+def _flick_moves(demo: Demo, out: pd.DataFrame) -> None:
+    """first shot of an engagement (gap > ENGAGE_GAP_TICKS since the same
+    sid's previous shot) and the mouse movement that preceded it: the
+    sum of |dx|+|dy| over the FLICK_WIN_TICKS ticks before the shot.
+    first_shot is always known; flick_move is NA for spray follow-ups
+    (recoil control is not aim) and when the demo/parser has no usercmd
+    props (missing is never 0, the buttons lesson)."""
     out["first_shot"] = _first_shot_arr(out["tick"], out["sid"])
     out["flick_move"] = np.nan
-    if demo.mouse is not None and len(demo.mouse):
-        _by = {sid: g.set_index("tick")["mag"] for sid, g in demo.mouse.groupby("sid")}
-        _fm = []
-        for t, first, sid in zip(out["tick"], out["first_shot"], out["sid"]):
-            if not first or sid not in _by:
-                _fm.append(np.nan)
-                continue
-            got = _by[sid].reindex(range(int(t) - FLICK_WIN_TICKS, int(t)))
-            v = got.sum(min_count=1)
-            _fm.append(float(v) if pd.notna(v) else np.nan)
-        out["flick_move"] = _fm
+    if demo.mouse is None or not len(demo.mouse):
+        return
+    _by = {sid: g.set_index("tick")["mag"] for sid, g in demo.mouse.groupby("sid")}
+    _fm = []
+    for t, first, sid in zip(out["tick"], out["first_shot"], out["sid"]):
+        if not first or sid not in _by:
+            _fm.append(np.nan)
+            continue
+        got = _by[sid].reindex(range(int(t) - FLICK_WIN_TICKS, int(t)))
+        v = got.sum(min_count=1)
+        _fm.append(float(v) if pd.notna(v) else np.nan)
+    out["flick_move"] = _fm
+
+
+def shots_table(demo: Demo) -> pd.DataFrame:
+    """
+    One row per gun shot: tick, sid, weapon, round, speed, position,
+    dist (nearest living enemy, approx) and hit (damaged an enemy, approx:
+    a hurt event within HIT_WINDOW ticks after the shot; shotgun pellets count once).
+
+    Shot/duel context columns: `zone` (the game's named place at the shot,
+    '' unknown), `round_sec` (seconds into the live round, NaN unknown),
+    `flashed` / `slowed` (shooter state at the fire tick; NA when the
+    demo/parser does not provide the prop - missing is never False).
+    """
+    out = _shot_frames(demo, _fire_rows(demo))
+    _state_flags(out)
+    _flick_moves(demo, out)
     out = out.drop(columns=["flash_duration", "velo_modifier"], errors="ignore")
     out["side"] = [
         demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"])
@@ -311,6 +331,194 @@ def add_risk(
     return out
 
 
+class _DuelCtx:
+    """Per-demo context the duel helpers share: fires, enemies, aim rule."""
+
+    __slots__ = ("demo", "rows", "fires_by", "enemies_of", "win", "aim_deg")
+
+    def __init__(self, demo: Demo, window_s: float, aim_deg: float):
+        self.demo = demo
+        self.rows = demo.rows
+        self.fires_by = {
+            k: g["tick"].astype(int).to_numpy()
+            for k, g in demo.fires.groupby("user_steamid")
+        }
+        self.enemies_of = {
+            sid: [
+                o
+                for o in demo.names
+                if o != sid
+                and demo.teams.get(o) not in (None, "?")
+                and demo.teams.get(o) != demo.teams.get(sid)
+            ]
+            for sid in demo.names
+        }
+        self.win = int(window_s * demo.tickrate)
+        self.aim_deg = aim_deg
+
+
+def _aimed_at(ctx: _DuelCtx, ts: int, sh: str, opp: str) -> bool:
+    """Was the shooter's crosshair within aim_deg of that opponent?"""
+    ra, ro = ctx.rows.get((ts, sh)), ctx.rows.get((ts, opp))
+    if ra is None or ro is None:
+        return True  # no data -> keep the shot (old behaviour)
+    e = angle_err(ra, ro)
+    return not np.isfinite(e) or e <= ctx.aim_deg
+
+
+def _aimed_elsewhere(ctx: _DuelCtx, ts: int, sh: str, opp: str) -> bool:
+    """Did the shooter rather aim at a DIFFERENT enemy at that tick?"""
+    ra = ctx.rows.get((ts, sh))
+    if ra is None:
+        return False
+    for other in ctx.enemies_of.get(sh, []):
+        if other == opp:
+            continue
+        ro = ctx.rows.get((ts, other))
+        if ro is None:
+            continue
+        e = angle_err(ra, ro)
+        if np.isfinite(e) and e <= ctx.aim_deg:
+            return True
+    return False
+
+
+class DuelShots(NamedTuple):
+    """The window shots of one duel: aimed / raw, first ticks, confidence."""
+
+    kw: np.ndarray
+    vw: np.ndarray
+    kw_raw: np.ndarray
+    vw_raw: np.ndarray
+    kf: int | None
+    vf: int | None
+    low_conf: bool
+
+
+def _shots_in_window(ctx: _DuelCtx, sid: str, t: int) -> np.ndarray:
+    """The shots `sid` fired in the window before tick t."""
+    a = ctx.fires_by.get(sid, np.array([], dtype=int))
+    return a[(a > t - ctx.win) & (a <= t)]
+
+
+def _duel_shots(ctx: _DuelCtx, k: str, v: str, t: int) -> DuelShots:
+    """Both sides' aimed window shots + who fired first."""
+    kw_raw, vw_raw = _shots_in_window(ctx, k, t), _shots_in_window(ctx, v, t)
+    kw = np.array([int(ts) for ts in kw_raw if _aimed_at(ctx, int(ts), k, v)], dtype=int)
+    vw = np.array([int(ts) for ts in vw_raw if _aimed_at(ctx, int(ts), v, k)], dtype=int)
+    low_conf = any(_aimed_elsewhere(ctx, int(ts), k, v) for ts in kw_raw) or any(
+        _aimed_elsewhere(ctx, int(ts), v, k) for ts in vw_raw
+    )
+    return DuelShots(
+        kw,
+        vw,
+        kw_raw,
+        vw_raw,
+        int(kw.min()) if len(kw) else None,
+        int(vw.min()) if len(vw) else None,
+        bool(low_conf),
+    )
+
+
+def _duel_dist(ctx: _DuelCtx, r, fa: str, fb: str, f_tick) -> float:
+    """Distance for head-size maths: the game value, else positions."""
+    d = getattr(r, "distance", np.nan)
+    if pd.notna(d) and d > 0:
+        return float(d)
+    a, b = ctx.rows.get((f_tick, fa)), ctx.rows.get((f_tick, fb))
+    if a is not None and b is not None:
+        return float(
+            np.sqrt((a.X - b.X) ** 2 + (a.Y - b.Y) ** 2 + (a.Z - b.Z) ** 2)
+        )
+    return float("nan")
+
+
+def _first_shooter(kf: int | None, vf: int | None) -> str:
+    """Who fired first: killer / victim / simultaneous / none."""
+    if kf is None and vf is None:
+        return "none"
+    if vf is None or (kf is not None and kf < vf):
+        return "killer"
+    if kf is None or vf < kf:
+        return "victim"
+    return "simultaneous"
+
+
+def _err_hw(err: float, ang: float) -> float:
+    """Aim error in head widths, NaN when either value is unknown."""
+    if np.isfinite(err) and np.isfinite(ang) and ang > 0:
+        return float(err / ang)
+    return np.nan
+
+
+def _would_head(err: float, ang: float) -> bool:
+    """Crosshair inside the head box (within half a head width of
+    its center) at the moment of the first shot."""
+    return bool(np.isfinite(err) and np.isfinite(ang) and err <= ang / 2)
+
+
+def _duel_row(ctx: _DuelCtx, r, rd: int, s: DuelShots) -> dict:
+    """The build_duels output row for one enemy-kill event."""
+    demo = ctx.demo
+    k, v, t = r.attacker_steamid, r.user_steamid, int(r.tick)
+    kf, vf = s.kf, s.vf
+    k_err = (
+        angle_err(ctx.rows.get((kf, k)), ctx.rows.get((kf, v)))
+        if kf is not None
+        else np.nan
+    )
+    v_err = (
+        angle_err(ctx.rows.get((vf, v)), ctx.rows.get((vf, k)))
+        if vf is not None
+        else np.nan
+    )
+    k_ang = head_ang(_duel_dist(ctx, r, k, v, kf))
+    v_ang = head_ang(_duel_dist(ctx, r, v, k, vf))
+    start = (
+        min(x for x in (kf, vf) if x is not None)
+        if (kf is not None or vf is not None)
+        else t
+    )
+    return {
+        "round": rd,
+        "tick": t,
+        "killer": k,
+        "victim": v,
+        "killer_side": demo.side_at(rd, k),
+        "victim_side": demo.side_at(rd, v),
+        "weapon": norm_weapon(r.weapon),
+        "weapon_class": weapon_class(r.weapon),
+        "headshot": bool(getattr(r, "headshot", False)),
+        "distance": getattr(r, "distance", np.nan),
+        "noscope": bool(getattr(r, "noscope", False)),
+        "thrusmoke": bool(getattr(r, "thrusmoke", False)),
+        "attackerblind": bool(getattr(r, "attackerblind", False)),
+        "penetrated": int(getattr(r, "penetrated", 0) or 0) > 0,
+        # context: when in the round and on which named zone
+        # the duel ended (kill-time values from the death event)
+        "round_sec": _row_round_sec(r),
+        "killer_zone": _zone(getattr(r, "attacker_last_place_name", None)),
+        "victim_zone": _zone(getattr(r, "user_last_place_name", None)),
+        "first": _first_shooter(kf, vf),
+        "killer_shots": len(s.kw),
+        "victim_shots": len(s.vw),
+        "killer_shots_raw": len(s.kw_raw),
+        "victim_shots_raw": len(s.vw_raw),
+        "low_conf": s.low_conf,
+        "killer_first_tick": kf,
+        "victim_first_tick": vf,
+        "duration_s": round((t - start) / demo.tickrate, 2),
+        "killer_speed": _speed(ctx.rows.get((kf, k))) if kf is not None else np.nan,
+        "victim_speed": _speed(ctx.rows.get((vf, v))) if vf is not None else np.nan,
+        "killer_err": k_err,
+        "victim_err": v_err,
+        "killer_err_hw": _err_hw(k_err, k_ang),
+        "victim_err_hw": _err_hw(v_err, v_ang),
+        "killer_would_head": _would_head(k_err, k_ang),
+        "victim_would_head": _would_head(v_err, v_ang),
+    }
+
+
 def build_duels(
     demo: Demo, window_s: float = 3.0, aim_deg: float = 30.0
 ) -> pd.DataFrame:
@@ -322,52 +530,13 @@ def build_duels(
     without position data keep the old keep-them behaviour. `low_conf` marks
     duels where either player also aimed at a different enemy in the window.
     """
-
-    win = int(window_s * demo.tickrate)
-    rows, names, teams = demo.rows, demo.names, demo.teams
-    fires_by = {
-        k: g["tick"].astype(int).to_numpy()
-        for k, g in demo.fires.groupby("user_steamid")
-    }
-    enemies_of = {
-        sid: [
-            o
-            for o in names
-            if o != sid
-            and teams.get(o) not in (None, "?")
-            and teams.get(o) != teams.get(sid)
-        ]
-        for sid in names
-    }
-
-    def _aimed_at(ts: int, sh: str, opp: str) -> bool:
-        ra, ro = rows.get((ts, sh)), rows.get((ts, opp))
-        if ra is None or ro is None:
-            return True  # no data -> keep the shot (old behaviour)
-        e = angle_err(ra, ro)
-        return not np.isfinite(e) or e <= aim_deg
-
-    def _aimed_elsewhere(ts: int, sh: str, opp: str) -> bool:
-        ra = rows.get((ts, sh))
-        if ra is None:
-            return False
-        for other in enemies_of.get(sh, []):
-            if other == opp:
-                continue
-            ro = rows.get((ts, other))
-            if ro is None:
-                continue
-            e = angle_err(ra, ro)
-            if np.isfinite(e) and e <= aim_deg:
-                return True
-        return False
-
+    ctx = _DuelCtx(demo, window_s, aim_deg)
     d = demo.deaths
     if not len(d) or "attacker_steamid" not in d.columns:
         return pd.DataFrame()
     d = d[
-        d["attacker_steamid"].isin(names)
-        & d["user_steamid"].isin(names)
+        d["attacker_steamid"].isin(demo.names)
+        & d["user_steamid"].isin(demo.names)
         & (d["attacker_steamid"] != d["user_steamid"])
     ]
     # duels are gun fights: knife / grenade / zeus / world / C4 kills have
@@ -379,7 +548,7 @@ def build_duels(
     out = []
     for r in d.itertuples():
         k, v, t = r.attacker_steamid, r.user_steamid, int(r.tick)
-        if teams.get(k) == teams.get(v):
+        if demo.teams.get(k) == demo.teams.get(v):
             continue
         # the round follows the demo's round windows (a post-round kill
         # already counted in the next round still belongs to this one),
@@ -387,111 +556,7 @@ def build_duels(
         rd = round_of_tick(getattr(demo, "round_windows", None) or {}, t)
         if rd is None:
             rd = _safe_int(getattr(r, "total_rounds_played", 0)) + 1
-
-        def in_win(s):
-            a = fires_by.get(s, np.array([], dtype=int))
-            return a[(a > t - win) & (a <= t)]
-
-        kw_raw, vw_raw = in_win(k), in_win(v)
-        kw = np.array([int(ts) for ts in kw_raw if _aimed_at(int(ts), k, v)], dtype=int)
-        vw = np.array([int(ts) for ts in vw_raw if _aimed_at(int(ts), v, k)], dtype=int)
-        kf = int(kw.min()) if len(kw) else None
-        vf = int(vw.min()) if len(vw) else None
-        low_conf = any(_aimed_elsewhere(int(ts), k, v) for ts in kw_raw) or any(
-            _aimed_elsewhere(int(ts), v, k) for ts in vw_raw
-        )
-
-        def _duel_dist(r, fa, fb, f_tick) -> float:
-            """Distance for head-size maths: the game value, else positions."""
-            d = getattr(r, "distance", np.nan)
-            if pd.notna(d) and d > 0:
-                return float(d)
-            a, b = rows.get((f_tick, fa)), rows.get((f_tick, fb))
-            if a is not None and b is not None:
-                return float(
-                    np.sqrt((a.X - b.X) ** 2 + (a.Y - b.Y) ** 2 + (a.Z - b.Z) ** 2)
-                )
-            return float("nan")
-
-        k_err = (
-            angle_err(rows.get((kf, k)), rows.get((kf, v)))
-            if kf is not None
-            else np.nan
-        )
-        v_err = (
-            angle_err(rows.get((vf, v)), rows.get((vf, k)))
-            if vf is not None
-            else np.nan
-        )
-        k_ang = head_ang(_duel_dist(r, k, v, kf))
-        v_ang = head_ang(_duel_dist(r, v, k, vf))
-        if kf is None and vf is None:
-            first = "none"
-        elif vf is None or (kf is not None and kf < vf):
-            first = "killer"
-        elif kf is None or vf < kf:
-            first = "victim"
-        else:
-            first = "simultaneous"
-        start = (
-            min(x for x in (kf, vf) if x is not None)
-            if (kf is not None or vf is not None)
-            else t
-        )
-        out.append(
-            {
-                "round": rd,
-                "tick": t,
-                "killer": k,
-                "victim": v,
-                "killer_side": demo.side_at(rd, k),
-                "victim_side": demo.side_at(rd, v),
-                "weapon": norm_weapon(r.weapon),
-                "weapon_class": weapon_class(r.weapon),
-                "headshot": bool(getattr(r, "headshot", False)),
-                "distance": getattr(r, "distance", np.nan),
-                "noscope": bool(getattr(r, "noscope", False)),
-                "thrusmoke": bool(getattr(r, "thrusmoke", False)),
-                "attackerblind": bool(getattr(r, "attackerblind", False)),
-                "penetrated": int(getattr(r, "penetrated", 0) or 0) > 0,
-                # context: when in the round and on which named zone
-                # the duel ended (kill-time values from the death event)
-                "round_sec": _row_round_sec(r),
-                "killer_zone": _zone(getattr(r, "attacker_last_place_name", None)),
-                "victim_zone": _zone(getattr(r, "user_last_place_name", None)),
-                "first": first,
-                "killer_shots": len(kw),
-                "victim_shots": len(vw),
-                "killer_shots_raw": len(kw_raw),
-                "victim_shots_raw": len(vw_raw),
-                "low_conf": bool(low_conf),
-                "killer_first_tick": kf,
-                "victim_first_tick": vf,
-                "duration_s": round((t - start) / demo.tickrate, 2),
-                "killer_speed": _speed(rows.get((kf, k))) if kf is not None else np.nan,
-                "victim_speed": _speed(rows.get((vf, v))) if vf is not None else np.nan,
-                "killer_err": k_err,
-                "victim_err": v_err,
-                "killer_err_hw": (
-                    float(k_err / k_ang)
-                    if np.isfinite(k_err) and np.isfinite(k_ang) and k_ang > 0
-                    else np.nan
-                ),
-                "victim_err_hw": (
-                    float(v_err / v_ang)
-                    if np.isfinite(v_err) and np.isfinite(v_ang) and v_ang > 0
-                    else np.nan
-                ),
-                # crosshair inside the head box (within half a head width of
-                # its center) at the moment of the first shot
-                "killer_would_head": bool(
-                    np.isfinite(k_err) and np.isfinite(k_ang) and k_err <= k_ang / 2
-                ),
-                "victim_would_head": bool(
-                    np.isfinite(v_err) and np.isfinite(v_ang) and v_err <= v_ang / 2
-                ),
-            }
-        )
+        out.append(_duel_row(ctx, r, rd, _duel_shots(ctx, k, v, t)))
     return pd.DataFrame(out)
 
 
@@ -702,6 +767,27 @@ def round_winners(demo: Demo) -> dict[int, str]:
     return {n: o["winner"] for n, o in round_outcomes(demo).items() if o["winner"]}
 
 
+def _round_fielded(sides: dict, r: int) -> dict[str, int] | None:
+    """Players each side fielded in round r, None when a side is unknown
+    (nothing to compare)."""
+    fielded = {"T": 0, "CT": 0}
+    for s in sides[r].values():
+        if s in fielded:
+            fielded[s] += 1
+    if fielded["T"] < 1 or fielded["CT"] < 1:
+        return None
+    return fielded
+
+
+def _round_death_rows(d, dr, warm, r: int, win) -> pd.DataFrame:
+    """The round's death rows: its own tick window when known, else the
+    round column (a death after the round ended carries the NEXT round's
+    number but belongs to this one)."""
+    if win is not None:
+        return d[d["tick"].between(win[0], win[1]) & ~warm]
+    return d[(dr == r - 1) & ~warm]
+
+
 def _guess_round_winners(demo: Demo) -> dict[int, str]:
     """
     The elimination-based guess behind round_outcomes: "a side lost every
@@ -727,19 +813,10 @@ def _guess_round_winners(demo: Demo) -> dict[int, str]:
     )
     out: dict[int, str] = {}
     for r in rounds:
-        fielded = {"T": 0, "CT": 0}
-        for s in sides[r].values():
-            if s in fielded:
-                fielded[s] += 1
-        if fielded["T"] < 1 or fielded["CT"] < 1:
-            continue  # sides unknown for this round -> nothing to compare
-        win = (demo.round_windows or {}).get(r)
-        if win is not None:
-            # the round's own tick window: a death after the round ended
-            # carries the NEXT round's number but belongs to this one
-            rows = d[d["tick"].between(win[0], win[1]) & ~warm]
-        else:
-            rows = d[(dr == r - 1) & ~warm]
+        fielded = _round_fielded(sides, r)
+        if fielded is None:
+            continue
+        rows = _round_death_rows(d, dr, warm, r, (demo.round_windows or {}).get(r))
         if not len(rows):
             continue  # nobody died at all: timeout/quick save, not guessable
         lost = {"T": 0, "CT": 0}
@@ -795,6 +872,96 @@ def openings_table(demo: Demo) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def _keep_ok(keep, round_idx, sid) -> bool:
+    """The _round_side_keep predicate: no filter -> everything counts."""
+    return keep is None or keep(int(round_idx) + 1, sid)
+
+
+def _impact_openings(de: pd.DataFrame, res: dict, keep) -> None:
+    """Opening duels: attempts (killer or victim of the first enemy kill)
+    and wins (the killer)."""
+    op = de.groupby("round_idx", sort=True).head(1)
+    for r in op.itertuples():
+        k, v = r.attacker_steamid, r.user_steamid
+        for sid in (k, v):
+            if sid in res and _keep_ok(keep, r.round_idx, sid):
+                res[sid]["open_attempts"] += 1
+        if k in res and _keep_ok(keep, r.round_idx, k):
+            res[k]["open_wins"] += 1
+
+
+def _impact_multikills(de: pd.DataFrame, res: dict, keep) -> None:
+    """Deaths + k2..k5: ROUNDS with exactly that many enemy kills - one
+    3-kill round adds 1 to k3, not 3."""
+    for r in de.itertuples():
+        if r.user_steamid in res and _keep_ok(keep, r.round_idx, r.user_steamid):
+            res[r.user_steamid]["deaths"] += 1
+    for (sid, _rd), n in (
+        de.groupby(["attacker_steamid", "round_idx"]).size().items()
+    ):
+        if sid in res and 2 <= int(n) <= 5 and _keep_ok(keep, _rd, sid):
+            res[sid][f"k{int(n)}"] += 1
+
+
+def _impact_trades(
+    demo: Demo, de: pd.DataFrame, res: dict, keep, trade_s: float
+) -> None:
+    """Trades: for each death, did a teammate kill its attacker within the
+    window (same round)? death_of maps (round, VICTIM) -> (tick, killer):
+    the attacker's own death row is the candidate avenging kill. The
+    attacker dies at most once per round, so one candidate row is enough."""
+    teams = demo.teams
+    win = int(trade_s * demo.tickrate)
+    death_of: dict[tuple[int, str], tuple[int, object]] = {}
+    for r in de.itertuples():
+        death_of[(int(getattr(r, "round_idx", 0)), r.user_steamid)] = (
+            int(r.tick),
+            r.attacker_steamid,
+        )
+    for r in de.itertuples():
+        v, a = r.user_steamid, r.attacker_steamid
+        key = (int(getattr(r, "round_idx", 0)), a)
+        later = death_of.get(key)
+        if later is None:
+            continue
+        dt, avenger = later
+        if not (int(r.tick) < dt <= int(r.tick) + win):
+            continue
+        if avenger == v or teams.get(avenger) != teams.get(v):
+            continue
+        if avenger in res and _keep_ok(keep, r.round_idx, avenger):
+            res[avenger]["trade_kills"] += 1
+        if v in res and _keep_ok(keep, r.round_idx, v):
+            res[v]["traded_deaths"] += 1
+
+
+def _impact_assists(de: pd.DataFrame, res: dict, keep, names) -> None:
+    """Assists (any form) and the assistedflash subset; NaN when the
+    demo/parser has no assister column."""
+    if "assister_steamid" not in de.columns:
+        return
+    for sid in res:
+        res[sid]["assists"] = 0
+        res[sid]["flash_assists"] = 0
+    ast = de[de["assister_steamid"].isin(names)]
+    if keep is not None and len(ast):
+        ast = ast[
+            np.array(
+                [
+                    _keep_ok(keep, ri, a)
+                    for ri, a in zip(ast["round_idx"], ast["assister_steamid"])
+                ],
+                dtype=bool,
+            )
+        ]
+    for sid, n in ast.groupby("assister_steamid").size().items():
+        res[sid]["assists"] = int(n)
+    if "assistedflash" in de.columns:
+        afl = ast[ast["assistedflash"].fillna(False).astype(bool)]
+        for sid, n in afl.groupby("assister_steamid").size().items():
+            res[sid]["flash_assists"] = int(n)
+
+
 def impact_stats(
     demo: Demo, trade_s: float = TRADE_S, f: "Filters | None" = None
 ) -> pd.DataFrame:
@@ -818,10 +985,6 @@ def impact_stats(
     filters do not apply. Without a filter it is the whole match.
     """
     keep = _round_side_keep(demo, f)
-
-    def _ok(round_idx, sid) -> bool:
-        return keep is None or keep(int(round_idx) + 1, sid)
-
     names = demo.names
     res = {
         sid: {
@@ -844,81 +1007,171 @@ def impact_stats(
     }
     de = _enemy_kill_rows(demo)
     if len(de):
-        teams = demo.teams
-        # ---- openings
-        op = de.groupby("round_idx", sort=True).head(1)
-        for r in op.itertuples():
-            k, v = r.attacker_steamid, r.user_steamid
-            for sid in (k, v):
-                if sid in res and _ok(r.round_idx, sid):
-                    res[sid]["open_attempts"] += 1
-            if k in res and _ok(r.round_idx, k):
-                res[k]["open_wins"] += 1
-        # ---- deaths + multi-kills (k2..k5: ROUNDS with exactly that
-        # many enemy kills - one 3-kill round adds 1 to k3, not 3)
-        for r in de.itertuples():
-            if r.user_steamid in res and _ok(r.round_idx, r.user_steamid):
-                res[r.user_steamid]["deaths"] += 1
-        for (sid, _rd), n in (
-            de.groupby(["attacker_steamid", "round_idx"]).size().items()
-        ):
-            if sid in res and 2 <= int(n) <= 5 and _ok(_rd, sid):
-                res[sid][f"k{int(n)}"] += 1
-        # ---- trades: for each death, did a teammate kill its attacker
-        # within the window (same round)? death_of maps (round, VICTIM) ->
-        # (tick, killer): the attacker's own death row is the candidate
-        # avenging kill. The attacker dies at most once per round, so one
-        # candidate row is enough.
-        win = int(trade_s * demo.tickrate)
-        death_of: dict[tuple[int, str], tuple[int, object]] = {}
-        for r in de.itertuples():
-            death_of[(int(getattr(r, "round_idx", 0)), r.user_steamid)] = (
-                int(r.tick),
-                r.attacker_steamid,
-            )
-        for r in de.itertuples():
-            v, a = r.user_steamid, r.attacker_steamid
-            key = (int(getattr(r, "round_idx", 0)), a)
-            later = death_of.get(key)
-            if later is None:
-                continue
-            dt, avenger = later
-            if not (int(r.tick) < dt <= int(r.tick) + win):
-                continue
-            if avenger == v or teams.get(avenger) != teams.get(v):
-                continue
-            if avenger in res and _ok(r.round_idx, avenger):
-                res[avenger]["trade_kills"] += 1
-            if v in res and _ok(r.round_idx, v):
-                res[v]["traded_deaths"] += 1
-        # ---- assists
-        if "assister_steamid" in de.columns:
-            for sid in res:
-                res[sid]["assists"] = 0
-                res[sid]["flash_assists"] = 0
-            ast = de[de["assister_steamid"].isin(names)]
-            if keep is not None and len(ast):
-                ast = ast[
-                    np.array(
-                        [
-                            _ok(ri, a)
-                            for ri, a in zip(ast["round_idx"], ast["assister_steamid"])
-                        ],
-                        dtype=bool,
-                    )
-                ]
-            for sid, n in ast.groupby("assister_steamid").size().items():
-                res[sid]["assists"] = int(n)
-            if "assistedflash" in de.columns:
-                afl = ast[ast["assistedflash"].fillna(False).astype(bool)]
-                for sid, n in afl.groupby("assister_steamid").size().items():
-                    res[sid]["flash_assists"] = int(n)
+        _impact_openings(de, res, keep)
+        _impact_multikills(de, res, keep)
+        _impact_trades(demo, de, res, keep, trade_s)
+        _impact_assists(de, res, keep, names)
         for sid, s in res.items():
             if s["open_attempts"]:
                 s["open_rate"] = round(s["open_wins"] / s["open_attempts"] * 100, 1)
             if s["deaths"]:
                 s["traded_pct"] = round(s["traded_deaths"] / s["deaths"] * 100, 1)
     return pd.DataFrame(res[s] for s in names)
+
+
+def _kd_setup(demo: Demo, f, de: pd.DataFrame, have_d: bool):
+    """Round/side-filtered K/D tallies and top weapons from the enemy-kill
+    rows (``de`` empty -> no tallies, every player falls back to 0/0)."""
+    keep = _round_side_keep(demo, f)
+    kills_by: dict = {}
+    deaths_by: dict = {}
+    best_w: dict[str, str] = {}  # sid -> the weapon the most kills came from
+    died_w: dict[str, str] = {}  # sid -> the weapon the most deaths came from
+    if keep is not None and len(de):
+        rd = (de["round_idx"] + 1).astype(int)
+        k_ok = np.array(
+            [keep(int(r), s) for r, s in zip(rd, de["attacker_steamid"])],
+            dtype=bool,
+        )
+        v_ok = np.array(
+            [keep(int(r), s) for r, s in zip(rd, de["user_steamid"])], dtype=bool
+        )
+        kills_by = de[k_ok].groupby("attacker_steamid").size().to_dict()
+        deaths_by = de[v_ok].groupby("user_steamid").size().to_dict()
+        best_w = _top_weapon(de, k_ok, "attacker_steamid")
+        died_w = _top_weapon(de, v_ok, "user_steamid")
+    elif len(de):  # no round/side filter: every enemy kill counts
+        k_ok = np.ones(len(de), dtype=bool)
+        best_w = _top_weapon(de, k_ok, "attacker_steamid")
+        died_w = _top_weapon(de, k_ok, "user_steamid")
+    return keep, kills_by, deaths_by, best_w, died_w
+
+
+def _player_kd(
+    p_sid: str,
+    demo: Demo,
+    duels: pd.DataFrame,
+    have_d: bool,
+    keep,
+    kills_by: dict,
+    deaths_by: dict,
+) -> tuple[int, int]:
+    """One player's kills/deaths, round structure (not shot filters)."""
+    if keep is not None and have_d:
+        return int(kills_by.get(p_sid, 0)), int(deaths_by.get(p_sid, 0))
+    if have_d:
+        # K/D like the in-game scoreboard: every ENEMY kill/death with
+        # any weapon (knife and grenades included), whole match. Duels
+        # above are gun-only, so the two must not be mixed.
+        # Static teams are fine here: teammates share the label before
+        # and after the halftime swap. World/suicide deaths have no
+        # known attacker and stay out, teamkills stay out both ways.
+        dth, teams = demo.deaths, demo.teams
+        ta = dth["attacker_steamid"].map(teams)
+        tu = dth["user_steamid"].map(teams)
+        enemy = ta.notna() & tu.notna() & (ta != tu)
+        kills = int(
+            (
+                (dth["attacker_steamid"] == p_sid)
+                & (dth["attacker_steamid"] != dth["user_steamid"])
+                & enemy
+            ).sum()
+        )
+        deaths = int(
+            (
+                (dth["user_steamid"] == p_sid)
+                & (dth["attacker_steamid"] != dth["user_steamid"])
+                & enemy
+            ).sum()
+        )
+        return kills, deaths
+    return (
+        int((duels["killer"] == p_sid).sum()) if len(duels) else 0,
+        int((duels["victim"] == p_sid).sum()) if len(duels) else 0,
+    )
+
+
+class _PlayerFrames(NamedTuple):
+    """One player's filtered shot/duel slices + the risky-shot percentage."""
+
+    sh: pd.DataFrame
+    hi: pd.DataFrame
+    dd: pd.DataFrame
+    kd: pd.DataFrame
+    fs: pd.DataFrame
+    fsh: pd.DataFrame
+    risky: float
+
+
+def _player_frames(demo, shots, duels, hurts, p, thr, safe, strict) -> _PlayerFrames:
+    """Slice the frames down to one player and derive the risky %."""
+    sh = shots[shots["sid"] == p.sid]
+    hi = _hurts_of(demo, p.sid, hurts)
+    dd = duels_for(duels, p.sid) if len(duels) else pd.DataFrame()
+    kd = dd[dd["result"] == "kill"] if len(dd) else dd
+    fs = dd[dd["first"].isin(["me", "opponent"])] if len(dd) else dd
+    fsh = sh[sh["first_shot"]] if len(sh) else sh
+    known = (
+        sh["dist"].notna() & sh["speed"].notna()
+        if len(sh)
+        else pd.Series(dtype=bool)
+    )
+    if len(sh) and known.any():
+        alw = allowed_speed(sh.loc[known, "dist"], thr, safe, strict)
+        risky = round((sh.loc[known, "speed"].to_numpy() > alw).mean() * 100, 1)
+    else:
+        risky = np.nan
+    return _PlayerFrames(sh, hi, dd, kd, fs, fsh, risky)
+
+
+def _player_row(demo: Demo, p, fr: _PlayerFrames, kills: int, deaths: int, thr: float, open_rate: dict, best_w: dict, died_w: dict) -> dict:
+    """player_summary's output row: one player's metric cells (NaN when
+    the player has no data for a metric)."""
+    sh, hi, dd, kd, fs, fsh = fr.sh, fr.hi, fr.dd, fr.kd, fr.fs, fr.fsh
+    return {
+        "player": p.name,
+        "sid": p.sid,
+        "team": p.team,
+        "sides": "→".join(demo.side_history(p.sid)),
+        "kills": kills,
+        "deaths": deaths,
+        "kd_ratio": round(kills / max(1, deaths), 2),
+        "shots": len(sh),
+        "hits": len(hi),
+        "accuracy": round(len(hi) / len(sh) * 100, 1) if len(sh) else np.nan,
+        "hs_hits": (
+            round((hi["hitgroup"] == "head").mean() * 100, 1)
+            if len(hi)
+            else np.nan
+        ),
+        "hs_kills": (
+            round(kd["headshot"].mean() * 100, 1) if len(kd) else np.nan
+        ),
+        "moving": (
+            round((sh["speed"] > thr).mean() * 100, 1) if len(sh) else np.nan
+        ),
+        "risky": fr.risky,
+        "first_shot": (
+            round((fs["first"] == "me").mean() * 100, 1) if len(fs) else np.nan
+        ),
+        # first-shot accuracy: hit rate on first shots of
+        # engagements (crosshair placement quality)
+        "first_acc": (
+            round(fsh["hit"].mean() * 100, 1) if len(fsh) else np.nan
+        ),
+        # opening-duel win rate: share of the rounds' first enemy
+        # kills won (killer vs victim)
+        "open_rate": open_rate.get(p.sid, np.nan),
+        "aim_err": (
+            round(dd["my_err"].median(), 1)
+            if len(dd) and dd["my_err"].notna().any()
+            else np.nan
+        ),
+        "duration": round(dd["duration_s"].median(), 2) if len(dd) else np.nan,
+        # icon columns: the favorite weapon and the one dying to
+        "best_weapon": best_w.get(p.sid, ""),
+        "died_to": died_w.get(p.sid, ""),
+    }
 
 
 def player_summary(
@@ -940,127 +1193,18 @@ def player_summary(
     res = []
     dth = demo.deaths
     have_d = len(dth) and {"attacker_steamid", "user_steamid"} <= set(dth.columns)
-    teams = demo.teams
     # opening-duel win rate (impact_stats): whole-match, like
     # the K/D below - it is round structure, not a filterable shot metric
     open_rate = impact_stats(demo, f=f).set_index("sid")["open_rate"].to_dict()
-    keep = _round_side_keep(demo, f)
-    kills_by: dict = {}
-    deaths_by: dict = {}
-    best_w: dict[str, str] = {}  # sid -> the weapon the most kills came from
-    died_w: dict[str, str] = {}  # sid -> the weapon the most deaths came from
     de = _enemy_kill_rows(demo) if have_d else pd.DataFrame()
-    k_ok = v_ok = None
-    if keep is not None:
-        if len(de):
-            rd = (de["round_idx"] + 1).astype(int)
-            k_ok = np.array(
-                [keep(int(r), s) for r, s in zip(rd, de["attacker_steamid"])],
-                dtype=bool,
-            )
-            v_ok = np.array(
-                [keep(int(r), s) for r, s in zip(rd, de["user_steamid"])], dtype=bool
-            )
-            kills_by = de[k_ok].groupby("attacker_steamid").size().to_dict()
-            deaths_by = de[v_ok].groupby("user_steamid").size().to_dict()
-            best_w = _top_weapon(de, k_ok, "attacker_steamid")
-            died_w = _top_weapon(de, v_ok, "user_steamid")
-    elif len(de):  # no round/side filter: every enemy kill counts
-        k_ok = np.ones(len(de), dtype=bool)
-        best_w = _top_weapon(de, k_ok, "attacker_steamid")
-        died_w = _top_weapon(de, k_ok, "user_steamid")
+    keep, kills_by, deaths_by, best_w, died_w = _kd_setup(demo, f, de, have_d)
     for p in demo.players.itertuples():
-        sh = shots[shots["sid"] == p.sid]
-        hi = _hurts_of(demo, p.sid, hurts)
-        dd = duels_for(duels, p.sid) if len(duels) else pd.DataFrame()
-        if keep is not None and have_d:
-            kills = int(kills_by.get(p.sid, 0))
-            deaths = int(deaths_by.get(p.sid, 0))
-        elif have_d:
-            # K/D like the in-game scoreboard: every ENEMY kill/death with
-            # any weapon (knife and grenades included), whole match. Duels
-            # above are gun-only, so the two must not be mixed.
-            # Static teams are fine here: teammates share the label before
-            # and after the halftime swap. World/suicide deaths have no
-            # known attacker and stay out, teamkills stay out both ways.
-            ta = dth["attacker_steamid"].map(teams)
-            tu = dth["user_steamid"].map(teams)
-            enemy = ta.notna() & tu.notna() & (ta != tu)
-            kills = int(
-                (
-                    (dth["attacker_steamid"] == p.sid)
-                    & (dth["attacker_steamid"] != dth["user_steamid"])
-                    & enemy
-                ).sum()
-            )
-            deaths = int(
-                (
-                    (dth["user_steamid"] == p.sid)
-                    & (dth["attacker_steamid"] != dth["user_steamid"])
-                    & enemy
-                ).sum()
-            )
-        else:
-            kills = int((duels["killer"] == p.sid).sum()) if len(duels) else 0
-            deaths = int((duels["victim"] == p.sid).sum()) if len(duels) else 0
-        kd = dd[dd["result"] == "kill"] if len(dd) else dd
-        fs = dd[dd["first"].isin(["me", "opponent"])] if len(dd) else dd
-        fsh = sh[sh["first_shot"]] if len(sh) else sh
-        known = (
-            sh["dist"].notna() & sh["speed"].notna()
-            if len(sh)
-            else pd.Series(dtype=bool)
+        fr = _player_frames(demo, shots, duels, hurts, p, thr, safe, strict)
+        kills, deaths = _player_kd(
+            p.sid, demo, duels, have_d, keep, kills_by, deaths_by
         )
-        if len(sh) and known.any():
-            alw = allowed_speed(sh.loc[known, "dist"], thr, safe, strict)
-            risky = round((sh.loc[known, "speed"].to_numpy() > alw).mean() * 100, 1)
-        else:
-            risky = np.nan
         res.append(
-            {
-                "player": p.name,
-                "sid": p.sid,
-                "team": p.team,
-                "sides": "→".join(demo.side_history(p.sid)),
-                "kills": kills,
-                "deaths": deaths,
-                "kd_ratio": round(kills / max(1, deaths), 2),
-                "shots": len(sh),
-                "hits": len(hi),
-                "accuracy": round(len(hi) / len(sh) * 100, 1) if len(sh) else np.nan,
-                "hs_hits": (
-                    round((hi["hitgroup"] == "head").mean() * 100, 1)
-                    if len(hi)
-                    else np.nan
-                ),
-                "hs_kills": (
-                    round(kd["headshot"].mean() * 100, 1) if len(kd) else np.nan
-                ),
-                "moving": (
-                    round((sh["speed"] > thr).mean() * 100, 1) if len(sh) else np.nan
-                ),
-                "risky": risky,
-                "first_shot": (
-                    round((fs["first"] == "me").mean() * 100, 1) if len(fs) else np.nan
-                ),
-                # first-shot accuracy: hit rate on first shots of
-                # engagements (crosshair placement quality)
-                "first_acc": (
-                    round(fsh["hit"].mean() * 100, 1) if len(fsh) else np.nan
-                ),
-                # opening-duel win rate: share of the rounds' first enemy
-                # kills won (killer vs victim)
-                "open_rate": open_rate.get(p.sid, np.nan),
-                "aim_err": (
-                    round(dd["my_err"].median(), 1)
-                    if len(dd) and dd["my_err"].notna().any()
-                    else np.nan
-                ),
-                "duration": round(dd["duration_s"].median(), 2) if len(dd) else np.nan,
-                # icon columns: the favorite weapon and the one dying to
-                "best_weapon": best_w.get(p.sid, ""),
-                "died_to": died_w.get(p.sid, ""),
-            }
+            _player_row(demo, p, fr, kills, deaths, thr, open_rate, best_w, died_w)
         )
     return (
         pd.DataFrame(res)

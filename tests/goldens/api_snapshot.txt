@@ -9,6 +9,7 @@ var    DUCK_PROPS
 class  Demo
 import DemoParser  # used by: tests/smoke_app.py, tests/test_core.py, tools/dump_payloads.py
 import DemoState
+class  DuelShots
 var    ENGAGE_GAP_TICKS
 var    EYE_STAND
 var    FLASH_SHOT_S
@@ -30,6 +31,7 @@ import MatchRecord
 class  MatchRow
 var    NA  # used by: tests/test_core.py
 var    NON_GUN
+import NamedTuple
 var    PARSE_VERSION  # used by: tests/test_core.py
 var    POS
 var    PUNCH_PROPS
@@ -51,6 +53,8 @@ var    TRADE_S
 import TYPE_CHECKING
 var    WEAPON_CLASSES  # used by: tests/test_core.py
 var    WEAPON_TO_CLASS
+class  _DuelCtx
+class  _PlayerFrames
 var    _REASON_BY_CODE
 var    _REASON_BY_MESSAGE
 var    _ROUND_MARK_EVENTS
@@ -59,38 +63,108 @@ var    _STRICT
 var    _THR
 var    _WINDOW_S
 def    _add_speed
+def    _aimed_at
+def    _aimed_elsewhere
+def    _between
+def    _build_rounds
+def    _count_pre_live
 def    _counter_strafe_tap
+def    _debug_counts
+def    _debug_me
+def    _debug_meta
 def    _decode_buttons
+def    _drop_warmup
 def    _duck_amount  # used by: tests/test_core.py
+def    _duel_checks
+def    _duel_dist
+def    _duel_entry
+def    _duel_row
+def    _duel_shots
 def    _enemy_kill_rows
 def    _entry_match
 def    _entry_time
+def    _err_hw
+def    _events_in_window
+def    _exclude_preliminary
 def    _extract_punch
+def    _filter_gun_events
+def    _fire_rows
+def    _first_shooter
 def    _first_shot_arr  # used by: tests/test_core.py
 def    _first_shot_windows  # used by: tests/test_core.py
+def    _flick_moves
+def    _frac_check
 def    _guess_round_winners
+def    _has_gun_fire
+def    _has_knife_death
+def    _hitgroups_check
 def    _hurts_of
+def    _impact_assists
+def    _impact_multikills
+def    _impact_openings
+def    _impact_trades
 def    _iso
+def    _kd_setup
+def    _keep_from_tick
+def    _keep_ok
+def    _knife_fallback
+def    _knife_only
+def    _library_row
+def    _lvl
 def    _match_hits
+def    _na_ids_check
+def    _named_event_windows
 def    _nearest_enemy_dist
 def    _norm_alive
+def    _official_end_ticks
+def    _parse_events_frames
+def    _parse_mouse
+def    _parse_players
 def    _parse_round_sides
+def    _parse_tick_table
+def    _parse_ticks_tiered
+def    _parse_totals
 def    _parse_version
+def    _player_frames
+def    _player_kd
+def    _player_row
 def    _png_size
+def    _record_row
 def    _records
+def    _round_bounds
 def    _round_col
+def    _round_death_rows
+def    _round_events
+def    _round_fielded
+def    _round_frames
 def    _round_info_from_events
+def    _round_mark_events
 def    _round_side_keep
+def    _row_flag
+def    _row_rnd
 def    _row_round_sec
+def    _row_tick
 def    _safe_int
 def    _score
+def    _scoreboard_check
+def    _shift_first_round
+def    _shot_frames
+def    _shots_in_window
 def    _side_of_winner
+def    _sides_check
 def    _speed
 def    _speed_from_positions
+def    _state_flags
+def    _stats_of
+def    _synthesize_round_bounds
+def    _telemetry_list
+def    _telemetry_prep
+def    _telemetry_series
 def    _timeline_speed
 def    _top_weapon
 def    _unpack
 def    _unpack_dir
+def    _would_head
 def    _wrap180
 def    _zone
 def    _zstandard_module
@@ -180,4 +254,4 @@ def    wilson_ci  # used by: tests/test_core.py
 def    world_to_radar  # used by: mapview.py, tests/test_core.py
 def    write_cached
 import zipfile
-# !! NOT re-exported by the core facade: ['DemoState', 'MatchRecord', 'Sequence', 'TYPE_CHECKING', '_REASON_BY_CODE', '_REASON_BY_MESSAGE', '_ROUND_MARK_EVENTS', '_SAFE', '_STRICT', '_THR', '_WINDOW_S', '_entry_match', '_entry_time', '_guess_round_winners', '_iso', '_round_info_from_events', '_score', '_side_of_winner', '_top_weapon', '_wrap180', 'bisect', 'bz2', 'cached_property', 'dataclass', 'datetime', 'field', 'gzip', 'hashlib', 'importlib', 'json', 'np', 'os', 'pd', 're', 'shutil', 'store', 'struct', 'sys', 'timezone', 'zipfile']
+# !! NOT re-exported by the core facade: ['DemoState', 'DuelShots', 'MatchRecord', 'NamedTuple', 'Sequence', 'TYPE_CHECKING', '_DuelCtx', '_PlayerFrames', '_REASON_BY_CODE', '_REASON_BY_MESSAGE', '_ROUND_MARK_EVENTS', '_SAFE', '_STRICT', '_THR', '_WINDOW_S', '_aimed_at', '_aimed_elsewhere', '_between', '_build_rounds', '_count_pre_live', '_debug_counts', '_debug_me', '_debug_meta', '_drop_warmup', '_duel_checks', '_duel_dist', '_duel_entry', '_duel_row', '_duel_shots', '_entry_match', '_entry_time', '_err_hw', '_events_in_window', '_exclude_preliminary', '_filter_gun_events', '_fire_rows', '_first_shooter', '_flick_moves', '_frac_check', '_guess_round_winners', '_has_gun_fire', '_has_knife_death', '_hitgroups_check', '_impact_assists', '_impact_multikills', '_impact_openings', '_impact_trades', '_iso', '_kd_setup', '_keep_from_tick', '_keep_ok', '_knife_fallback', '_knife_only', '_library_row', '_lvl', '_na_ids_check', '_named_event_windows', '_official_end_ticks', '_parse_events_frames', '_parse_mouse', '_parse_players', '_parse_tick_table', '_parse_ticks_tiered', '_parse_totals', '_player_frames', '_player_kd', '_player_row', '_record_row', '_round_bounds', '_round_death_rows', '_round_events', '_round_fielded', '_round_frames', '_round_info_from_events', '_round_mark_events', '_row_flag', '_row_rnd', '_row_tick', '_score', '_scoreboard_check', '_shift_first_round', '_shot_frames', '_shots_in_window', '_side_of_winner', '_sides_check', '_state_flags', '_stats_of', '_synthesize_round_bounds', '_telemetry_list', '_telemetry_prep', '_telemetry_series', '_top_weapon', '_would_head', '_wrap180', 'bisect', 'bz2', 'cached_property', 'dataclass', 'datetime', 'field', 'gzip', 'hashlib', 'importlib', 'json', 'np', 'os', 'pd', 're', 'shutil', 'store', 'struct', 'sys', 'timezone', 'zipfile']

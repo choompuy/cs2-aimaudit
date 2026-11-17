@@ -75,7 +75,7 @@ def _write(path: str, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-def download(dest: str, tag: str, timeout: float) -> int:
+def download_radar_set(dest: str, tag: str, timeout: float) -> int:
     """Download into `dest`; returns the number of images. Raises on any failure."""
     meta = _get(URL.format(repo=REPO, tag=tag, name="map_data.json"), timeout)
     json.loads(meta)  # fail early on an error page
@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  Downloading the radar images for the Map page (about 3 MB, once)...")
 
     try:
-        n = download(dest, args.tag, timeout=20 if auto else 60)
+        n = download_radar_set(dest, args.tag, timeout=20 if auto else 60)
     except Exception as e:  # noqa: BLE001 - one friendly message for any failure
         if not auto:
             print(f"download failed: {e}", file=sys.stderr)

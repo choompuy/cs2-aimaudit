@@ -23,6 +23,7 @@ import sources.http
 import sources.steam
 import store
 from sources import model as sm
+from views import _shared
 
 
 def render(ctx) -> None:
@@ -121,21 +122,8 @@ def _persist_accounts() -> dict:
     return accounts
 
 
-def _steam_cfg(accounts: dict) -> sm.SteamConfig:
-    return sm.SteamConfig(
-        steam_id64=accounts.get("steam_id64") or "",
-        replays_dir=accounts.get("replays_dir") or "",
-    )
-
-
-def _show_error(t, e) -> None:
-    if e is None:
-        return
-    key, kw = e
-    try:
-        st.error(t(key, **kw))
-    except (KeyError, ValueError, IndexError):
-        st.error(t(key))
+_steam_cfg = _shared.steam_cfg
+_show_error = _shared.show_error
 
 
 def _add_by_share_code(t) -> None:

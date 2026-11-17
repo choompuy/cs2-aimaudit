@@ -14,6 +14,7 @@ written here, so the doc and the guardrails stay honest.
 | `shell.py`                        |       727 | App shell: the sidebar rail, navigation (`go_page`/`go_match`/`go_tab`, URL state), demo loading, the match header, the context row, the library panel. |
 | `filters_ui.py`                   |       548 | URL state (`_URL_KEYS`) and link migration, presets, callbacks, the filter panel (rendered inside the match header).                         |
 | `views/matches.py`                |       781 | The Matches page: the unified table (filters, Refresh, Add match, row actions, the download flow).                                        |
+| `views/_shared.py`                |        30 | Helpers shared by the pages (`steam_cfg`, `show_error`); started as the Matches/Settings duplicates.                                       |
 | `views/dashboard.py`              |        27 | The Dashboard stub (cross-match aggregates land in a future `core/aggregate.py`).                                                            |
 | `views/settings.py`               |       214 | The Settings page: language note, analysis sliders, accounts + Steam helper, Library and storage, privacy.                                   |
 | `views/overview.py`               |        77 | Overview page (one grid for both teams).                                                                                                     |
@@ -32,6 +33,7 @@ written here, so the doc and the guardrails stay honest.
 | `core/checks.py`                  |       353 | `data_checks`, `debug_report`.                                                                                                               |
 | `core/__init__.py`                |       153 | Facade: re-exports the public API so `import core` / `core.X` keep working.                                                                  |
 | `ui/table.py`                     |       478 | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells), `data_table` (custom component).                       |
+| `ui/component.py`                 |        38 | Custom-component glue: `declare` + `event_callback`, shared by table / strip / roundrep.                                                |
 | `ui/schema.py` + `ui/tables.toml` | 338 + 354 | The table schema: loader, `build_cols`, `table`, `validate`; the TOML is the single source of truth for grids (incl. `[table.matches]`).     |
 | `ui/charts.py`                    |        86 | `style_figure` and shared chart builders.                                                                                                    |
 | `ui/format.py`                    |        63 | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`, `map_name`.                                                                           |
@@ -48,6 +50,7 @@ written here, so the doc and the guardrails stay honest.
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `i18n.py`                         |    1 413 | English/Russian strings; every UI text goes through `t("key")` literals.                                                                     |
 | `store.py`                        |       836 | The ONE place that knows where files live: the `data/` folder next to `start.bat`, the demo library (copies + linked demos), caches (parsed / unpacked / matchstats / icons), support notes (`data/logs/notes.log`), parse keys. |
+| `state.py`                        |       170 | The `session_state` registry: key-name constants, typed get_*/set_* for the keys shared by 2+ modules, and the navigation mutators (`go_page`/`go_match`/`go_tab`/`leave_match`, re-exported by `shell`). |
 | `nativedialog.py`                 |        78 | Native Windows file dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
 
 Support: `tests/test_core.py` (synthetic-match unit tests),
@@ -64,16 +67,22 @@ core API snapshot, `fetch_radars.py`, `fetch_icons.py`,
 
 Navigation is two-level and lives in `session_state`
 (never only in widget state - Streamlit drops the state of widgets a run
-does not render):
+does not render). The shared keys are a REGISTRY (`state.py`): key-name
+constants and typed get_*/set_* accessors; a module never touches
+another module's key by a string literal. `lang` and `me` are widget-OWNED
+keys (the sidebar selectbox / the player selectbox), so the registry only
+reads them:
 
 - **Sidebar level**: `page` ∈ `dashboard | matches | settings | guide`,
-  switched ONLY through `shell.go_page` (the sidebar buttons; clicking
+  switched ONLY through `state.go_page` (re-exported as `shell.go_page`;
+  the sidebar buttons - clicking
   Matches lands on the LIST). A fresh session starts on the Matches list.
 - **Match view**: inside `page == "matches"` - `match` (the library demo id
   of the open match, or absent = the list) and `match_tab` ∈ `overview |
-  shooting | duels | map | replay`. `shell.go_match(demo_id, tab)` is the
+  shooting | duels | map | replay`. `state.go_match(demo_id, tab)` (the
+  `shell.go_match` re-export) is the
   ONE way to open a match (a list row, a download, the old
-  links); `shell.leave_match` is the `← Матчи` button; `shell.go_tab`
+  links); `state.leave_match` is the `← Матчи` button; `state.go_tab`
   switches tabs inside the open match.
 - **Compatibility**: `shell.migrate_nav` turns old single-level page ids
   (and the retired `timeline`) into `matches` + `match_tab` + the last

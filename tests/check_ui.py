@@ -737,6 +737,7 @@ for _needle in (
     "views/dashboard.py",
     "core/matchlist.py",
     "core/matchstats.py",
+    "state.py",
     "go_match",
     "match_tab",
     "How to add a navigation item",

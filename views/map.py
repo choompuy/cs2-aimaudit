@@ -14,28 +14,9 @@ def render(ctx) -> None:
     _map_fragment(ctx)
 
 
-@st.fragment
-def _map_fragment(ctx):
-    t = ctx.t
-    demo = ctx.demo
-    filters = ctx.filters
-    me = ctx.me
-    name_of = ctx.name_of
-    """Where the selected player killed and died, on the radar (Map page)."""
-    st.subheader(t("map_title"))
-    has_pos = {"attacker_X", "attacker_Y", "user_X", "user_Y"} <= set(
-        demo.deaths.columns
-    )
-    if not has_pos:
-        st.info(t("map_no_pos"))
-        return
-    pts = core.kill_points(demo, me, filters)
-    if not len(pts):
-        st.info(t("map_none"))
-        return
-    map_name = str(demo.header.get("map_name") or "")
-    radar = core.load_radar(map_name)
-
+def _map_controls(radar, t):
+    """The show / lines / level controls (their state persists per
+    session). Returns (show, lines, level)."""
     c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
     show = (
         c1.segmented_control(
@@ -62,6 +43,11 @@ def _map_fragment(ctx):
             )
             or "upper"
         )
+    return show, lines, level
+
+
+def _hover_texts(pts, t, name_of):
+    """The per-point hover text (round, opponent, weapon, distance, hs)."""
 
     def _hover(r) -> str:
         return t(
@@ -73,7 +59,29 @@ def _map_fragment(ctx):
             hs=t("map_hover_hs") if r["headshot"] else "",
         )
 
-    pts = pts.assign(hover=[_hover(r) for _, r in pts.iterrows()])
+    return [_hover(r) for _, r in pts.iterrows()]
+
+
+@st.fragment
+def _map_fragment(ctx):
+    """Where the selected player killed and died, on the radar (Map page)."""
+    t = ctx.t
+    demo = ctx.demo
+    st.subheader(t("map_title"))
+    has_pos = {"attacker_X", "attacker_Y", "user_X", "user_Y"} <= set(
+        demo.deaths.columns
+    )
+    if not has_pos:
+        st.info(t("map_no_pos"))
+        return
+    pts = core.kill_points(demo, ctx.me, ctx.filters)
+    if not len(pts):
+        st.info(t("map_none"))
+        return
+    map_name = str(demo.header.get("map_name") or "")
+    radar = core.load_radar(map_name)
+    show, lines, level = _map_controls(radar, t)
+    pts = pts.assign(hover=_hover_texts(pts, t, ctx.name_of))
     fig = mapview.build_figure(
         pts,
         radar,

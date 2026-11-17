@@ -316,9 +316,9 @@ def weapon_label(name) -> str:
         return "N/A"
     lang = None
     try:
-        import streamlit as st
+        import state
 
-        lang = st.session_state.get("lang")
+        lang = state.get_lang()
     except Exception:  # noqa: BLE001 - bare mode (unit tests): en
         lang = None
     t = i18n.make_t(lang or next(iter(i18n.LANGS)))

@@ -26,6 +26,8 @@ from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
 
+from ui import component
+
 _TONES = ("accent", "opponent", "positive", "negative", "info", "warning", "context")
 
 
@@ -73,7 +75,7 @@ def _fmt(spec: str, x: float) -> str:
 _AUTO_MIN_VALUES = 3
 
 
-def _score(
+def _grade(
     x: float | None, grade, lo: float | None, hi: float | None, best: str | None
 ):
     """Quality 0.0 (worst colour) .. 1.0 (best colour); None = do not colour."""
@@ -95,6 +97,87 @@ def _score(
     return round(min(1.0, max(0.0, p)), 3)
 
 
+def _rel_maxima(rows: Mapping[str, Sequence], cols: Sequence[Col]) -> dict[str, float]:
+    """Per-column max of the numeric values (bar='rel' denominators)."""
+    out: dict[str, float] = {}
+    for c in cols:
+        if c.bar == "rel":
+            vals = [_num(v) for v in rows[c.key]]
+            out[c.key] = max([v for v in vals if v is not None] or [0.0])
+    return out
+
+
+def _auto_ranges(
+    rows: Mapping[str, Sequence], cols: Sequence[Col]
+) -> dict[str, tuple[float | None, float | None]]:
+    """Per-column (lo, hi) for grade='auto' (None until enough values)."""
+    out: dict[str, tuple[float | None, float | None]] = {}
+    for c in cols:
+        if c.grade == "auto" and c.kind == "num":
+            vals = sorted({v for v in (_num(v) for v in rows[c.key]) if v is not None})
+            out[c.key] = (
+                (vals[0], vals[-1]) if len(vals) >= _AUTO_MIN_VALUES else (None, None)
+            )
+    return out
+
+
+def _col_payload(c: Col) -> dict:
+    """The header entry for one column."""
+    numeric = c.kind == "num"
+    first = "asc" if (not numeric or c.best == "low") else "desc"
+    return {
+        "k": c.key,
+        "l": c.label,
+        "t": c.kind,
+        "b": bool(c.bar),
+        "tn": c.tone if c.tone in _TONES else "accent",
+        "h": c.help or "",
+        "f": first,
+        "s": bool(c.sticky),
+    }
+
+
+def _num_cell(c: Col, src, col_max, col_rng) -> list:
+    """A numeric cell: value, display, bar fraction, grade score."""
+    x = _num(src)
+    raw, disp = x, ("—" if x is None else _fmt(c.fmt, x))
+    frac = None
+    if x is not None and c.bar == "pct":
+        frac = min(1.0, max(0.0, x / 100.0))
+    elif x is not None and c.bar == "rel" and col_max.get(c.key, 0) > 0:
+        frac = min(1.0, max(0.0, x / col_max[c.key]))
+    lo, hi = col_rng.get(c.key, (None, None))
+    return [raw, disp, frac, None, _grade(x, c.grade, lo, hi, c.best)]
+
+
+def _icon_cell(c: Col, rows: Mapping[str, Sequence], i: int, src) -> list:
+    """An icon cell: raw is the icon key (or the plain name when no icon
+    exists), disp is the localized name - the tooltip, and the visible
+    text when the icon set is missing ("N/A" for no weapon)."""
+    name = "" if src is None else str(src)
+    disp = (
+        str(rows[c.title_by][i])
+        if c.title_by and rows[c.title_by][i] is not None
+        else name
+    ) or "—"
+    return [name or None, disp, None, None, None]
+
+
+def _text_cell(c: Col, rows: Mapping[str, Sequence], i: int, src) -> list:
+    """A text/badge cell: sort value, display, optional tone mapping."""
+    disp = "" if src is None else str(src)
+    srt = rows[c.sort][i] if c.sort else src
+    raw = (
+        _num(srt)
+        if c.sort and _num(srt) is not None
+        else (None if srt is None else str(srt))
+    )
+    tone = None
+    if c.tones:
+        tone = c.tones.get(str(srt)) or c.tones.get(disp)
+    return [raw, disp, None, tone, None]
+
+
 def table_payload(
     rows: Mapping[str, Sequence],
     cols: Sequence[Col],
@@ -113,76 +196,20 @@ def table_payload(
     the payload so the renderer can deduplicate and the SVG never lands
     in the DOM as anything but an <img>/mask source."""
     n = len(next(iter(rows.values()))) if rows else 0
-    col_max: dict[str, float] = {}
-    for c in cols:
-        if c.bar == "rel":
-            vals = [_num(v) for v in rows[c.key]]
-            col_max[c.key] = max([v for v in vals if v is not None] or [0.0])
-    col_rng: dict[str, tuple[float | None, float | None]] = {}
-    for c in cols:
-        if c.grade == "auto" and c.kind == "num":
-            vals = sorted({v for v in (_num(v) for v in rows[c.key]) if v is not None})
-            col_rng[c.key] = (
-                (vals[0], vals[-1]) if len(vals) >= _AUTO_MIN_VALUES else (None, None)
-            )
-    out_cols = []
-    for c in cols:
-        numeric = c.kind == "num"
-        first = "asc" if (not numeric or c.best == "low") else "desc"
-        out_cols.append(
-            {
-                "k": c.key,
-                "l": c.label,
-                "t": c.kind,
-                "b": bool(c.bar),
-                "tn": c.tone if c.tone in _TONES else "accent",
-                "h": c.help or "",
-                "f": first,
-                "s": bool(c.sticky),
-            }
-        )
+    col_max = _rel_maxima(rows, cols)
+    col_rng = _auto_ranges(rows, cols)
+    out_cols = [_col_payload(c) for c in cols]
     out_rows = []
     for i in range(n):
         cells = []
         for c in cols:
             src = rows[c.key][i]
             if c.kind == "num":
-                x = _num(src)
-                raw, disp = x, ("—" if x is None else _fmt(c.fmt, x))
-                frac = None
-                if x is not None and c.bar == "pct":
-                    frac = min(1.0, max(0.0, x / 100.0))
-                elif x is not None and c.bar == "rel" and col_max.get(c.key, 0) > 0:
-                    frac = min(1.0, max(0.0, x / col_max[c.key]))
-                tone = None
-                lo, hi = col_rng.get(c.key, (None, None))
-                score = _score(x, c.grade, lo, hi, c.best)
+                cells.append(_num_cell(c, src, col_max, col_rng))
             elif c.kind == "icon":
-                # raw: the icon key (or the plain name when no icon exists);
-                # disp: the localized name - the tooltip, and the visible
-                # text when the icon set is missing ("N/A" for no weapon)
-                name = "" if src is None else str(src)
-                disp = (
-                    str(rows[c.title_by][i])
-                    if c.title_by and rows[c.title_by][i] is not None
-                    else name
-                ) or "—"
-                raw = name or None
-                frac = tone = score = None
+                cells.append(_icon_cell(c, rows, i, src))
             else:
-                score = None
-                disp = "" if src is None else str(src)
-                srt = rows[c.sort][i] if c.sort else src
-                raw = (
-                    _num(srt)
-                    if c.sort and _num(srt) is not None
-                    else (None if srt is None else str(srt))
-                )
-                frac = None
-                tone = None
-                if c.tones:
-                    tone = c.tones.get(str(srt)) or c.tones.get(disp)
-            cells.append([raw, disp, frac, tone, score])
+                cells.append(_text_cell(c, rows, i, src))
         s = stripe[i] if stripe is not None else None
         out_rows.append({"i": i, "s": s if s in _TONES else None, "c": cells})
     return {
@@ -197,10 +224,7 @@ def table_payload(
 
 
 def _renderer():
-    # registered on every run: the registry lives in the Streamlit
-    # runtime (AppTest and server restarts start with an empty one), and
-    # re-registering an identical definition is cheap and idempotent
-    return st.components.v2.component("aimaudit_table", css=_CSS, js=_JS)
+    return component.declare("aimaudit_table", _CSS, _JS)
 
 
 def data_table(
@@ -227,14 +251,7 @@ def data_table(
     )
     kwargs: dict = {}
     if on_click is not None:
-
-        def _cb() -> None:
-            state = st.session_state.get(key)
-            idx = state.get("clicked") if hasattr(state, "get") else None
-            if idx is not None:
-                on_click(int(idx))
-
-        kwargs["on_clicked_change"] = _cb
+        kwargs["on_clicked_change"] = component.event_callback(key, "clicked", on_click)
     _renderer()(key=key, data=payload, **kwargs)
 
 

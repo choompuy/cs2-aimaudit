@@ -189,17 +189,17 @@ class HttpTransport:
             os.replace(part, dest)
             return done
         except DownloadCancelled:
-            _remove(part)
+            _unlink(part)
             raise
         except (urllib.error.URLError, TimeoutError, OSError) as e:
-            _remove(part)
+            _unlink(part)
             raise NetworkError(f"{type(e).__name__}: {e}") from e
         except BaseException:
-            _remove(part)
+            _unlink(part)
             raise
 
 
-def _remove(path: str) -> None:
+def _unlink(path: str) -> None:
     try:
         os.remove(path)
     except OSError:

@@ -18,6 +18,7 @@ import streamlit as st
 import core
 import nativedialog
 import shell
+import state
 import store
 import sources
 import sources.http
@@ -25,6 +26,7 @@ import sources.inbox
 import sources.steam
 from sources import model as sm
 from ui.format import map_name
+from views import _shared
 
 _PERIODS = ("7", "30", "all")
 _RESULTS = ("all", "win", "loss", "tie")
@@ -33,42 +35,21 @@ PAGE_ROWS = 25
 
 
 # ------------------------------------------------------------- shared bits
-def _steam_cfg(accounts: dict) -> sm.SteamConfig:
-    return sm.SteamConfig(
-        steam_id64=accounts.get("steam_id64") or "",
-        replays_dir=accounts.get("replays_dir") or "",
-    )
-
-
-def _provider_cache(provider: str) -> list[sm.MatchRecord]:
-    return sources.read_cache(provider)
+_steam_cfg = _shared.steam_cfg
+_show_error = _shared.show_error
 
 
 def _all_records() -> list[sm.MatchRecord]:
     """Every cached provider list (Steam today), newest first."""
     out: list[sm.MatchRecord] = []
     for p in sorted(store.read_matches_cache().get("providers") or {}):
-        out.extend(_provider_cache(p))
+        out.extend(sources.read_cache(p))
     return _sorted(out)
-
-
-def _show_error(t, e) -> None:
-    if e is None:
-        return
-    key, kw = e
-    try:
-        st.error(t(key, **kw))
-    except (KeyError, ValueError, IndexError):
-        st.error(t(key))
 
 
 def _sorted(records: list[sm.MatchRecord]) -> list[sm.MatchRecord]:
     """By date, newest first; undated records keep to the end."""
     return sources.sorted_records(records)
-
-
-def _accounts() -> dict:
-    return store.read_accounts()
 
 
 # ------------------------------------------------------------- URL filters
@@ -109,7 +90,7 @@ def _after_pick(paths, t) -> None:
     """Link the chosen files (a native dialog gave their real paths) and
     open the last one as the match."""
     if paths is None:
-        st.session_state["_pick_err"] = t("lib_no_dialog")
+        state.set_pick_err(t("lib_no_dialog"))
         return
     added, errs = [], []
     for p in paths:
@@ -123,7 +104,7 @@ def _after_pick(paths, t) -> None:
             added[-1]["name"] if len(added) == 1 else t("lib_n_added", n=len(added))
         )
     if errs:
-        st.session_state["_pick_err"] = "  ".join(errs)
+        state.set_pick_err("  ".join(errs))
 
 
 def _pick_file(t) -> None:
@@ -151,7 +132,7 @@ def _add_match(t) -> None:
 
 # ------------------------------------------------------------------ refresh
 def _refresh(t, n: int) -> None:
-    accounts = _accounts()
+    accounts = store.read_accounts()
     errs = {}
     cfg = _steam_cfg(accounts)
     try:
@@ -190,7 +171,7 @@ def _download(t, rec: sm.MatchRecord) -> None:
     """The row's download, run AFTER the table drew its "Downloading…"
     state: the cell stays busy for the whole transfer while the status +
     progress line underneath tracks the real numbers."""
-    cfg = _steam_cfg(_accounts())
+    cfg = _steam_cfg(store.read_accounts())
     status = st.status(t("mt_dl_status"))
     bar = st.progress(0.0)
 
@@ -498,12 +479,9 @@ def _start_card(t) -> None:
 
 
 # ------------------------------------------------------------------- page
-def render(ctx) -> None:
-    t = ctx.t
-    _load_url_filters()
-    accounts = _accounts()
-    if st.session_state.get("mt_refresh"):
-        _refresh(t, accounts.get("match_count") or sm.DEFAULT_MATCH_COUNT)
+def _notices(t) -> None:
+    """The one-shot notices a previous run left in session state: import
+    errors, freed space, pick warnings, added/downloaded toasts."""
     _show_import_error(t)
     errs = st.session_state.pop("mt_errs", None) or {}
     _show_error(t, errs.get("steam"))
@@ -511,8 +489,9 @@ def render(ctx) -> None:
         st.success(
             t("lib_freed", size=store.human_size(st.session_state.pop("mt_freed")))
         )
-    if "_pick_err" in st.session_state:
-        st.warning(st.session_state.pop("_pick_err"))
+    _pe = state.pop_pick_err()
+    if _pe is not None:
+        st.warning(_pe)
     if "_added" in st.session_state:
         st.toast(t("lib_added", name=st.session_state.pop("_added")))
     if "_dl_done" in st.session_state:
@@ -520,7 +499,9 @@ def render(ctx) -> None:
     if "_dl_err" in st.session_state:
         _show_error(t, st.session_state.pop("_dl_err"))
 
-    # the title row: heading, Refresh / setup and Add match on the right
+
+def _title_row(t) -> None:
+    """The title row: heading, Refresh / setup and Add match on the right."""
     with st.container(horizontal=True, gap="small", vertical_alignment="center"):
         st.subheader(t("mt_title"))
         if not sources.steam.helper_installed():
@@ -539,6 +520,29 @@ def render(ctx) -> None:
             width="content",
         )
         _add_match(t)
+
+
+def _run_flagged_download(t, rows) -> None:
+    """The flagged download runs now - the table already showed its busy
+    state, the status/progress line under it tracks the real numbers."""
+    if not st.session_state.get("mt_dl"):
+        return
+    key = st.session_state["mt_dl"]
+    row = next((r for r in rows if r.key == key), None)
+    if row is not None and row.rec is not None:
+        _download(t, row.rec)
+    else:
+        st.session_state.pop("mt_dl", None)
+
+
+def render(ctx) -> None:
+    t = ctx.t
+    _load_url_filters()
+    accounts = store.read_accounts()
+    if st.session_state.get("mt_refresh"):
+        _refresh(t, accounts.get("match_count") or sm.DEFAULT_MATCH_COUNT)
+    _notices(t)
+    _title_row(t)
 
     rows = core.build_rows(
         _all_records(), store.list_demos(), stats_of=core.matchstats.cached_stats
@@ -572,14 +576,5 @@ def render(ctx) -> None:
             ),
         )
     _clear_control(t)
-
-    # the flagged download runs now - the table already showed its busy
-    # state, the status/progress line under it tracks the real numbers
-    if st.session_state.get("mt_dl"):
-        key = st.session_state["mt_dl"]
-        row = next((r for r in rows if r.key == key), None)
-        if row is not None and row.rec is not None:
-            _download(t, row.rec)
-        else:
-            st.session_state.pop("mt_dl", None)
+    _run_flagged_download(t, rows)
     _sync_url_filters()

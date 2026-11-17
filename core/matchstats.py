@@ -76,7 +76,7 @@ def compute(demo, me_sid: str, played_at: datetime | None = None) -> dict:
     impact = impact_stats(demo)
     irow = impact[impact["sid"] == me_sid]
 
-    def _num(col, cast=float):
+    def _cell(col, cast=float):
         if not len(row) or col not in row.columns:
             return None
         v = row[col].iloc[0]
@@ -118,8 +118,8 @@ def compute(demo, me_sid: str, played_at: datetime | None = None) -> dict:
         except (TypeError, ValueError):
             return None
 
-    kills = _num("kills", int)
-    deaths = _num("deaths", int)
+    kills = _cell("kills", int)
+    deaths = _cell("deaths", int)
     return {
         "version": STATS_VERSION,
         "map": demo.header.get("map_name") or None,
@@ -128,10 +128,10 @@ def compute(demo, me_sid: str, played_at: datetime | None = None) -> dict:
         "result": result,
         "kills": kills,
         "deaths": deaths,
-        "kd": _num("kd_ratio"),
+        "kd": _cell("kd_ratio"),
         "adr": adr,
-        "hs_pct": _num("hs_kills"),
-        "accuracy": _num("accuracy"),
+        "hs_pct": _cell("hs_kills"),
+        "accuracy": _cell("accuracy"),
         "open_win_pct": _impact("open_rate"),
         "me_sid": me_sid,
         "played_at": played_at.isoformat() if played_at else None,

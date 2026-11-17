@@ -306,16 +306,10 @@ def _entry(file: str, digest: str, size: int, orig: str, stem: str) -> dict:
     }
 
 
-def _sync() -> list[dict]:
-    """
-    The library as it is on disk: entries whose file vanished are dropped,
-    files copied into demos/ by hand are adopted (named with an id marker so
-    the caches can find them), duplicates of a known demo are ignored.
-    """
-    entries = _read_library()
-    d = demos_dir()
+def _scan_demo_files(d: str) -> dict | None:
+    """The demo files on disk (None when the folder cannot be read)."""
     try:
-        files = {
+        return {
             f.name: f
             for f in os.scandir(d)
             if f.is_file()
@@ -323,18 +317,28 @@ def _sync() -> list[dict]:
             and f.name.lower().endswith(DEMO_EXTS)
         }
     except OSError:
-        return entries
+        return None
+
+
+def _keep_entries(entries: list[dict], files: dict) -> tuple[list[dict], set[str]]:
+    """Entries that still exist: a copy whose file vanished leaves the
+    list; a LINKED demo stays (it is shown as missing so the user can
+    locate it again)."""
     kept: list[dict] = []
     ids: set[str] = set()
     for e in entries:
         if e["id"] in ids:
             continue
-        # a copy whose file vanished leaves the list; a LINKED demo stays (it is
-        # shown as missing so the user can locate it again)
         if e.get("path") or e.get("file") in files:
             kept.append(e)
             ids.add(e["id"])
-    changed = len(kept) != len(entries)
+    return kept, ids
+
+
+def _adopt_files(d: str, files: dict, kept: list[dict], ids: set[str]) -> None:
+    """Files copied into demos/ by hand are adopted (named with an id
+    marker so the caches can find them); duplicates of a known demo are
+    ignored."""
     known = {e["file"] for e in kept if e.get("file")}
     linked = {os.path.normcase(e["path"]) for e in kept if e.get("path")}
     for name, f in sorted(files.items()):
@@ -357,6 +361,24 @@ def _sync() -> list[dict]:
                 target = name
         kept.append(_entry(target, digest, size, name, _safe(stem)))
         ids.add(digest[:16])
+
+
+def _sync() -> list[dict]:
+    """
+    The library as it is on disk: entries whose file vanished are dropped,
+    files copied into demos/ by hand are adopted (named with an id marker so
+    the caches can find them), duplicates of a known demo are ignored.
+    """
+    entries = _read_library()
+    d = demos_dir()
+    files = _scan_demo_files(d)
+    if files is None:
+        return entries
+    kept, ids = _keep_entries(entries, files)
+    changed = len(kept) != len(entries)
+    before = len(kept)
+    _adopt_files(d, files, kept, ids)
+    if len(kept) != before:
         changed = True
     if changed:
         _write_library(kept)
@@ -501,19 +523,19 @@ def add_demo(source, name: str | None = None) -> dict:
                 out.write(chunk)
                 size += len(chunk)
     except BaseException:
-        _remove(part)
+        _unlink_freed(part)
         raise
     finally:
         if close:
             fh.close()
     if size == 0:
-        _remove(part)
+        _unlink_freed(part)
         raise ValueError("The file is empty.")
     digest = h.hexdigest()
     entries = _sync()
     for e in entries:
         if e["id"] == digest[:16]:
-            _remove(part)
+            _unlink_freed(part)
             touch(e["id"])
             return get_demo(e["id"]) or e
     stem, ext = split_demo_name(name)
@@ -546,7 +568,7 @@ def update_meta(demo_id: str, **fields) -> None:
     _update(demo_id, **fields)
 
 
-def _remove(path: str) -> int:
+def _unlink_freed(path: str) -> int:
     try:
         n = os.path.getsize(path)
         os.remove(path)
@@ -574,7 +596,7 @@ def delete_demo(demo_id: str) -> int:
             link_id(os.path.realpath(hit["path"]))[:8],
         }
     else:
-        freed += _remove(demo_path(hit))
+        freed += _unlink_freed(demo_path(hit))
         keys = {demo_key(hit["file"]) or demo_id[:8]}
     for key in keys:
         for folder, pat in (
@@ -585,7 +607,7 @@ def delete_demo(demo_id: str) -> int:
             try:
                 for f in os.listdir(folder):
                     if pat.match(f):
-                        freed += _remove(os.path.join(folder, f))
+                        freed += _unlink_freed(os.path.join(folder, f))
             except OSError:
                 pass
     _write_library([e for e in entries if e["id"] != demo_id])
@@ -643,7 +665,7 @@ def read_parsed(path: str, code_ver: str):
         # pickle.load may raise anything (Python docs: arbitrary exceptions
         # from __setstate__) - the note records which cache was dropped and why
         log_note("cache", f"dropped unreadable parsed cache: {type(e).__name__}")
-        _remove(f)
+        _unlink_freed(f)
         return None
     try:
         os.utime(f)  # most recently used survives the pruning
@@ -666,14 +688,14 @@ def write_parsed(path: str, code_ver: str, obj, max_bytes: int | None = None) ->
         # OSError = a full disk (the analysis itself keeps working); the
         # pickling pair = obj suddenly unpicklable (a code change)
         log_note("cache", f"parsed cache write failed: {type(e).__name__}")
-        _remove(tmp)
+        _unlink_freed(tmp)
         return False
     id8 = os.path.basename(f).split("-")[0]
     try:
         for other in os.listdir(parsed_dir()):
             full = os.path.join(parsed_dir(), other)
             if other.startswith(f"{id8}-") and full != f:
-                _remove(full)
+                _unlink_freed(full)
     except OSError:
         pass
     prune_parsed(PARSED_MAX_BYTES if max_bytes is None else max_bytes)
@@ -696,7 +718,7 @@ def prune_parsed(max_bytes: int) -> int:
     for _mt, size, p in files:
         total += size
         if total > max_bytes:
-            freed += _remove(p)
+            freed += _unlink_freed(p)
     return freed
 
 
@@ -722,7 +744,7 @@ def read_matchstats(path: str, code_ver: str) -> dict | None:
             d = json.load(fh)
     except (OSError, ValueError) as e:
         log_note("cache", f"dropped unreadable match stats: {type(e).__name__}")
-        _remove(f)
+        _unlink_freed(f)
         return None
     return d if isinstance(d, dict) else None
 
@@ -740,14 +762,14 @@ def write_matchstats(path: str, code_ver: str, d: dict) -> bool:
     except (OSError, TypeError, ValueError) as e:
         # OSError = a full disk; TypeError/ValueError = d no longer JSON-able
         log_note("cache", f"match stats write failed: {type(e).__name__}")
-        _remove(tmp)
+        _unlink_freed(tmp)
         return False
     key = os.path.basename(f).split("-")[0]
     try:
         for other in os.listdir(matchstats_dir()):
             full = os.path.join(matchstats_dir(), other)
             if other.startswith(f"{key}-") and full != f:
-                _remove(full)
+                _unlink_freed(full)
     except OSError:
         pass
     return True
@@ -789,7 +811,7 @@ def clear_cache() -> int:
     for folder in (parsed_dir(), unpacked_dir(), matchstats_dir()):
         try:
             for n in os.listdir(folder):
-                freed += _remove(os.path.join(folder, n))
+                freed += _unlink_freed(os.path.join(folder, n))
         except OSError:
             pass
     return freed
@@ -801,7 +823,7 @@ def clear_icons() -> int:
     freed = 0
     try:
         for n in os.listdir(icons_dir()):
-            freed += _remove(os.path.join(icons_dir(), n))
+            freed += _unlink_freed(os.path.join(icons_dir(), n))
     except OSError:
         pass
     return freed

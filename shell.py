@@ -24,19 +24,23 @@ import context
 import core
 import i18n
 import nativedialog
+import state
 import store
 import ui.format
 from context import _status, get_demo, get_duels, get_shots
 
 # ------------------------------------------------------------- navigation
-# The two-level model: `page` is the sidebar level; `match` (a library demo
-# id) and `match_tab` live inside the Matches page - a match is always
-# opened FROM the list, never from the sidebar.
-NAV_PAGES = ("dashboard", "matches", "settings", "guide")
-MATCH_TABS = ("overview", "shooting", "duels", "map", "replay")
-# ids of the pre-sidebar navigation: match tabs today (the Timeline page was
-# folded into Duels long before the sidebar)
-_LEGACY_PAGES = {"overview", "shooting", "duels", "map", "replay", "timeline"}
+# The two-level model lives in state.py (the registry): `page` is the
+# sidebar level; `match` (a library demo id) and `match_tab` live inside
+# the Matches page - a match is always opened FROM the list, never from
+# the sidebar. Re-exported here: tests and the sidebar read shell.NAV_*.
+NAV_PAGES = state.NAV_PAGES
+MATCH_TABS = state.MATCH_TABS
+_LEGACY_PAGES = state.LEGACY_PAGES
+go_page = state.go_page
+go_match = state.go_match
+go_tab = state.go_tab
+leave_match = state.leave_match
 
 NAV_ICONS = {
     "dashboard": ":material/dashboard:",
@@ -57,7 +61,7 @@ def preserve_analysis_settings() -> None:
     session or a hand-edited state may carry. On the Settings page the
     widgets render and own the keys themselves - assigning here would trip
     Streamlit's "default value + session state" warning."""
-    if st.session_state.get("page") == "settings":
+    if state.get_page() == "settings":
         return
     for k, cast in (
         ("thr", int),
@@ -70,37 +74,6 @@ def preserve_analysis_settings() -> None:
         except (TypeError, ValueError):
             v = ANALYSIS_DEFAULTS[k]
         st.session_state[k] = v
-
-
-def go_page(page: str) -> None:
-    """The one switch for the top level (the sidebar buttons)."""
-    st.session_state["page"] = page if page in NAV_PAGES else "matches"
-    if st.session_state["page"] == "matches":
-        # the nav item means the LIST; an open match is left via its own
-        # back button, so the item always lands on the list
-        st.session_state.pop("match", None)
-
-
-def go_match(demo_id: str, tab: str = "overview") -> None:
-    """The one way to open a match: a list row, a fresh download. No other
-    code may set `match` / `demo_id` by hand."""
-    st.session_state["page"] = "matches"
-    st.session_state["match"] = demo_id
-    st.session_state["demo_id"] = demo_id
-    st.session_state["demo_change"] = False
-    if tab in MATCH_TABS:
-        st.session_state["match_tab"] = tab
-
-
-def leave_match() -> None:
-    """«← Матчи»: back to the list; its filters and the loaded demo stay."""
-    st.session_state.pop("match", None)
-
-
-def go_tab(tab: str) -> None:
-    """Switch the tab of the open match (the duel window -> 2D replay)."""
-    if tab in MATCH_TABS and st.session_state.get("match"):
-        st.session_state["match_tab"] = tab
 
 
 def parse_nav_params(params) -> dict:
@@ -130,23 +103,23 @@ def load_nav_url() -> None:
     st.session_state["nav_url_loaded"] = True
     nav = parse_nav_params(st.query_params)
     if nav["page"]:
-        st.session_state["page"] = nav["page"]
+        state.set_page(nav["page"])
     if nav["match_tab"]:
-        st.session_state["match_tab"] = nav["match_tab"]
+        state.set_match_tab(nav["match_tab"])
     if nav["match"] and store.get_demo(nav["match"]) is not None:
         # only a match that still exists opens; m implies the match view
-        st.session_state["match"] = nav["match"]
-        st.session_state["demo_id"] = nav["match"]
-        st.session_state["page"] = "matches"
+        state.set_match(nav["match"])
+        state.set_demo_id(nav["match"])
+        state.set_page("matches")
 
 
 def sync_nav_url() -> None:
     """Keep `?p&m&tab` in step with the session (bookmark / share / reload).
     Defaults are dropped so the URL stays clean; the analysis filters keep
     their own `?f=` (filters_ui)."""
-    page = st.session_state.get("page") or "matches"
-    match = st.session_state.get("match")
-    tab = st.session_state.get("match_tab") or "overview"
+    page = state.get_page()
+    match = state.get_match()
+    tab = state.get_match_tab()
     want: dict[str, str] = {}
     if page != "matches":
         want["p"] = page
@@ -170,36 +143,36 @@ def migrate_nav() -> None:
     last opened demo; none yet -> the plain list), and keep `match_tab`
     alive while its widget is not rendered (Streamlit would drop it).
     """
-    page = st.session_state.get("page")
+    page = st.session_state.get(state.PAGE)
     if page in _LEGACY_PAGES:
-        st.session_state["match_tab"] = "duels" if page == "timeline" else page
-        st.session_state["page"] = "matches"
+        state.set_match_tab("duels" if page == "timeline" else page)
+        state.set_page("matches")
     elif page not in NAV_PAGES:
-        st.session_state["page"] = "matches"
-    if st.session_state.get("match_tab") not in MATCH_TABS:
-        st.session_state["match_tab"] = "overview"
+        state.set_page("matches")
+    if st.session_state.get(state.MATCH_TAB) not in MATCH_TABS:
+        state.set_match_tab("overview")
     if (
         page in _LEGACY_PAGES
-        and st.session_state.get("page") == "matches"
-        and st.session_state.get("match") is None
+        and state.get_page() == "matches"
+        and state.get_match() is None
     ):
         # an old link says WHICH TAB; the last opened demo says which match
-        state = core.load_state()
-        last = state.get("last_demo")
+        saved = core.load_state()
+        last = saved.get("last_demo")
         if last and store.get_demo(last) is not None:
-            go_match(last, st.session_state["match_tab"])
+            go_match(last, state.get_match_tab())
     # the match_tab widget only renders inside the match view: re-assign so
     # Streamlit does not drop the key on the other pages (same trick as
     # filters_ui.preserve_filters)
-    st.session_state["match_tab"] = st.session_state.get("match_tab") or "overview"
-    st.session_state["page"] = st.session_state.get("page") or "matches"
+    state.set_match_tab(state.get_match_tab())
+    state.set_page(state.get_page())
 
 
 def sidebar(ctx) -> None:
     """The navigation rail: app title, the nav items, the language."""
-    t = i18n.make_t(st.session_state.get("lang", next(iter(i18n.LANGS))))
+    t = i18n.make_t(state.get_lang() or next(iter(i18n.LANGS)))
     context.set_t(t)
-    page = st.session_state.get("page") or "matches"
+    page = state.get_page()
 
     with st.sidebar:
         # the keys stay STABLE across pages (nav_<id> only) and every item
@@ -262,7 +235,7 @@ def match_shell(ctx) -> None:
     match chips and the match tabs. The analysis filter bar joins the same
     sticky container below the tabs (filters_ui reuses ctx.hdr)."""
     t = ctx.t
-    entry = store.get_demo(st.session_state["match"]) or {}
+    entry = store.get_demo(state.get_match()) or {}
     m = entry.get("match") or {}
     score = m.get("score") if isinstance(m.get("score"), (list, tuple)) else None
     result = m.get("result")
@@ -293,7 +266,7 @@ def match_shell(ctx) -> None:
             st.markdown(_chips(t, entry, m), unsafe_allow_html=True)
         # the segmented control of the OLD nav: here it only switches the
         # match tab. st.tabs executes EVERY tab body on every rerun; a
-        # segmented control bound to session_state["match_tab"] renders
+        # segmented control bound to the registry key `match_tab` renders
         # only the active one, and code can switch it (the duel window's
         # "show in 2D replay" button does).
         tab = (
@@ -412,8 +385,8 @@ def confirm_delete(did: str) -> None:
     for k in ("demo_id", "demo_loaded"):
         if st.session_state.get(k) == did:
             st.session_state.pop(k, None)
-    if st.session_state.get("match") == did:
-        st.session_state.pop("match", None)
+    if state.get_match() == did:
+        state.clear_match()
     st.session_state["_freed"] = freed
 
 
@@ -435,15 +408,65 @@ def locate_demo(t, did: str) -> None:
         t("lib_locate"), t("lib_dialog_demos"), t("lib_dialog_all")
     )
     if chosen is None:
-        st.session_state["_pick_err"] = t("lib_no_dialog")
+        state.set_pick_err(t("lib_no_dialog"))
     elif chosen:
         try:
             store.relink(did, chosen[0])
         except (ValueError, OSError) as e:
-            st.session_state["_pick_err"] = str(e)
+            state.set_pick_err(str(e))
             return
-        if st.session_state.get("demo_loaded") == did:
-            st.session_state.pop("demo_loaded")  # load it again from the new place
+        if state.get_demo_loaded() == did:
+            st.session_state.pop(state.DEMO_LOADED)  # load it again from the new place
+
+
+def _lib_entry_row(t, e: dict) -> None:
+    """One library entry: the name/size line and the remove / delete
+    buttons its mode allows (a linked demo only drops the list entry)."""
+    c1, c2 = st.columns([5, 3], vertical_alignment="center")
+    warn = ":material/warning: " if e["status"] == "missing" else ""
+    kind = t("lib_badge_link") if e["mode"] == "link" else t("lib_badge_copy")
+    c1.markdown(
+        f"{warn}**{e['name']}** · {e.get('map') or '—'} · "
+        f"{store.human_size(e['size'])} · {kind}"
+    )
+    if e["mode"] == "link":
+        # a linked demo: only the list entry goes, the user's file stays
+        c1.caption(e["path"])
+        if e["status"] == "missing":
+            c2.button(
+                t("lib_locate"),
+                key=f"loc_{e['id']}",
+                on_click=locate_demo,
+                args=(t, e["id"]),
+            )
+        c2.button(
+            t("lib_remove"),
+            key=f"rm_{e['id']}",
+            on_click=confirm_delete,
+            args=(e["id"],),
+            help=t("lib_remove_help"),
+        )
+    elif st.session_state.get("del_pending") == e["id"]:
+        c2.button(
+            t("lib_delete_yes"),
+            key=f"delyes_{e['id']}",
+            on_click=confirm_delete,
+            args=(e["id"],),
+            type="primary",
+        )
+        c2.button(
+            t("lib_delete_no"),
+            key=f"delno_{e['id']}",
+            on_click=_cancel_delete,
+        )
+    else:
+        c2.button(
+            t("lib_delete"),
+            key=f"del_{e['id']}",
+            on_click=_ask_delete,
+            args=(e["id"],),
+            help=t("lib_delete_help"),
+        )
 
 
 def library_panel(t, entries: list[dict]) -> None:
@@ -469,51 +492,7 @@ def library_panel(t, entries: list[dict]) -> None:
     )
     st.caption(t("lib_by_hand"))
     for e in entries:
-        c1, c2 = st.columns([5, 3], vertical_alignment="center")
-        warn = ":material/warning: " if e["status"] == "missing" else ""
-        kind = t("lib_badge_link") if e["mode"] == "link" else t("lib_badge_copy")
-        c1.markdown(
-            f"{warn}**{e['name']}** · {e.get('map') or '—'} · "
-            f"{store.human_size(e['size'])} · {kind}"
-        )
-        if e["mode"] == "link":
-            # a linked demo: only the list entry goes, the user's file stays
-            c1.caption(e["path"])
-            if e["status"] == "missing":
-                c2.button(
-                    t("lib_locate"),
-                    key=f"loc_{e['id']}",
-                    on_click=locate_demo,
-                    args=(t, e["id"]),
-                )
-            c2.button(
-                t("lib_remove"),
-                key=f"rm_{e['id']}",
-                on_click=confirm_delete,
-                args=(e["id"],),
-                help=t("lib_remove_help"),
-            )
-        elif st.session_state.get("del_pending") == e["id"]:
-            c2.button(
-                t("lib_delete_yes"),
-                key=f"delyes_{e['id']}",
-                on_click=confirm_delete,
-                args=(e["id"],),
-                type="primary",
-            )
-            c2.button(
-                t("lib_delete_no"),
-                key=f"delno_{e['id']}",
-                on_click=_cancel_delete,
-            )
-        else:
-            c2.button(
-                t("lib_delete"),
-                key=f"del_{e['id']}",
-                on_click=_ask_delete,
-                args=(e["id"],),
-                help=t("lib_delete_help"),
-            )
+        _lib_entry_row(t, e)
     st.button(
         t("lib_clear"),
         key="lib_clear",
@@ -535,73 +514,49 @@ def library_panel(t, entries: list[dict]) -> None:
         )
 
 
-def open_demo(ctx) -> None:
-    """
-    Load the open match's demo and build the cached base tables.
-
-    Adding demos lives on the Matches page, the library on Settings; a
-    match is always opened through go_match (which sets demo_id), so this
-    only resolves the entry, says a clear word about a missing file, and
-    loads.
-    """
-    t = ctx.t
-    thr = ctx.thr
-    window_s = ctx.window_s
-    safe_dist = ctx.safe_dist
-    strict_dist = ctx.strict_dist
-
-    state = core.load_state()
-    lib = store.list_demos()
+def _resolve_demo_id(saved: dict, lib: list) -> None:
+    """Defensive: a demo_id this library does not have (deleted in
+    Settings mid-session) falls back to the last opened one."""
     by_id = {e["id"]: e for e in lib}
-    _loaded_id = st.session_state.get("demo_loaded")
+    if lib and (state.get_demo_id() or "") not in by_id:
+        _last = saved.get("last_demo")
+        state.set_demo_id(_last if _last in by_id else lib[0]["id"])
 
-    if lib and st.session_state.get("demo_id") not in by_id:
-        # defensive: a demo_id this library does not have (deleted in
-        # Settings mid-session) falls back to the last opened one
-        _last = state.get("last_demo")
-        st.session_state["demo_id"] = _last if _last in by_id else lib[0]["id"]
 
-    entry = by_id[st.session_state["demo_id"]]
-    if entry["status"] == "missing":
-        # a linked demo whose file is gone: a clear card with the three
-        # ways out (locate it, drop the entry, back to the list), not a crash
-        with st.container(border=True):
-            st.error(t("lib_missing", path=entry["path"]))
-            m1, m2, m3 = st.columns(3)
-            m1.button(
-                t("lib_locate"),
-                key="lib_locate",
-                on_click=locate_demo,
-                args=(t, entry["id"]),
-            )
-            m2.button(
-                t("lib_remove"),
-                key="lib_remove_missing",
-                on_click=confirm_delete,
-                args=(entry["id"],),
-                help=t("lib_remove_help"),
-            )
-            m3.button(
-                t("back_to_matches"),
-                key="mt_back_missing",
-                icon=":material/arrow_back:",
-                on_click=leave_match,
-            )
-        st.stop()
-    src = store.demo_path(entry)
-    try:
-        path = core.decompressed_demo(src, tag=entry["id"][:8])
-    except ValueError as e:
-        st.error(t("load_failed"))
-        st.caption(str(e))
-        st.stop()
-    mtime = os.path.getmtime(path)
+def _missing_demo_card(t, entry: dict) -> None:
+    """A linked demo whose file is gone: a clear card with the three
+    ways out (locate it, drop the entry, back to the list), not a crash."""
+    with st.container(border=True):
+        st.error(t("lib_missing", path=entry["path"]))
+        m1, m2, m3 = st.columns(3)
+        m1.button(
+            t("lib_locate"),
+            key="lib_locate",
+            on_click=locate_demo,
+            args=(t, entry["id"]),
+        )
+        m2.button(
+            t("lib_remove"),
+            key="lib_remove_missing",
+            on_click=confirm_delete,
+            args=(entry["id"],),
+            help=t("lib_remove_help"),
+        )
+        m3.button(
+            t("back_to_matches"),
+            key="mt_back_missing",
+            icon=":material/arrow_back:",
+            on_click=leave_match,
+        )
+    st.stop()
 
-    # ----------------------------------------------------------------- load
-    # The progress plate is created only while this exact file is not loaded
-    # yet; every later rerun skips it, so the compact header row sits at the
-    # top instead of the "Demo loaded" box.
-    fresh_load = entry["id"] != _loaded_id
+
+def _load_or_stop(t, path: str, mtime: float, fresh_load: bool):
+    """get_demo with the loading-status plate; st.stop()s on failure.
+
+    The progress plate is created only while this exact file is not loaded
+    yet; every later rerun skips it, so the compact header row sits at the
+    top instead of the "Demo loaded" box."""
     status = st.status(t("loading")) if fresh_load else None
     _status["box"] = status
     try:
@@ -624,12 +579,49 @@ def open_demo(ctx) -> None:
         st.caption(str(e))
         st.stop()
     _status["box"] = None
-
     if demo.players.empty:
         if status is not None:
             status.update(label=t("load_failed"), state="error")
         st.error(t("err_no_events"))
         st.stop()
+    return demo, status
+
+
+def open_demo(ctx) -> None:
+    """
+    Load the open match's demo and build the cached base tables.
+
+    Adding demos lives on the Matches page, the library on Settings; a
+    match is always opened through go_match (which sets demo_id), so this
+    only resolves the entry, says a clear word about a missing file, and
+    loads.
+    """
+    t = ctx.t
+    thr = ctx.thr
+    window_s = ctx.window_s
+    safe_dist = ctx.safe_dist
+    strict_dist = ctx.strict_dist
+
+    saved = core.load_state()
+    lib = store.list_demos()
+    by_id = {e["id"]: e for e in lib}
+    _loaded_id = state.get_demo_loaded()
+    _resolve_demo_id(saved, lib)
+
+    entry = by_id[state.get_demo_id() or ""]
+    if entry["status"] == "missing":
+        _missing_demo_card(t, entry)
+    src = store.demo_path(entry)
+    try:
+        path = core.decompressed_demo(src, tag=entry["id"][:8])
+    except ValueError as e:
+        st.error(t("load_failed"))
+        st.caption(str(e))
+        st.stop()
+    mtime = os.path.getmtime(path)
+
+    fresh_load = entry["id"] != _loaded_id
+    demo, status = _load_or_stop(t, path, mtime, fresh_load)
 
     # remember what this demo is (map, tick rate, players) in the library, mark
     # it as the latest opened and make it the one that opens next time
@@ -642,13 +634,12 @@ def open_demo(ctx) -> None:
         tickrate=int(demo.tickrate),
         players=[str(n) for n in demo.players["name"]],
     )
-    if state.get("last_demo") != entry["id"]:
-        state["last_demo"] = entry["id"]
-        core.save_state(state)
+    if saved.get("last_demo") != entry["id"]:
+        saved["last_demo"] = entry["id"]
+        core.save_state(saved)
     # the demo is now loaded: remember it and fold the "Change demo" panel
-    st.session_state["demo_loaded"] = entry["id"]
+    state.set_demo_loaded(entry["id"])
     if fresh_load:
-        st.session_state["demo_change"] = False
         # fold the loading UI into the compact header immediately: without
         # this the loading state stays on screen until the next interaction
         st.rerun()
@@ -659,7 +650,7 @@ def open_demo(ctx) -> None:
     shots = get_shots(path, mtime, thr, safe_dist, strict_dist)
     duels_all = get_duels(path, mtime, window_s)
 
-    ctx.state = state
+    ctx.state = saved
     ctx.status = status
     ctx.entry = entry
     ctx.demo = demo
@@ -669,15 +660,9 @@ def open_demo(ctx) -> None:
     ctx.duels_all = duels_all
 
 
-def context_bar(ctx) -> None:
-    """The compact header: demo info, the player row, the excluded rounds."""
-    t = ctx.t
-    demo = ctx.demo
-    entry = ctx.entry
-    state = ctx.state
-
-    # the compact demo row: one line with what matters about the file (the
-    # way out is "← Матчи" in the sticky header, not a change-demo button)
+def _demo_info_line(entry: dict, demo: core.Demo, t) -> None:
+    """The compact demo row: one line with what matters about the file (the
+    way out is "← Матчи" in the sticky header, not a change-demo button)."""
     info = [f"**{entry['name']}**"]
     if demo.header.get("map_name"):
         info.append(f"**{t('map')}:** {demo.header['map_name']}")
@@ -691,7 +676,9 @@ def context_bar(ctx) -> None:
     with st.container(horizontal=True, gap="small", vertical_alignment="center"):
         st.caption(" · ".join(info))
 
-    # pre-match rounds that were dropped (knife round / warmup / restarts)
+
+def _excluded_line(demo: core.Demo, t) -> None:
+    """Pre-match rounds that were dropped (knife round / warmup / restarts)."""
     _excl = getattr(demo, "excluded", {}) or {}
     _excl_parts = []
     if _excl.get("warmup"):
@@ -707,6 +694,11 @@ def context_bar(ctx) -> None:
             unsafe_allow_html=True,
         )
 
+
+def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
+    """The compact player row: [label] [prev] [selectbox] [next]. Up/Down
+    are the player keys: the Duels page uses Left/Right and
+    Shift+Left/Right, so the three steppers never collide."""
     name_of = dict(zip(demo.players["sid"], demo.players["name"]))
     team_of = dict(zip(demo.players["sid"], demo.players["team"]))
     plist = demo.players.assign(
@@ -714,22 +706,19 @@ def context_bar(ctx) -> None:
     ).sort_values(["team", "_n"])
     me_opts = plist["sid"].tolist()
     # preselect the remembered player (and drop a stale pick from another demo)
-    if st.session_state.get("me") not in me_opts:
-        last = state.get("last_player")
-        st.session_state["me"] = last if last in me_opts else me_opts[0]
+    if state.get_me() not in me_opts:
+        last = saved.get("last_player")
+        state.set_me(last if last in me_opts else me_opts[0])
 
     def _me_step(delta: int):
         """Buttons/hotkeys cycle the player selectbox (wraps around)."""
-        cur = st.session_state.get("me")
+        cur = state.get_me()
         if cur in me_opts:
             i = (me_opts.index(cur) + delta) % len(me_opts)
         else:
             i = 0 if delta > 0 else len(me_opts) - 1
-        st.session_state["me"] = me_opts[i]
+        state.set_me(me_opts[i])
 
-    # One compact row: [Player label] [prev] [selectbox] [next]. Up/Down
-    # are the player keys: the Duels page uses Left/Right and
-    # Shift+Left/Right, so the three steppers never collide.
     with st.container(horizontal=True, gap="small", vertical_alignment="center"):
         st.caption(t("player"))
         st.button(
@@ -759,9 +748,18 @@ def context_bar(ctx) -> None:
             width="content",
             type="tertiary",
         )
-    if state.get("last_player") != me:
-        state["last_player"] = me
-        core.save_state(state)
+    if saved.get("last_player") != me:
+        saved["last_player"] = me
+        core.save_state(saved)
 
     ctx.me = me
     ctx.name_of = name_of
+
+
+def context_bar(ctx) -> None:
+    """The compact header: demo info, the player row, the excluded rounds."""
+    demo = ctx.demo
+    t = ctx.t
+    _demo_info_line(ctx.entry, demo, t)
+    _excluded_line(demo, t)
+    _player_row(ctx, ctx.state, demo, t)

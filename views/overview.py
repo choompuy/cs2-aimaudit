@@ -2,6 +2,8 @@
 
 import streamlit as st
 
+import state
+
 from ui import icons
 from ui import schema
 
@@ -75,7 +77,7 @@ def render(ctx) -> None:
     def _pick_player_row(i):
         """Grid row click -> select that player (callback, runs before widgets)."""
         if 0 <= i < len(ov_sids):
-            st.session_state["me"] = ov_sids[i]
+            state.set_me(ov_sids[i])
 
     schema.table(
         "overview",

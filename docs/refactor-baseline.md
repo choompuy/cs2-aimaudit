@@ -182,6 +182,191 @@ test counts 551 / 98 / 74 / 423 (+2 net: −3 `add_folder`, +5 `log_note`);
 payload goldens byte-identical; `api_snapshot` regenerated on purpose
 (`replay_data`, `_live_freeze_ends` gone, `TYPE_CHECKING` import visible).
 
+## Stage 3 — diagnostics: state loss (fix commits)
+
+The random walk (`tests/walk_app.py`, 3 seeds × 60 actions in CI) and the
+Streamlit-trap audit found ONE real defect family: **widget state lost on
+page switch**. Every page-local toggle / segmented control / select that
+did not render on other pages lost its value when the user navigated away
+(Streamlit drops the state of widgets a run does not render):
+
+- `ov_full`, `du_full`, `sh_all` (the Basic/Full column switches), the
+  Map page's `map_show` / `map_level` / `map_lines`, and the Matches list
+  filters `mflt_period` / `mflt_result` / `mflt_mode` / `mflt_src` all
+  reset after a round-trip through another page;
+- fixed with `persist_state="session"` (Streamlit ≥ 1.46): widget keys
+  unchanged, smoke scenarios keep working, values now survive the trip;
+- the Map page's manual `st.session_state.setdefault("map_show", ...)`
+  workaround became redundant and was removed.
+
+`walk_app.py` asserts after every action: no `at.exception`, no `st.error`
+output, no "value not among the options" mismatches. `smoke_app.py`
+gained the state-loss regression scenarios (a toggle survives a page
+round-trip; `ov_full` kept across a demo switch). CI runs the walk
+(3 seeds × 60) on every push, `--full` (5 × 250) on schedule.
+
+**Verification**: 551 / 98 / 74 / 471 (smoke +48 checks); the
+`overview_all_ru` golden regenerated ON PURPOSE (with `ov_full` now
+persisting, the full-columns table renders where it previously reset).
+
+## Stage 4 — R1: one copy of each duplicated block (refactor)
+
+Behaviour-preserving; payload goldens byte-identical, `api_snapshot`
+regenerated only for the two new private names (`_parse_ticks_tiered`,
+`_events_in_window`).
+
+- `views/_shared.py` (new): `steam_cfg` + `show_error`, previously
+  identical in `views/matches.py` and `views/settings.py`; the trivial
+  pass-throughs `_accounts()` → `store.read_accounts()` and
+  `_provider_cache()` → `sources.read_cache()` are inlined.
+- `core/loader.py::_parse_ticks_tiered` (new): the "try prop-set tiers,
+  keep the last error" loop that `core/replay.py` (player telemetry,
+  round replay) and `core/loader.py` (`load_demo`) each had inline.
+- `ui/component.py` (new): `declare` + `event_callback`, the component
+  registration and the `on_*_change` closure that `ui/roundrep.py`,
+  `ui/strip.py`, `ui/table.py` each duplicated.
+- Same-name helpers disambiguated (each name now means ONE thing):
+  `replay._num(row,name)` → `_to_float`, `replay._num(r,name,nd)` →
+  `_rnd`, `matchstats._num(col,cast)` → `_cell` (all three were nested
+  locals with different semantics; `ui/table._num` keeps the name),
+  `ui/table._score` → `_grade` (colour quality; `matchlist._score`
+  keeps the name), `sources/http._remove` → `_unlink`, `store._remove`
+  → `_unlink_freed` (it returns bytes freed), `tools/fetch_radars`
+  `download` → `download_radar_set`.
+- `core/replay.py::_events_in_window` (new): the fires/deaths/hurts
+  window guard the three round-event blocks repeated.
+- `views/shooting.py::_events_popover` (new): the two Top-3 evidence
+  popovers (err / lost-first) collapsed into one parameterised helper.
+
+Test adjustments (names follow the rename, expectations untouched):
+`fetch_radars.download` → `download_radar_set` in `test_core.py`.
+
+## Stage 4b — R3: the session_state registry (refactor)
+
+`state.py` (new, 161 lines, a leaf like `store.py`): key-name constants,
+typed get_*/set_* for the keys shared by 2+ modules, and the navigation
+mutators `go_page`/`go_match`/`go_tab`/`leave_match` (moved from shell,
+re-exported there so `shell.go_*` callers and tests keep working).
+
+- Shared keys routed through the registry: `page`, `match`, `match_tab`,
+  `lang`, `me`, `du_open`, `tl_duel`, `demo_id`, `demo_loaded`,
+  `_pick_err`. No app module touches another module's key by a string
+  literal any more (ui/icons.py and ui/schema.py read `lang` through the
+  registry too, via a lazy import that keeps their bare-mode fallback).
+- `lang` and `me` are WIDGET-OWNED keys (the sidebar / player
+  selectboxes): the registry only reads them - a manual setter would
+  trip Streamlit's widget-state guard.
+- Dead state found while enumerating keys: `demo_change` was WRITE-ONLY
+  (nothing read it, at `5b3cdad` either) - the two writes are gone.
+- Local `state = core.load_state()` / `ctx.state` dicts inside
+  `shell.open_demo` / `shell.context_bar` renamed to `saved` (they
+  shadowed the new module and would have mis-fired at runtime).
+- `docs/ARCHITECTURE.md`: the module map and the "Navigation and state"
+  section now describe the registry; `check_ui` 12c gained a `state.py`
+  needle so the doc cannot rot.
+
+**Verification**: 551 / 98 / 74 / 471 checks green; walk 3 × 60 clean;
+payload goldens byte-identical; `api_snapshot` unchanged (state.py is
+not part of the core facade); vulture ≥80 %: 0.
+
+## Stage 5 — R2: split the monster functions (refactor, one per commit)
+
+### R2-1 `core/loader.py::load_demo` (was 472 lines, CC 128)
+
+Split into nine phase functions plus the live-match helpers; the public
+interface and `PARSE_VERSION` unchanged, `load_demo` is now a 55-line
+orchestrator:
+
+- `_parse_players` (players + id lookups + header), `_parse_events_frames`
+  (tiered event parse + steamid fixing), `_drop_warmup` +
+  `_exclude_preliminary` (live-match start / knife-round fallback, now
+  with `_round_bounds` / `_count_pre_live` / `_keep_from_tick` /
+  `_knife_fallback` / `_shift_first_round` and module-level
+  `_between` / `_has_gun_fire` / `_knife_only` / `_has_knife_death`),
+  `_filter_gun_events`, `_parse_tick_table`, `_parse_mouse`,
+  `_parse_totals`, `_build_rounds` (with `_round_mark_events` /
+  `_official_end_ticks` / `_named_event_windows` /
+  `_synthesize_round_bounds`).
+
+Complexity: F(125) → nothing above C(18); every extracted function ≤60
+lines except `_parse_events_frames` (75) and the pre-existing
+`decompressed_demo` (68), both under the 80-line cap with the reason in
+a comment. Goldens: payloads byte-identical; `api_snapshot` regenerated
+for the new private names only.
+
+### R2-2 `filters_ui.py::render` (was 454 lines, CC 96)
+
+Data + small renderers: `_filter_data` (what the demo offers),
+`_preset_options`, `_drop_stale_selections` + `_migrate_filter_state`
+(old links / clamping), `_round_kwargs` + `_resolve_filters`,
+`_active_chips`, `_keep_hidden_filter_keys`, `_card_controls_row1/row2`
+(the declarative control groups), `_render_open_card` /
+`_render_summary_row`, `_sync_filter_url`; the chip/preset/reset
+callbacks are factories closing over the run's n_rounds/halves.
+`render` is a 58-line orchestrator; widget keys, order and the URL pack
+unchanged. Max complexity C(17), nothing over 60 lines.
+
+### R2-3 `views/shooting.py::render` (was 408 lines, CC 89)
+
+Sections, each fed from a `_Stats` bundle computed once: `_duel_stats` +
+`_discipline_stats` + `_stats` (the numbers, incl. the thresholds),
+`_movement_tips` + `_discipline_tips` + `_build_tips` (the coaching
+engine), `_top3_card`, `_metric_tiles` + `_all_metrics_tiles`, `_charts`
++ `_risk_chart`, `_weapons_grid`. `render` is 12 lines. Widget keys and
+draw order unchanged (`sh_all` keeps persist_state="session"). Max
+complexity C(17); `_top3_card` (72) and `_all_metrics_tiles` (79) stay
+under the 80-line cap with the reason commented.
+
+### R2-4 `ui/roundrep.py::round_payload` (was 305 lines, CC 98)
+
+Payload assembly by sections: `_weapon_changes` / `_key_bits` /
+`_player_frames` (the per-player rows), `_duel_rows` (the duel rows with
+telemetry), `_round_bar` (the round bar + how the round ended),
+`_bomb_rows`, `_register_badges` (the status icons), `_radar_payload` /
+`_grid_bounds`, `_event_rows`, `_sel_and_at`, and the `_weapon_registry`
+factory (the shared weapon-name closure). `round_payload` keeps the
+interface docstring and the `_badge`/`_name`/`_pi` closures and is now
+C(17). The JS front-end golden test stays green (27 checks) and the
+payload goldens are byte-identical.
+
+### R2-5..R2-16 the rest of the D/E list and the 70+ functions
+
+Every function that ranked D or worse at the base is split (see the
+commit list): `ui/schema.validate` (F 63), `core/metrics.build_duels`
+(F 50), `ui/table.table_payload` (F 46), `core/checks.data_checks`
+(F 44), `core/matchlist.build_rows` (F 43), `core/metrics.impact_stats`
+(E 38), `views/duels.render` (E 33), `sources/steam._record` (E 32),
+`core/metrics.player_summary` (D 30), `views/replay._duel_figure` /
+`_duel_dialog` (D 28), `tools/inspect_rounds.inspect_demo` (D 24),
+`sources/steam_gc._parse_roundstats` (D 24), `shell.open_demo` (D 23),
+`store._sync` (D 22), `tools/fetch_icons.main` (D 21); then the long
+ones: `core/replay.round_replay_data` (120), `duel_telemetry` (102),
+`round_duels` (81), `mapview.build_figure` (133), `core/metrics.shots_table`
+(110), `core/checks.debug_report` (112), `player_summary` (83),
+`ui/roundrep.round_payload` (118), `views/replay._replay_fragment` (110),
+`views/matches.render` (86), `shell.library_panel` (87), `shell.context_bar`
+(96), `views/map._map_fragment` (89).
+
+After R2: radon rank D+ = **0** in app code (max C(19), the pre-existing
+`core/metrics.shots_table` and `core/checks._scoreboard_check`);
+functions >= 70 lines = **8**, each with a reason:
+
+- `core/filters.apply_filters` (72) - the documented filter chain, one
+  stage per line group; splitting it would hide the order.
+- `core/loader.decompressed_demo` (70) - the tiered decompress loop
+  (bz2/gz/zst/zip), one tier per block.
+- `core/loader._parse_events_frames` (80) - the documented prop-tier
+  fallback parse; the tiers are one unit and stay under the 80-line cap.
+- `core/matchstats.compute` (72) - the summary-metric chain, one metric
+  per line group.
+- `shell.open_demo` (71) - the orchestrator after R2-11 (the status
+  plate, missing-file card and load failures are helpers already).
+- `views/overview.render` (75) - the overview page body (one table call
+  plus its columns).
+- `views/shooting._top3_card` (76) / `_all_metrics_tiles` (79) - the
+  documented tile builders (one tile per line, under the 80-line cap,
+  reason commented in R2-3).
+
 ## Stage status
 
 - [x] 0. Baseline, goldens, `pick()` helper (this document)
@@ -190,9 +375,11 @@ payload goldens byte-identical; `api_snapshot` regenerated on purpose
       `tools/check_goldens.py` added to CI)
 - [x] 2. F3 dead code, F4 F821 annotations, F5 swallowed exceptions
       (this section)
-- [ ] 3. Diagnostics: random walk, Streamlit-trap audit, fix commits
-- [ ] 4. R1 duplicates, R3 state registry
-- [ ] 5. R2 split monster functions (by complexity, one per commit)
+- [x] 3. Diagnostics: state-loss fixes, `tests/walk_app.py` in CI
+      (this section)
+- [x] 4. R1 duplicates + R3 state registry (the two sections above)
+- [x] 5. R2 split monster functions (R2-1..R2-16; D+ = 0, >=70-line
+      functions = 8 with reasons)
 - [ ] 6. R5 test split, R4 i18n as data
 - [ ] 7. F6 doc numbers checked by test, F7 B023/B905
 - [ ] 8. Final report: before/after table

@@ -18,6 +18,7 @@ import streamlit as st
 import context
 import filters_ui
 import shell
+import state
 import store
 import theme
 import ui.format
@@ -64,9 +65,9 @@ def main() -> None:
     # the fmt helpers (ui/format.py) read the run's translator and names
     ui.format.configure(ctx.t, ctx.name_of)
 
-    page = st.session_state["page"]
-    if page == "matches" and st.session_state.get("match"):
-        if store.get_demo(st.session_state["match"]) is None:
+    page = state.get_page()
+    if page == "matches" and state.has_match():
+        if store.get_demo(state.get_match()) is None:
             # the match's demo left the library (deleted in Settings or by
             # hand): show the list instead of blowing up
             shell.leave_match()
@@ -112,7 +113,7 @@ def _match(ctx) -> None:
     if tab == "replay":
         views.replay.render(ctx)
     # a Duels row click asks for the duel window: it is a modal over the page
-    if tab == "duels" and st.session_state.pop("du_open", False):
+    if tab == "duels" and state.pop_du_open():
         views.replay.open_duel_dialog(ctx)
     views.extras.debug(ctx)
 

@@ -35,7 +35,13 @@ from core.model import (
 
 from core.filters import apply_filters
 
-from core.loader import _norm_alive, build_id_lookup, fix_ids, tickrate_from_header
+from core.loader import (
+    _norm_alive,
+    _parse_ticks_tiered,
+    build_id_lookup,
+    fix_ids,
+    tickrate_from_header,
+)
 
 from core.metrics import _enemy_kill_rows
 
@@ -212,7 +218,7 @@ def kill_points(demo: Demo, me: str, f: "Filters | None" = None) -> pd.DataFrame
     if not len(de):
         return empty
 
-    def _num(row, name):
+    def _to_float(row, name):
         v = pd.to_numeric(getattr(row, name, np.nan), errors="coerce")
         return float(v) if pd.notna(v) else np.nan
 
@@ -220,11 +226,11 @@ def kill_points(demo: Demo, me: str, f: "Filters | None" = None) -> pd.DataFrame
     for r in de.itertuples():
         killed = r.attacker_steamid == me
         mine, theirs = ("attacker", "user") if killed else ("user", "attacker")
-        mx, my = _num(r, f"{mine}_X"), _num(r, f"{mine}_Y")
+        mx, my = _to_float(r, f"{mine}_X"), _to_float(r, f"{mine}_Y")
         if np.isnan(mx) or np.isnan(my):
             continue
-        mz, ox = _num(r, f"{mine}_Z"), _num(r, f"{theirs}_X")
-        oy, oz = _num(r, f"{theirs}_Y"), _num(r, f"{theirs}_Z")
+        mz, ox = _to_float(r, f"{mine}_Z"), _to_float(r, f"{theirs}_X")
+        oy, oz = _to_float(r, f"{theirs}_Y"), _to_float(r, f"{theirs}_Z")
         rd = _safe_int(getattr(r, "round_idx", 0)) + 1
         dist = (
             float(
@@ -275,26 +281,94 @@ def timeline_data(
     ticks = list(
         range(tick - int(before_s * tickrate), tick + int(after_s * tickrate) + 1)
     )
-    df = None
-    last_err: Exception | None = None
-    for props in (
-        POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS,
-        POS + ["buttons"] + ALIVE_PROPS,
-        POS + ALIVE_PROPS,
-        POS,
-    ):
-        try:
-            df = parser.parse_ticks(props, ticks=ticks, players=[int(me)])
-            break
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-    if df is None:
-        raise last_err  # type: ignore[misc]
+    df = _parse_ticks_tiered(
+        parser,
+        (
+            POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS,
+            POS + ["buttons"] + ALIVE_PROPS,
+            POS + ALIVE_PROPS,
+            POS,
+        ),
+        ticks,
+        players=[int(me)],
+    )
     df = _decode_buttons(df)
     df = _norm_alive(df)
     df = _timeline_speed(df, tickrate)
     missing = [x for x in BUTTONS if x not in df.columns]
     return df.sort_values("tick").reset_index(drop=True), missing
+
+
+def _round_frames(parser, lo: int, hi: int, max_samples: int):
+    """Every player's frames on the uniform grid (<= max_samples points,
+    the UI interpolates): {sid: df}, the grid step and the key columns."""
+    step = max(1, -(-(hi - lo + 1) // max_samples))
+    grid = list(range(lo, hi + 1, step))
+    df = _parse_ticks_tiered(
+        parser,
+        (
+            POS
+            + BTN_NAMED
+            + ["buttons"]
+            + ALIVE_PROPS
+            + ["health", "active_weapon_name", "flash_duration"],
+            POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS + ["health"],
+            POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS,
+            POS + ALIVE_PROPS,
+            POS,
+        ),
+        grid,
+    )
+    # exact SteamIDs (the raw column is float-rounded), like every tick frame
+    flookup, name_to_sid = build_id_lookup(parser.parse_player_info())
+    df["steamid"] = fix_ids(
+        df["steamid"],
+        flookup,
+        df["name"] if "name" in df.columns else None,
+        name_to_sid,
+    )
+    df = _norm_alive(_decode_buttons(df))
+    frames: dict[str, pd.DataFrame] = {}
+    for sid, d in df.groupby("steamid", sort=False):
+        frames[str(sid)] = (
+            d.drop_duplicates("tick").sort_values("tick").reset_index(drop=True)
+        )
+    return frames, int(step), [k for k in BUTTONS if k in df.columns]
+
+
+def _round_events(demo: Demo, lo: int, hi: int):
+    """The round's shots / kills / hits (tick window, not the round column:
+    the window is already the round). Hits cover EVERY pair of the round -
+    the replay shows the whole round, teammate trades included."""
+    fires, deaths, hurts = demo.fires, demo.deaths, demo.hurts
+    out_shots: list[tuple[int, str, str]] = []
+    s = _events_in_window(fires, lo, hi, {"tick", "weapon"})
+    if s is not None:
+        sid_col = "sid" if "sid" in fires.columns else "user_steamid"
+        out_shots = [
+            (int(r.tick), str(getattr(r, sid_col)), norm_weapon(r.weapon))
+            for r in s.itertuples()
+        ]
+    out_kills: list[tuple[int, str, str, str, bool]] = []
+    d = _events_in_window(deaths, lo, hi, {"tick", "attacker_steamid", "user_steamid"})
+    if d is not None:
+        for r in d.itertuples():
+            out_kills.append(
+                (
+                    int(r.tick),
+                    str(r.attacker_steamid),
+                    str(r.user_steamid),
+                    norm_weapon(getattr(r, "weapon", "") or ""),
+                    bool(getattr(r, "headshot", False)),
+                )
+            )
+    out_hits: list[tuple[int, str, str]] = []
+    h = _events_in_window(hurts, lo, hi, {"tick", "attacker_steamid", "user_steamid"})
+    if h is not None:
+        for r in h.itertuples():
+            a, u = str(r.attacker_steamid), str(r.user_steamid)
+            out_hits.append((int(r.tick), a, u))
+    return out_shots, out_kills, out_hits
 
 
 def round_replay_data(
@@ -333,99 +407,12 @@ def round_replay_data(
     if hi <= lo:
         raise ValueError("no_round_data")
 
-    parser = DemoParser(demo.path)
-    fires, deaths, hurts = demo.fires, demo.deaths, demo.hurts
-
-    # ---- uniform grid (<= max_samples points, the UI interpolates) -------
-    step = max(1, -(-(hi - lo + 1) // max_samples))
-    grid = list(range(lo, hi + 1, step))
-
-    df = None
-    last_err: Exception | None = None
-    for props in (
-        POS
-        + BTN_NAMED
-        + ["buttons"]
-        + ALIVE_PROPS
-        + ["health", "active_weapon_name", "flash_duration"],
-        POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS + ["health"],
-        POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS,
-        POS + ALIVE_PROPS,
-        POS,
-    ):
-        try:
-            df = parser.parse_ticks(props, ticks=grid)
-            break
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-    if df is None:
-        raise last_err  # type: ignore[misc]
-    # exact SteamIDs (the raw column is float-rounded), like every tick frame
-    flookup, name_to_sid = build_id_lookup(parser.parse_player_info())
-    df["steamid"] = fix_ids(
-        df["steamid"],
-        flookup,
-        df["name"] if "name" in df.columns else None,
-        name_to_sid,
-    )
-    df = _norm_alive(_decode_buttons(df))
-
-    frames: dict[str, pd.DataFrame] = {}
-    for sid, d in df.groupby("steamid", sort=False):
-        frames[str(sid)] = (
-            d.drop_duplicates("tick").sort_values("tick").reset_index(drop=True)
-        )
-
-    # ---- events of the round (tick window, not the round column: the
-    # window is already the round) -----------------------------------------
-    out_shots: list[tuple[int, str, str]] = []
-    if (
-        fires is not None
-        and len(fires)
-        and "tick" in fires.columns
-        and "weapon" in fires.columns
-    ):
-        sid_col = "sid" if "sid" in fires.columns else "user_steamid"
-        s = fires[fires["tick"].between(lo, hi)]
-        out_shots = [
-            (int(r.tick), str(getattr(r, sid_col)), norm_weapon(r.weapon))
-            for r in s.itertuples()
-        ]
-    out_kills: list[tuple[int, str, str, str, bool]] = []
-    if (
-        deaths is not None
-        and len(deaths)
-        and {"tick", "attacker_steamid", "user_steamid"} <= set(deaths.columns)
-    ):
-        d = deaths[deaths["tick"].between(lo, hi)]
-        for r in d.itertuples():
-            out_kills.append(
-                (
-                    int(r.tick),
-                    str(r.attacker_steamid),
-                    str(r.user_steamid),
-                    norm_weapon(getattr(r, "weapon", "") or ""),
-                    bool(getattr(r, "headshot", False)),
-                )
-            )
-    out_hits: list[tuple[int, str, str]] = []
-    if (
-        hurts is not None
-        and len(hurts)
-        and {"tick", "attacker_steamid", "user_steamid"} <= set(hurts.columns)
-    ):
-        h = hurts[hurts["tick"].between(lo, hi)]
-        for r in h.itertuples():
-            a, u = str(r.attacker_steamid), str(r.user_steamid)
-            # every pair of the round: the replay shows the whole round
-            # (teammate trades too), not only the selected duelists
-            out_hits.append((int(r.tick), a, u))
-
-    keys = [k for k in BUTTONS if k in df.columns]
+    frames, step, keys = _round_frames(DemoParser(demo.path), lo, hi, max_samples)
+    out_shots, out_kills, out_hits = _round_events(demo, lo, hi)
     return {
         "t0": int(lo),
         "t1": int(hi),
-        "step": int(step),
+        "step": step,
         "tickrate": int(tickrate),
         "round": round_no,
         "frames": frames,
@@ -434,6 +421,74 @@ def round_replay_data(
         "kills": out_kills,
         "hits": out_hits,
         "info": dict((getattr(demo, "round_info", None) or {}).get(round_no) or {}),
+    }
+
+
+def _events_in_window(events, lo: int, hi: int, need: set):
+    """An event frame cut to the [lo, hi] tick window, or None when the
+    frame is absent/empty or misses columns (old demos) - the guard every
+    round-event block repeats."""
+    if events is None or not len(events) or not need <= set(events.columns):
+        return None
+    return events[events["tick"].between(lo, hi)]
+
+
+def _row_rnd(r, name: str, nd: int = 1):
+    """A row column as a finite float rounded to nd, else None."""
+    v = getattr(r, name, None)
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if not np.isfinite(f) else round(f, nd)
+
+
+def _row_tick(r, name: str):
+    v = getattr(r, name, None)
+    return None if v is None or pd.isna(v) else int(v)
+
+
+def _row_flag(r, name: str) -> bool:
+    """A duel modifier column (noscope, thrusmoke, ...): False when the
+    column is missing (an older demo) or NaN, never bool(NaN)."""
+    v = getattr(r, name, None)
+    try:
+        return False if v is None or pd.isna(v) else bool(v)
+    except (TypeError, ValueError):  # noqa: BLE001 - garbage: not a flag
+        return False
+
+
+def _duel_entry(r, t0: int, t1: int, tk: int, tr: int) -> dict:
+    """One round_duels entry: the duel's window bracket, the duelists and
+    the per-duelist numbers measured at each side's first shot."""
+    kft, vft = _row_tick(r, "killer_first_tick"), _row_tick(r, "victim_first_tick")
+    firsts = [x for x in (kft, vft) if x is not None]
+    start = min(firsts) if firsts else tk - tr
+    return {
+        "a": max(t0, start - int(0.75 * tr)),
+        "b": min(t1, tk + int(1.5 * tr)),
+        "tick": tk,
+        "killer": str(r.killer),
+        "victim": str(r.victim),
+        "weapon": str(r.weapon),
+        "hs": bool(r.headshot),
+        "dur": _row_rnd(r, "duration_s", 2),
+        "dist": _row_rnd(r, "distance", 0),
+        "first": str(getattr(r, "first", "") or ""),
+        # kill modifiers for the icons (wallbang / noscope / through
+        # smoke / a flashed attacker), when the demo carries them
+        "ns": _row_flag(r, "noscope"),
+        "sm": _row_flag(r, "thrusmoke"),
+        "bl": _row_flag(r, "attackerblind"),
+        "wb": _row_flag(r, "penetrated"),
+        "kft": kft,
+        "vft": vft,
+        "ksp": _row_rnd(r, "killer_speed", 0),
+        "vsp": _row_rnd(r, "victim_speed", 0),
+        "kerr": _row_rnd(r, "killer_err", 1),
+        "verr": _row_rnd(r, "victim_err", 1),
+        "kshots": _row_rnd(r, "killer_shots", 0),
+        "vshots": _row_rnd(r, "victim_shots", 0),
     }
 
 
@@ -461,68 +516,70 @@ def round_duels(
     t0, t1 = int(window[0]), int(window[1])
     d = duels[duels["tick"].between(t0, t1)].sort_values("tick", kind="stable")
     tr = max(int(tickrate), 1)
-
-    def _num(r, name, nd=1):
-        v = getattr(r, name, None)
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return None
-        return None if not np.isfinite(f) else round(f, nd)
-
-    def _tick(r, name):
-        v = getattr(r, name, None)
-        return None if v is None or pd.isna(v) else int(v)
-
-    def _flag(r, name) -> bool:
-        """A duel modifier column (noscope, thrusmoke, ...): False when the
-        column is missing (an older demo) or NaN, never bool(NaN)."""
-        v = getattr(r, name, None)
-        try:
-            return False if v is None or pd.isna(v) else bool(v)
-        except (TypeError, ValueError):  # noqa: BLE001 - garbage: not a flag
-            return False
-
-    out: list[dict] = []
-    for r in d.itertuples(index=False):
-        tk = int(r.tick)
-        kft, vft = _tick(r, "killer_first_tick"), _tick(r, "victim_first_tick")
-        firsts = [x for x in (kft, vft) if x is not None]
-        start = min(firsts) if firsts else tk - tr
-        out.append(
-            {
-                "a": max(t0, start - int(0.75 * tr)),
-                "b": min(t1, tk + int(1.5 * tr)),
-                "tick": tk,
-                "killer": str(r.killer),
-                "victim": str(r.victim),
-                "weapon": str(r.weapon),
-                "hs": bool(r.headshot),
-                "dur": _num(r, "duration_s", 2),
-                "dist": _num(r, "distance", 0),
-                "first": str(getattr(r, "first", "") or ""),
-                # kill modifiers for the icons (wallbang / noscope / through
-                # smoke / a flashed attacker), when the demo carries them
-                "ns": _flag(r, "noscope"),
-                "sm": _flag(r, "thrusmoke"),
-                "bl": _flag(r, "attackerblind"),
-                "wb": _flag(r, "penetrated"),
-                "kft": kft,
-                "vft": vft,
-                "ksp": _num(r, "killer_speed", 0),
-                "vsp": _num(r, "victim_speed", 0),
-                "kerr": _num(r, "killer_err", 1),
-                "verr": _num(r, "victim_err", 1),
-                "kshots": _num(r, "killer_shots", 0),
-                "vshots": _num(r, "victim_shots", 0),
-            }
-        )
-    return out
+    return [_duel_entry(r, t0, t1, int(r.tick), tr) for r in d.itertuples(index=False)]
 
 
 def _wrap180(a: np.ndarray) -> np.ndarray:
     """Angle difference wrapped into [-180, 180) (the shortest way round)."""
     return (a + 180.0) % 360.0 - 180.0
+
+
+def _telemetry_prep(f: pd.DataFrame, ticks: np.ndarray, step: int) -> pd.DataFrame:
+    """One player's frame rows on the telemetry grid, with one extra
+    sample before the window (speed / turn are deltas)."""
+    g = f.drop_duplicates("tick").set_index("tick").sort_index()
+    keep = np.concatenate(([ticks[0] - step], ticks))
+    return g.reindex(keep)
+
+
+def _telemetry_series(me: pd.DataFrame, foe: pd.DataFrame, dt_s: float) -> dict:
+    """One duelist's live series: speed (position delta, NaN on gaps /
+    teleports / a dead pawn), turn (deg/s of the view vector), the
+    crosshair-to-enemy-head angle and the distance between them."""
+    x, y = me["X"].to_numpy(float), me["Y"].to_numpy(float)
+    sp = np.hypot(np.diff(x), np.diff(y)) / dt_s
+    yaw = me["yaw"].to_numpy(float)
+    pit = me["pitch"].to_numpy(float)
+    dyaw = _wrap180(np.diff(yaw))
+    dpit = np.diff(pit)
+    tn = np.hypot(dyaw * np.cos(np.radians(pit[1:])), dpit) / dt_s
+    alive = (
+        me["is_alive"].astype(float).fillna(1.0).to_numpy()[1:] > 0
+        if "is_alive" in me.columns
+        else np.ones(len(sp), bool)
+    )
+    sp = np.where(alive & (sp <= 600.0), sp, np.nan)
+    tn = np.where(alive, tn, np.nan)
+    # crosshair -> enemy head
+    z = me["Z"].to_numpy(float)[1:] if "Z" in me.columns else np.zeros(len(sp))
+    zf = foe["Z"].to_numpy(float)[1:] if "Z" in foe.columns else np.zeros(len(sp))
+    duck_me = (
+        np.nan_to_num(me["DUCK"].to_numpy(float)[1:]) > 0 if "DUCK" in me.columns else 0
+    )
+    duck_foe = (
+        np.nan_to_num(foe["DUCK"].to_numpy(float)[1:]) > 0 if "DUCK" in foe.columns else 0
+    )
+    eye = z + EYE_STAND - DUCK_DROP * duck_me
+    head = zf + HEAD_STAND - DUCK_DROP * duck_foe
+    vx = foe["X"].to_numpy(float)[1:] - x[1:]
+    vy = foe["Y"].to_numpy(float)[1:] - y[1:]
+    vz = head - eye
+    n = np.sqrt(vx * vx + vy * vy + vz * vz)
+    p, yw = np.radians(pit[1:]), np.radians(yaw[1:])
+    view = np.stack([np.cos(p) * np.cos(yw), np.cos(p) * np.sin(yw), -np.sin(p)])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cosang = (view[0] * vx + view[1] * vy + view[2] * vz) / n
+    er = np.degrees(np.arccos(np.clip(cosang, -1, 1)))
+    er = np.where(alive & (n > 0), er, np.nan)
+    return {"sp": sp, "tn": tn, "er": er, "dist": n}
+
+
+def _telemetry_list(arr, nd: int) -> list:
+    """A series as a JSON-friendly list (None for NaN)."""
+    return [
+        None if not np.isfinite(v) else (int(round(v)) if nd == 0 else round(float(v), nd))
+        for v in arr
+    ]
 
 
 def duel_telemetry(
@@ -566,64 +623,12 @@ def duel_telemetry(
         return {}
     ticks = int(t0) + np.arange(i0, i1 + 1) * step
 
-    def _prep(f: pd.DataFrame) -> pd.DataFrame:
-        g = f.drop_duplicates("tick").set_index("tick").sort_index()
-        # one extra sample before the window: speed / turn are deltas
-        keep = np.concatenate(([ticks[0] - step], ticks))
-        return g.reindex(keep)
-
-    a, b = _prep(fa), _prep(fb)
+    a, b = _telemetry_prep(fa, ticks, step), _telemetry_prep(fb, ticks, step)
     dt_s = step / max(int(tickrate), 1)
-
-    def _series(me: pd.DataFrame, foe: pd.DataFrame) -> dict:
-        x, y = me["X"].to_numpy(float), me["Y"].to_numpy(float)
-        sp = np.hypot(np.diff(x), np.diff(y)) / dt_s
-        yaw = me["yaw"].to_numpy(float)
-        pit = me["pitch"].to_numpy(float)
-        dyaw = _wrap180(np.diff(yaw))
-        dpit = np.diff(pit)
-        tn = np.hypot(dyaw * np.cos(np.radians(pit[1:])), dpit) / dt_s
-        alive = (
-            me["is_alive"].astype(float).fillna(1.0).to_numpy()[1:] > 0
-            if "is_alive" in me.columns
-            else np.ones(len(sp), bool)
-        )
-        sp = np.where(alive & (sp <= 600.0), sp, np.nan)
-        tn = np.where(alive, tn, np.nan)
-        # crosshair -> enemy head
-        z = me["Z"].to_numpy(float)[1:] if "Z" in me.columns else np.zeros(len(sp))
-        zf = foe["Z"].to_numpy(float)[1:] if "Z" in foe.columns else np.zeros(len(sp))
-        duck_me = (
-            np.nan_to_num(me["DUCK"].to_numpy(float)[1:]) > 0 if "DUCK" in me.columns else 0
-        )
-        duck_foe = (
-            np.nan_to_num(foe["DUCK"].to_numpy(float)[1:]) > 0 if "DUCK" in foe.columns else 0
-        )
-        eye = z + EYE_STAND - DUCK_DROP * duck_me
-        head = zf + HEAD_STAND - DUCK_DROP * duck_foe
-        vx = foe["X"].to_numpy(float)[1:] - x[1:]
-        vy = foe["Y"].to_numpy(float)[1:] - y[1:]
-        vz = head - eye
-        n = np.sqrt(vx * vx + vy * vy + vz * vz)
-        p, yw = np.radians(pit[1:]), np.radians(yaw[1:])
-        view = np.stack([np.cos(p) * np.cos(yw), np.cos(p) * np.sin(yw), -np.sin(p)])
-        with np.errstate(invalid="ignore", divide="ignore"):
-            cosang = (view[0] * vx + view[1] * vy + view[2] * vz) / n
-        er = np.degrees(np.arccos(np.clip(cosang, -1, 1)))
-        er = np.where(alive & (n > 0), er, np.nan)
-        return {"sp": sp, "tn": tn, "er": er, "dist": n}
-
-    sa, sb = _series(a, b), _series(b, a)
-
-    def _lst(arr, nd):
-        return [
-            None if not np.isfinite(v) else (int(round(v)) if nd == 0 else round(float(v), nd))
-            for v in arr
-        ]
-
+    sa, sb = _telemetry_series(a, b, dt_s), _telemetry_series(b, a, dt_s)
     return {
         "i0": int(i0),
-        "a": {"sp": _lst(sa["sp"], 0), "tn": _lst(sa["tn"], 0), "er": _lst(sa["er"], 1)},
-        "b": {"sp": _lst(sb["sp"], 0), "tn": _lst(sb["tn"], 0), "er": _lst(sb["er"], 1)},
-        "d": _lst(sa["dist"], 0),
+        "a": {"sp": _telemetry_list(sa["sp"], 0), "tn": _telemetry_list(sa["tn"], 0), "er": _telemetry_list(sa["er"], 1)},
+        "b": {"sp": _telemetry_list(sb["sp"], 0), "tn": _telemetry_list(sb["tn"], 0), "er": _telemetry_list(sb["er"], 1)},
+        "d": _telemetry_list(sa["dist"], 0),
     }

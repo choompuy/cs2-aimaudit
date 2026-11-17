@@ -3851,7 +3851,7 @@ try:
     _real_write = fetch_radars._write
     fetch_radars._write = lambda path, data: (_order.append(os.path.basename(path)), _real_write(path, data))[1]
     try:
-        fetch_radars.download(os.path.join(tempfile.mkdtemp(prefix="cs2aa_fr_"), "r"), "t", 5)
+        fetch_radars.download_radar_set(os.path.join(tempfile.mkdtemp(prefix="cs2aa_fr_"), "r"), "t", 5)
     finally:
         fetch_radars._write = _real_write
     check("radars: map_data.json is written last", _order[-1] == "map_data.json" and len(_order) == 3, _order)

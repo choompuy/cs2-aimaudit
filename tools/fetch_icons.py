@@ -469,37 +469,24 @@ def download_mirror(dest: str, timeout: float) -> tuple[int, int]:
     return saved, skipped
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--dest", default=None, help="folder for the icons (default: data\\icons)")
-    ap.add_argument(
-        "--source",
-        choices=("mirror", "game", "auto"),
-        default="mirror",
-        help="mirror: the pinned HUD commit (default); game: decompile from an "
-        "installed CS2; auto: mirror first, game for what it could not deliver",
-    )
-    ap.add_argument("--cs2-dir", default=None, help="the CS2 folder (default: $AIMAUDIT_CS2_DIR or autodetect)")
-    ap.add_argument(
-        "--if-missing",
-        action="store_true",
-        help="launcher mode: do nothing when the icons are there, never fail",
-    )
-    args = ap.parse_args(argv)
-    dest = args.dest or os.environ.get("AIMAUDIT_ICON_DIR") or store.icons_dir()
-    auto = args.if_missing
+def _gate(dest: str) -> bool:
+    """Launcher mode pre-checks: True when the download should proceed."""
+    if os.environ.get("AIMAUDIT_NO_ICONS"):
+        return False
+    if present(dest):
+        return False
+    if _recently_failed(dest):
+        print("  Icons: the last download failed, not retrying yet.")
+        print("  Retry any time with:  python tools\\fetch_icons.py")
+        return False
+    print("  Downloading the weapon icons for the UI (about 200 KB, once)...")
+    return True
 
-    if auto:
-        if os.environ.get("AIMAUDIT_NO_ICONS"):
-            return 0
-        if present(dest):
-            return 0
-        if _recently_failed(dest):
-            print("  Icons: the last download failed, not retrying yet.")
-            print("  Retry any time with:  python tools\\fetch_icons.py")
-            return 0
-        print("  Downloading the weapon icons for the UI (about 200 KB, once)...")
 
+def _acquire(args, dest: str, auto: bool) -> int:
+    """Download from the chosen source. On success the previous failure
+    mark is cleared; launcher mode turns any failure into a friendly
+    message + a mark (exit 0), manual runs report exit 1."""
     try:
         if args.source == "game":
             cs2 = find_cs2_dir(args.cs2_dir)
@@ -536,6 +523,34 @@ def main(argv: list[str] | None = None) -> int:
         os.remove(os.path.join(dest, FAILED_MARK))
     except OSError:
         pass
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--dest", default=None, help="folder for the icons (default: data\\icons)")
+    ap.add_argument(
+        "--source",
+        choices=("mirror", "game", "auto"),
+        default="mirror",
+        help="mirror: the pinned HUD commit (default); game: decompile from an "
+        "installed CS2; auto: mirror first, game for what it could not deliver",
+    )
+    ap.add_argument("--cs2-dir", default=None, help="the CS2 folder (default: $AIMAUDIT_CS2_DIR or autodetect)")
+    ap.add_argument(
+        "--if-missing",
+        action="store_true",
+        help="launcher mode: do nothing when the icons are there, never fail",
+    )
+    args = ap.parse_args(argv)
+    dest = args.dest or os.environ.get("AIMAUDIT_ICON_DIR") or store.icons_dir()
+    auto = args.if_missing
+
+    if auto and not _gate(dest):
+        return 0
+    code = _acquire(args, dest, auto)
+    if code:
+        return code
     if os.path.abspath(dest) != os.path.abspath(store.icons_dir()) and not os.environ.get("AIMAUDIT_ICON_DIR"):
         print(f"  set AIMAUDIT_ICON_DIR={dest} before starting the app")
     return 0
