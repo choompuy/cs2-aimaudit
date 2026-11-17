@@ -49,6 +49,8 @@ jobs:
         run: python tests/test_icons.py
       - name: UI consistency checks
         run: python tests/check_ui.py
+      - name: Docs numbers machine-checked (±15%)
+        run: python tests/check_docs.py
       - name: UI smoke test (real app.py on synthetic demos)
         run: python tests/smoke_app.py --fast
       - name: Random-walk smoke (3 seeds x 60 actions)

@@ -699,8 +699,8 @@ def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
     """The compact player row: [label] [prev] [selectbox] [next]. Up/Down
     are the player keys: the Duels page uses Left/Right and
     Shift+Left/Right, so the three steppers never collide."""
-    name_of = dict(zip(demo.players["sid"], demo.players["name"]))
-    team_of = dict(zip(demo.players["sid"], demo.players["team"]))
+    name_of = dict(zip(demo.players["sid"], demo.players["name"], strict=True))
+    team_of = dict(zip(demo.players["sid"], demo.players["team"], strict=True))
     plist = demo.players.assign(
         _n=demo.players["name"].astype(str).str.lower()
     ).sort_values(["team", "_n"])

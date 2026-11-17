@@ -138,14 +138,14 @@ def _match_hits(shots: pd.DataFrame, hurts: pd.DataFrame) -> np.ndarray:
         return hit
     by_key: dict[tuple, list[tuple[int, int]]] = {}
     for i, (sid, w, t) in enumerate(
-        zip(shots["sid"], shots["weapon"], shots["tick"].astype(int))
+        zip(shots["sid"], shots["weapon"], shots["tick"].astype(int), strict=True)
     ):
         by_key.setdefault((sid, w), []).append((int(t), i))
     for lst in by_key.values():
         lst.sort()
     for sid, w, th in zip(
         hurts["attacker_steamid"], hurts["weapon"], hurts["tick"].astype(int)
-    ):
+    , strict=True):
         lst = by_key.get((sid, w))
         if not lst:
             continue
@@ -213,7 +213,7 @@ def _shot_frames(demo: Demo, s: pd.DataFrame) -> pd.DataFrame:
     rows = demo.rows
     out["counter_strafe"] = [
         _counter_strafe_tap(rows.get((int(tk), sid)), rows.get((int(tk) - 1, sid)))
-        for tk, sid in zip(out["tick"], out["sid"])
+        for tk, sid in zip(out["tick"], out["sid"], strict=True)
     ]
     out["dist"] = _nearest_enemy_dist(demo, out)
     out["hit"] = _match_hits(out, demo.hurts)
@@ -255,7 +255,7 @@ def _flick_moves(demo: Demo, out: pd.DataFrame) -> None:
         return
     _by = {sid: g.set_index("tick")["mag"] for sid, g in demo.mouse.groupby("sid")}
     _fm = []
-    for t, first, sid in zip(out["tick"], out["first_shot"], out["sid"]):
+    for t, first, sid in zip(out["tick"], out["first_shot"], out["sid"], strict=True):
         if not first or sid not in _by:
             _fm.append(np.nan)
             continue
@@ -281,7 +281,7 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     _flick_moves(demo, out)
     out = out.drop(columns=["flash_duration", "velo_modifier"], errors="ignore")
     out["side"] = [
-        demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"])
+        demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"], strict=True)
     ]
     out["weapon_class"] = out["weapon"].map(weapon_class)
     return out
@@ -584,7 +584,7 @@ def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
                     "headshot": df["headshot"],
                     "distance": df["distance"],
                     "first": df["first"].map(
-                        lambda f: (
+                        lambda f, mine=mine: (
                             f
                             if f in ("none", "simultaneous")
                             else ("me" if f == mine else "opponent")
@@ -637,7 +637,7 @@ def _top_weapon(de: pd.DataFrame, ok: np.ndarray, who: str) -> dict[str, str]:
         .sort_values([who, "n", "weapon"], ascending=[True, False, True])
         .drop_duplicates(who)
     )
-    return dict(zip(top[who], top["weapon"]))
+    return dict(zip(top[who], top["weapon"], strict=True))
 
 
 def _enemy_kill_rows(demo: Demo) -> pd.DataFrame:
@@ -949,7 +949,7 @@ def _impact_assists(de: pd.DataFrame, res: dict, keep, names) -> None:
             np.array(
                 [
                     _keep_ok(keep, ri, a)
-                    for ri, a in zip(ast["round_idx"], ast["assister_steamid"])
+                    for ri, a in zip(ast["round_idx"], ast["assister_steamid"], strict=True)
                 ],
                 dtype=bool,
             )
@@ -1030,11 +1030,11 @@ def _kd_setup(demo: Demo, f, de: pd.DataFrame, have_d: bool):
     if keep is not None and len(de):
         rd = (de["round_idx"] + 1).astype(int)
         k_ok = np.array(
-            [keep(int(r), s) for r, s in zip(rd, de["attacker_steamid"])],
+            [keep(int(r), s) for r, s in zip(rd, de["attacker_steamid"], strict=True)],
             dtype=bool,
         )
         v_ok = np.array(
-            [keep(int(r), s) for r, s in zip(rd, de["user_steamid"])], dtype=bool
+            [keep(int(r), s) for r, s in zip(rd, de["user_steamid"], strict=True)], dtype=bool
         )
         kills_by = de[k_ok].groupby("attacker_steamid").size().to_dict()
         deaths_by = de[v_ok].groupby("user_steamid").size().to_dict()

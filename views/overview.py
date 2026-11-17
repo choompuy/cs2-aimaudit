@@ -49,7 +49,7 @@ def render(ctx) -> None:
 
     ov_cells = {
         "player": [
-            ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"])
+            ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"], strict=True)
         ],
         "team": ov["team"].to_numpy(),
         "kdr": ov["kd_ratio"].to_numpy(),

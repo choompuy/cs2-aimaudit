@@ -107,6 +107,16 @@ def _png_size(path: str) -> int | None:
     return int(w) if w == h and w > 0 else None
 
 
+def _radar_png(root: str, name: str) -> str | None:
+    """The radar PNG of `name` under a radar root (radars/ subfolder or the
+    root itself)."""
+    for sub in ("radars", ""):
+        q = os.path.join(root, sub, f"{name}.png")
+        if os.path.isfile(q):
+            return q
+    return None
+
+
 def load_radar(map_name: str) -> dict | None:
     """
     Radar of a map: {"png", "lower_png", "size", "pos_x", "pos_y", "scale",
@@ -133,17 +143,10 @@ def load_radar(map_name: str) -> dict | None:
         if not scale > 0:
             continue
 
-        def _img(name):
-            for sub in ("radars", ""):
-                q = os.path.join(root, sub, f"{name}.png")
-                if os.path.isfile(q):
-                    return q
-            return None
-
-        png = _img(map_name)
+        png = _radar_png(root, map_name)
         if not png:
             continue
-        lower_png, lower = _img(f"{map_name}_lower"), None
+        lower_png, lower = _radar_png(root, f"{map_name}_lower"), None
         sec = (meta.get("verticalsections") or {}).get("lower")
         if lower_png and isinstance(sec, dict):
             try:

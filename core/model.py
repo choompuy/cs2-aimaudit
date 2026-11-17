@@ -555,11 +555,11 @@ class Demo:
 
     @cached_property
     def names(self) -> dict[str, str]:
-        return dict(zip(self.players["sid"], self.players["name"]))
+        return dict(zip(self.players["sid"], self.players["name"], strict=True))
 
     @cached_property
     def teams(self) -> dict[str, str]:
-        return dict(zip(self.players["sid"], self.players["team"]))
+        return dict(zip(self.players["sid"], self.players["team"], strict=True))
 
 
 # How a round ended (the key of Demo.round_info[n]["reason"]).

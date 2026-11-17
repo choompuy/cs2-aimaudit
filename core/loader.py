@@ -57,7 +57,7 @@ def build_id_lookup(info: pd.DataFrame):
 
     flookup: dict[float, list[str]] = {}
     name_to_sid: dict[str, str] = {}
-    for sid, name in zip(info["steamid"], info["name"]):
+    for sid, name in zip(info["steamid"], info["name"], strict=True):
         if pd.isna(sid) or int(sid) == 0:
             continue
         s = str(int(sid))
@@ -112,7 +112,7 @@ def fix_ids(
     if names is None or not name_to_sid:
         return s.map(lambda v: one(v, None)).astype(object)
     return pd.Series(
-        [one(v, nm) for v, nm in zip(s, names)], index=s.index, dtype=object
+        [one(v, nm) for v, nm in zip(s, names, strict=True)], index=s.index, dtype=object
     )
 
 
@@ -450,7 +450,7 @@ def _parse_round_sides(
         r = _round_col(df)
         tk = pd.to_numeric(df["tick"], errors="coerce")
         ok = (r >= 0) & tk.notna()
-        for ri, tick in zip(r[ok], tk[ok]):
+        for ri, tick in zip(r[ok], tk[ok], strict=True):
             ri = int(ri) + 1
             t = int(tick)
             if ri not in per_round or t < per_round[ri]:
@@ -650,7 +650,7 @@ def _round_bounds(ev):
             else pd.Series(False, index=freeze.index)
         )
         fe_rows = sorted(
-            (int(tt), bool(ww)) for tt, ww in zip(t.dropna(), warm[t.notna()])
+            (int(tt), bool(ww)) for tt, ww in zip(t.dropna(), warm[t.notna()], strict=True)
         )
     live_start = None
     bnm = ev.get("begin_new_match", pd.DataFrame())
@@ -780,7 +780,7 @@ def _exclude_preliminary(ev, deaths, fires, hurts, warmup_rows):
 
 def _filter_gun_events(players, deaths, fires, hurts):
     """Phase 4: gun-only fires and the hurts cleanup."""
-    teams = dict(zip(players["sid"], players["team"]))
+    teams = dict(zip(players["sid"], players["team"], strict=True))
     # NOTE: boolean-mask filtering an ALREADY-empty DataFrame drops all its
     # columns in pandas ((0, n) -> (0, 0)), so every filter is guarded.
     if not fires.empty:

@@ -50,7 +50,7 @@ def _key_runs(on: np.ndarray, xs: np.ndarray, row: int, tick_dur: float):
     edges = np.diff(np.concatenate(([0], on.astype(np.int8), [0])))
     starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1) - 1
     bx: list = []
-    for i0, i1 in zip(starts, ends):
+    for i0, i1 in zip(starts, ends, strict=True):
         bx += [float(xs[i0]), float(xs[i1]) + tick_dur, None]
     return bx, [row if v is not None else None for v in bx]
 
@@ -102,7 +102,7 @@ def _event_marker_traces(ctx, r, tdf, tick, fig, unit) -> None:
     me = ctx.me
     tr = ctx.demo.tickrate
     w_lo, w_hi = int(tdf["tick"].min()), int(tdf["tick"].max())
-    sp_by_tick = dict(zip(tdf["tick"].astype(int), tdf["speed"])) if "speed" in tdf.columns else {}
+    sp_by_tick = dict(zip(tdf["tick"].astype(int), tdf["speed"], strict=True)) if "speed" in tdf.columns else {}
 
     def _on_speed(ticks):
         pts = [((int(tk) - tick) / tr, sp_by_tick.get(int(tk))) for tk in ticks]
@@ -329,7 +329,7 @@ def _duel_strip(ctx) -> pd.Series:
     duel_strip(
         [
             {"round": rd, "result": w, "tip": lab}
-            for rd, w, lab in zip(my_duels["round"], my_duels["result"], labels)
+            for rd, w, lab in zip(my_duels["round"], my_duels["result"], labels, strict=True)
         ],
         state.get_tl_duel(),
         key="tl_strip",

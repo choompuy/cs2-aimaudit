@@ -367,6 +367,87 @@ functions >= 70 lines = **8**, each with a reason:
   documented tile builders (one tile per line, under the 80-line cap,
   reason commented in R2-3).
 
+## Stage 6 — R5: the test split, R4: i18n as data
+
+**R5** — `tests/test_core.py` (4 354 lines by then) is 7 section modules
+plus a runner: `tests/core_sections/_shared.py` (the original header -
+env var, UTF-8, imports, `check()`, the fake parser, `__all__`) and
+`s01_metrics_tables` .. `s07_store_tools` holding the sections
+**verbatim**; each runs its checks at import and `tests/test_core.py`
+imports them in the original order, so the check sequence and the
+totals cannot change. Cross-section names use explicit imports
+(generated from the AST: used, never rebound in the file, not a local
+parameter); the `__file__`-relative paths gained one `parents[]` level.
+`tools/api_snapshot.py` tracks the section files as consumers.
+ruff F,B on the split: 2 findings (pre-existing B905), the monolith
+had 3.
+
+**R4** — `i18n.toml` is the single source of truth for the strings (648
+keys x en/ru, one table per language, the same pattern as
+`ui/tables.toml` / `theme/tokens.toml`); `i18n.py` is the 24-line
+loader, `STR`/`LANGS`/`make_t` keep their API. The dump was verified
+byte-exact against the old dicts before the switch.
+
+## Stage 7 — F6 docs numbers, F7 B023/B905
+
+**F6** — `tests/check_docs.py` parses the ARCHITECTURE.md module table
+(`A + B` combined rows, space-separated thousands, "—" rows skipped)
+and checks every count against the real file within ±15%; runs in CI
+next to `check_ui`. Six drifted rows resynced. 39 rows, 0 failed.
+
+**F7** — B023 (2): `duels_for`'s first-role lambda binds `mine` as a
+default argument; `load_radar`'s `_img` closure became the module-level
+`_radar_png(root, name)`. B905 (23): every `zip()` in app code states
+its length contract - `strict=True` for the same-frame / same-mask
+pairs (equal by construction, now an asserted invariant),
+`strict=False` only for `filters`' deliberate `rounds` vs
+`rounds[1:]` offset. Plus `__all__` on the core facade so its 133
+deliberate re-exports stop reading as F401.
+
+## Stage 8 — final report (before / after)
+
+Measured on `refactor/fixes-and-refactor` with the exact baseline
+commands; the "before" column is `5b3cdad`.
+
+| Metric | Before (`5b3cdad`) | After | Target |
+|---|---|---|---|
+| App Python lines (no tests) | 16 233 | 16 055 (−1.1 %) | −10 % (see note) |
+| Functions ≥ 70 lines | 30 | **8** (each with a reason) | ≤ 8 |
+| Functions ≥ 120 lines | 14 | **0** | — |
+| Functions at radon rank D+ | 22 (max F 128) | **0** (max C 19) | 0 outside a reported list |
+| ruff findings (prompt selection, whole repo) | 331 | **133** (app code 84) | — |
+| ruff F821 / B023 / S110 in app code | 4 / 6 / 2 | **0 / 0 / 0** | 0 |
+| vulture ≥ 60 % / ≥ 80 % confidence | 27 / 0 | **19 / 0** | ≥80 %: 0 |
+| Test checks: core / sources / icons / smoke-fast / JS | 549 / 98 / 74 / 406 / 27 | **551 / 98 / 74 / 471 / 27** (+ walk 3x60, + check_docs 39 rows) | never drops, JS in CI |
+| Golden snapshots | — | payloads byte-identical except the two purposeful regenerations (`ov_full` persisting; api_snapshot names) | |
+| `session_state` shared-key literals | 39 (+ dynamic) | **0** - shared keys go through the `state.py` registry (page-local widget/flag keys stay literal by design) | |
+| Largest module | `i18n.py` 1 413 | `core/metrics.py` 1 264 | no module > 800 without a reason |
+| i18n strings | two dicts in `i18n.py` | `i18n.toml` (648 x 2), loader 24 lines | data as data |
+| Docs numbers | hand-written | machine-checked ±15 % in CI | ✓ |
+
+**Modules over 800 lines, with their reasons** (all three are one
+domain each, internally split into the helpers listed in their
+docstrings):
+
+- `core/metrics.py` (1 264) - the metric tables: one builder per table
+  (`shots_table`, `build_duels`, `impact_stats`, `player_summary`, ...),
+  all sharing the model constants; splitting the file would scatter one
+  domain across modules.
+- `core/loader.py` (1 180) - the parse pipeline: `load_demo` is a
+  55-line orchestrator over 9 phase functions; the phases share the
+  parse context and event frames.
+- `store.py` (883) - the ONE module that knows where files live
+  (the app's own architectural rule, documented in ARCHITECTURE.md).
+
+**The −10 % line-count target, honestly**: net app lines went down by
+178 (1.1 %), not 1 600. The dead code F3 removed (and the two dead
+paths F5 restructured) was reinvested into structure: the R2/R5 splits
+add function headers and docstrings, stage 0-3 added the safety net
+(`walk_app`, state-loss regressions, `log_note`), the registry
+(`state.py`, 170 lines) and the docs checker. The line target assumed
+the baseline was mostly duplication; at `5b3cdad` it was mostly
+long-but-single-purpose functions, which split - not shrink.
+
 ## Stage status
 
 - [x] 0. Baseline, goldens, `pick()` helper (this document)
@@ -380,9 +461,9 @@ functions >= 70 lines = **8**, each with a reason:
 - [x] 4. R1 duplicates + R3 state registry (the two sections above)
 - [x] 5. R2 split monster functions (R2-1..R2-16; D+ = 0, >=70-line
       functions = 8 with reasons)
-- [ ] 6. R5 test split, R4 i18n as data
-- [ ] 7. F6 doc numbers checked by test, F7 B023/B905
-- [ ] 8. Final report: before/after table
+- [x] 6. R5 test split, R4 i18n as data
+- [x] 7. F6 doc numbers checked by test, F7 B023/B905
+- [x] 8. Final report: before/after table (this section)
 
 ## Acceptance targets (from the prompt)
 
