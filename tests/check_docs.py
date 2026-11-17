@@ -15,8 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "ARCHITECTURE.md"
 
 # | `file.py` (+ `other.toml`)?  |  NNN (+ MMM)?  | description |
+# The count cell class must include "+": without it combined "NNN + MMM"
+# rows never matched and were silently skipped (the i18n row's count
+# drifted 656 -> 1306 with the check green).
 ROW = re.compile(
-    r"^\|\s*`([^`]+)`(?:\s*\+\s*`([^`]+)`)?\s*\|\s*([0-9 \u2014\u2013-]+)\|"
+    r"^\|\s*`([^`]+)`(?:\s*\+\s*`([^`]+)`)?\s*\|\s*([0-9 +\u2014\u2013-]+)\|"
 )
 NUM = re.compile(r"\d+")
 TOL = 0.15

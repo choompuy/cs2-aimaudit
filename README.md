@@ -179,7 +179,8 @@ The JS line needs Node once (`npm ci` in `tests/js`); without it
   the shell in `shell.py`, the filter panel in `filters_ui.py`.
 - `ui/tables.toml` — the table schema: formats, sorting, grading and bars
   for every grid, described as data.
-- `i18n.py` — English/Russian strings.
+- `i18n.py` + `i18n/en.toml` / `i18n/ru.toml` — UI strings, one flat file
+  per language; missing keys fall back to English.
 - `docs/ARCHITECTURE.md` — module map, dependency rules and how to add a
   metric, column, page or filter.
 - `docs/DEMOPARSER_NOTES.md` — notes on the demoparser2 API.

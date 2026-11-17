@@ -48,7 +48,8 @@ written here, so the doc and the guardrails stay honest.
 | `sources/inbox.py`                |       162 | The CS2 replays folder (Watch -> Your Matches) as a match source (registry + libraryfolders.vdf).                                            |
 | `sources/__init__.py`             |       169 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package - plus the `matches.json` cache glue (`read_cache` / `write_cache` / `cache_time`). |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
-| `i18n.py` + `i18n.toml`           |     24 + 656 | `i18n.toml` is the single source of truth for the strings (one table per language); every UI text goes through `t("key")` literals.          |
+| `i18n.py`                         |        45 | Thin loader: `STR`/`LANGS`/`make_t` built from the `i18n/<lang>.toml` files; fails fast on a missing `en.toml`, a non-flat file or a file/LANGS mismatch. |
+| `i18n/en.toml` + `i18n/ru.toml`   | 653 + 653 | The UI strings themselves (648 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
 | `store.py`                        |       836 | The ONE place that knows where files live: the `data/` folder next to `start.bat`, the demo library (copies + linked demos), caches (parsed / unpacked / matchstats / icons), support notes (`data/logs/notes.log`), parse keys. |
 | `state.py`                        |       170 | The `session_state` registry: key-name constants, typed get_*/set_* for the keys shared by 2+ modules, and the navigation mutators (`go_page`/`go_match`/`go_tab`/`leave_match`, re-exported by `shell`). |
 | `nativedialog.py`                 |        95 | Native Windows file dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
@@ -239,7 +240,8 @@ of the download, `AIMAUDIT_ICON_DIR` points tests at a fixture folder.
    `build_duels` for duels) and add the raw column to the DataFrame.
 2. Describe it: add a `[metric.<id>]` block with `fmt`, `best`, `grade`,
    `bar`, `tone` as needed, plus `col_<id>` (and optional
-   `col_<id>_help`) in **both** locales in `i18n.toml`.
+   `col_<id>_help`) in **both** language files (`i18n/en.toml`,
+   `i18n/ru.toml`).
 3. Place it: add the id to the `columns` list (and `basic` if it belongs
    in the default view) of the target `[table.<id>]`.
 4. Feed it: the page builds the rows dict — add the numpy column under
@@ -270,8 +272,8 @@ A **column** is the recipe above. A **table**:
    the sidebar button (`nav_<id>`, `nav_<id>__on` when active) comes
    from that one loop, and `theme/overrides.css` needs the new
    `.st-key-nav_<id>__on button` selector for the active highlight.
-3. Add the `nav_<id>` label to BOTH locales in `i18n.toml`
-   (`tests/check_ui.py` fails without it).
+3. Add the `nav_<id>` label to BOTH language files (`i18n/en.toml`,
+   `i18n/ru.toml`) — `tests/check_ui.py` fails without it.
 4. Dispatch it in `app.py` (one `elif page == "<id>":` line; pages
    without the analysis filters stay in the `filters_ui.preserve_filters()`
    branch) and add a smoke scenario.

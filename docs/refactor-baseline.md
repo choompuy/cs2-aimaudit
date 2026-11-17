@@ -388,6 +388,20 @@ keys x en/ru, one table per language, the same pattern as
 loader, `STR`/`LANGS`/`make_t` keep their API. The dump was verified
 byte-exact against the old dicts before the switch.
 
+**R4b** (follow-up, behavior-preserving) — the single 1 306-line
+`i18n.toml` became one file per language: `i18n/en.toml` +
+`i18n/ru.toml` (653 lines, 648 keys each). Shorter files to navigate,
+and a new language is a new `i18n/<lang>.toml` + one `LANGS` line. The
+loader discovers `i18n/*.toml` and fails fast on a missing `en.toml`,
+a non-flat file (a copied `[table]` header) and a file/LANGS
+mismatch; `STR` was verified identical to the pre-split table
+key-by-key (same keys, order and values), so `check_ui` and the golden
+payloads are untouched. The split also exposed a `check_docs.py` gap:
+its count-cell regex lacked `+`, so combined "A + B" module-table rows
+were never checked (the i18n row had drifted 656 -> 1306 unseen);
+fixed in its own commit - 41 rows checked there (was 39), and the i18n
+row splitting in two below brings the table to 42.
+
 ## Stage 7 — F6 docs numbers, F7 B023/B905
 
 **F6** — `tests/check_docs.py` parses the ARCHITECTURE.md module table
@@ -418,11 +432,11 @@ commands; the "before" column is `5b3cdad`.
 | ruff findings (prompt selection, whole repo) | 331 | **133** (app code 84) | — |
 | ruff F821 / B023 / S110 in app code | 4 / 6 / 2 | **0 / 0 / 0** | 0 |
 | vulture ≥ 60 % / ≥ 80 % confidence | 27 / 0 | **19 / 0** | ≥80 %: 0 |
-| Test checks: core / sources / icons / smoke-fast / JS | 549 / 98 / 74 / 406 / 27 | **551 / 98 / 74 / 471 / 27** (+ walk 3x60, + check_docs 39 rows) | never drops, JS in CI |
+| Test checks: core / sources / icons / smoke-fast / JS | 549 / 98 / 74 / 406 / 27 | **551 / 98 / 74 / 471 / 27** (+ walk 3x60, + check_docs 41 rows) | never drops, JS in CI |
 | Golden snapshots | — | payloads byte-identical except the two purposeful regenerations (`ov_full` persisting; api_snapshot names) | |
 | `session_state` shared-key literals | 39 (+ dynamic) | **0** - shared keys go through the `state.py` registry (page-local widget/flag keys stay literal by design) | |
 | Largest module | `i18n.py` 1 413 | `core/metrics.py` 1 264 | no module > 800 without a reason |
-| i18n strings | two dicts in `i18n.py` | `i18n.toml` (648 x 2), loader 24 lines | data as data |
+| i18n strings | two dicts in `i18n.py` | `i18n/en.toml` + `i18n/ru.toml` (648 keys each), loader 45 lines | data as data, one file per language |
 | Docs numbers | hand-written | machine-checked ±15 % in CI | ✓ |
 
 **Modules over 800 lines, with their reasons** (all three are one
