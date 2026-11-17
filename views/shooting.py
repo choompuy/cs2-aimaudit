@@ -249,7 +249,7 @@ def render(ctx) -> None:
     c[1].metric(t("m_risky"), pct(risky_pct), help=t("m_risky_help"))
     c[2].metric(t("m_err"), num(err, 1), help=t("m_err_help"))
     c[3].metric(t("m_first"), pct(first_pct), help=t("m_first_help"))
-    if st.toggle(t("all_metrics"), key="sh_all"):
+    if st.toggle(t("all_metrics"), key="sh_all", persist_state="session"):
         st.markdown(f"**{t('sec_accuracy')}**")
         c = st.columns(4)
         c[0].metric(t("m_shots"), len(sh_me), help=t("m_shots_help"))

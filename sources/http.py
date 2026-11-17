@@ -14,6 +14,7 @@ Rules enforced here (see docs/ARCHITECTURE.md, "sources"):
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -79,11 +80,11 @@ class HttpTransport:
             with self._open(url, data=data, headers=headers, timeout=timeout) as resp:
                 return resp.status, resp.headers or {}, resp.read()
         except urllib.error.HTTPError as e:
-            body = b""
             try:
                 body = e.read(4096)
-            except Exception:  # noqa: BLE001 - the status is what matters
-                pass
+            except (OSError, ValueError, http.client.HTTPException):
+                # a half-written error body is fine: the status is what matters
+                body = b""
             return e.code, e.headers or {}, body
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise NetworkError(f"{type(e).__name__}: {e}") from e

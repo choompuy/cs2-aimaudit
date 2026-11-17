@@ -368,7 +368,7 @@ def next_share_code(transport, api_key: str, steamid64: str, auth_code: str, kno
     url = (
         "https://api.steampowered.com/ICSGOPlayers_730/GetNextMatchSharingCode/v1"
         f"?key={api_key}&steamid={steamid64}"
-        f"&knowncode={known_code}"
+        f"&steamidkey={auth_code}&knowncode={known_code}"
     )
     try:
         data = transport.get_json(url)

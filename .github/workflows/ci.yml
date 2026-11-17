@@ -40,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources
-        run: python -m compileall -q app.py core i18n.py mapview.py store.py context.py filters_ui.py shell.py sources ui views theme tools
+        run: python tools/compile_all.py
       - name: Core tests (synthetic demo, no .dem needed)
         run: python tests/test_core.py
       - name: Match import tests (fake transports, no network)
@@ -51,6 +51,16 @@ jobs:
         run: python tests/check_ui.py
       - name: UI smoke test (real app.py on synthetic demos)
         run: python tests/smoke_app.py --fast
+      - name: Random-walk smoke (3 seeds x 60 actions)
+        run: python tests/walk_app.py
+      - name: JS front-end tests (roundrep.js, icons)
+        run: |
+          cd tests/js
+          npm ci
+          cd ../..
+          python tests/check_roundrep_js.py
+      - name: Golden snapshots (table payloads + core API)
+        run: python tools/check_goldens.py
 
   smoke-all:
     # One full run (every page and locale) per commit is enough.
@@ -63,6 +73,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Byte-compile sources
-        run: python -m compileall -q app.py core i18n.py mapview.py store.py context.py filters_ui.py shell.py sources ui views theme tools
+        run: python tools/compile_all.py
       - name: Full UI smoke test
         run: python tests/smoke_app.py --all

@@ -36,7 +36,6 @@ def _map_fragment(ctx):
     map_name = str(demo.header.get("map_name") or "")
     radar = core.load_radar(map_name)
 
-    st.session_state.setdefault("map_show", "both")
     c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
     show = (
         c1.segmented_control(
@@ -44,19 +43,22 @@ def _map_fragment(ctx):
             ["both", "kills", "deaths"],
             format_func=lambda v: t(f"map_show_{v}"),
             key="map_show",
+            persist_state="session",
         )
         or "both"
     )
-    lines = c2.toggle(t("map_lines"), value=True, key="map_lines")
+    lines = c2.toggle(
+        t("map_lines"), value=True, key="map_lines", persist_state="session"
+    )
     level = "upper"
     if radar and radar.get("lower"):
-        st.session_state.setdefault("map_level", "upper")
         level = (
             st.segmented_control(
                 t("map_level"),
                 ["upper", "lower"],
                 format_func=lambda v: t(f"map_level_{v}"),
                 key="map_level",
+                persist_state="session",
             )
             or "upper"
         )

@@ -1,0 +1,455 @@
+{
+  "click": true,
+  "cols": [
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "round",
+      "l": "Round",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "Seconds into the live round (freeze time excluded): 0 is the round going live, ~115 the dying seconds of a long one.",
+      "k": "round_sec",
+      "l": "Round s",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "result",
+      "l": "Result",
+      "s": false,
+      "t": "badge",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "opponent",
+      "l": "Opponent",
+      "s": true,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "weapon",
+      "l": "Weapon",
+      "s": false,
+      "t": "icon",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "hs",
+      "l": "HS",
+      "s": false,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "desc",
+      "h": "",
+      "k": "distance",
+      "l": "Distance",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "The game's named place on the map where you were (m_last_place_name).",
+      "k": "zone",
+      "l": "Zone",
+      "s": false,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "first",
+      "l": "Shot first",
+      "s": false,
+      "t": "badge",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "aim_err",
+      "l": "Aim error",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "desc",
+      "h": "",
+      "k": "my_shots",
+      "l": "My shots",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "desc",
+      "h": "",
+      "k": "opp_shots",
+      "l": "Their shots",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "duration",
+      "l": "Duel time",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "speed",
+      "l": "Speed at 1st shot",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "errhw",
+      "l": "Aim error (head widths)",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "side",
+      "l": "My side",
+      "s": false,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "flags",
+      "l": "Notes",
+      "s": false,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "tick",
+      "l": "tick",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    }
+  ],
+  "empty": "",
+  "icons": {},
+  "maxh": 720,
+  "rows": [
+    {
+      "c": [
+        [
+          1.0,
+          "1",
+          null,
+          null,
+          null
+        ],
+        [
+          25.16,
+          "25.2 s",
+          null,
+          null,
+          null
+        ],
+        [
+          "kill",
+          "kill",
+          null,
+          "positive",
+          null
+        ],
+        [
+          "Charlie",
+          "Charlie",
+          null,
+          null,
+          null
+        ],
+        [
+          "ak47",
+          "AK-47",
+          null,
+          null,
+          null
+        ],
+        [
+          1.0,
+          "✓",
+          null,
+          null,
+          null
+        ],
+        [
+          500.0,
+          "500 u",
+          null,
+          null,
+          null
+        ],
+        [
+          "BombsiteA",
+          "BombsiteA",
+          null,
+          null,
+          null
+        ],
+        [
+          "me",
+          "me",
+          null,
+          "positive",
+          null
+        ],
+        [
+          0.2291818957535779,
+          "0.2°",
+          null,
+          null,
+          null
+        ],
+        [
+          2.0,
+          "2",
+          null,
+          null,
+          null
+        ],
+        [
+          1.0,
+          "1",
+          null,
+          null,
+          null
+        ],
+        [
+          0.16,
+          "0.16 s",
+          null,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0 u/s",
+          null,
+          null,
+          null
+        ],
+        [
+          0.11112251742333606,
+          "0.11",
+          null,
+          null,
+          null
+        ],
+        [
+          "T",
+          "T",
+          null,
+          null,
+          null
+        ],
+        [
+          "",
+          "",
+          null,
+          null,
+          null
+        ],
+        [
+          1010.0,
+          "1010",
+          null,
+          null,
+          null
+        ]
+      ],
+      "i": 0,
+      "s": "positive"
+    },
+    {
+      "c": [
+        [
+          2.0,
+          "2",
+          null,
+          null,
+          null
+        ],
+        [
+          25.16,
+          "25.2 s",
+          null,
+          null,
+          null
+        ],
+        [
+          "kill",
+          "kill",
+          null,
+          "positive",
+          null
+        ],
+        [
+          "Charlie",
+          "Charlie",
+          null,
+          null,
+          null
+        ],
+        [
+          "awp",
+          "AWP",
+          null,
+          null,
+          null
+        ],
+        [
+          1.0,
+          "✓",
+          null,
+          null,
+          null
+        ],
+        [
+          500.0,
+          "500 u",
+          null,
+          null,
+          null
+        ],
+        [
+          "BombsiteA",
+          "BombsiteA",
+          null,
+          null,
+          null
+        ],
+        [
+          "me",
+          "me",
+          null,
+          "positive",
+          null
+        ],
+        [
+          0.2291818957535779,
+          "0.2°",
+          null,
+          null,
+          null
+        ],
+        [
+          2.0,
+          "2",
+          null,
+          null,
+          null
+        ],
+        [
+          1.0,
+          "1",
+          null,
+          null,
+          null
+        ],
+        [
+          0.16,
+          "0.16 s",
+          null,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0 u/s",
+          null,
+          null,
+          null
+        ],
+        [
+          0.11112251742333606,
+          "0.11",
+          null,
+          null,
+          null
+        ],
+        [
+          "T",
+          "T",
+          null,
+          null,
+          null
+        ],
+        [
+          "",
+          "",
+          null,
+          null,
+          null
+        ],
+        [
+          2010.0,
+          "2010",
+          null,
+          null,
+          null
+        ]
+      ],
+      "i": 1,
+      "s": "positive"
+    }
+  ],
+  "sel": null
+}

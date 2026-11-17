@@ -244,10 +244,6 @@ def steamid64_to_account_id(steamid64: str | int) -> int | None:
     return sid - 76561197960265728
 
 
-def account_id_to_steamid64(account_id: int) -> str:
-    return str(account_id + 76561197960265728)
-
-
 def my_group(account_ids: list[int], account_id: int) -> int | None:
     """0 = the first five slots (team CT at the end), 1 = the rest."""
     try:

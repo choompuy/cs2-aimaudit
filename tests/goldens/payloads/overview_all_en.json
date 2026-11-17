@@ -1,0 +1,795 @@
+{
+  "click": true,
+  "cols": [
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "player",
+      "l": "Player",
+      "s": true,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "team",
+      "l": "Team",
+      "s": false,
+      "t": "badge",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "desc",
+      "h": "Kills divided by deaths in the current view. Empty when the player has no deaths there.",
+      "k": "kdr",
+      "l": "K/D ratio",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "kills",
+      "l": "Kills",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "asc",
+      "h": "",
+      "k": "deaths",
+      "l": "Deaths",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "shots",
+      "l": "Shots",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "hits",
+      "l": "Hits",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "accuracy",
+      "l": "Accuracy",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "hs_hits",
+      "l": "HS (of hits)",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "hs_kills",
+      "l": "HS (of kills)",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "asc",
+      "h": "",
+      "k": "moving",
+      "l": "Shots on the move",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "asc",
+      "h": "",
+      "k": "risky",
+      "l": "Risky",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "first_shot",
+      "l": "Shoots first",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "first_acc",
+      "l": "1st-shot accuracy",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "Share of opening duels won - the round's first enemy kill, counted when you were either the killer or the victim. Follows the Side and Rounds filters; weapon and distance filters do not change it.",
+      "k": "open_rate",
+      "l": "Opening winrate",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "sides",
+      "l": "Sides",
+      "s": false,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "aim_err",
+      "l": "Aim error",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "duration",
+      "l": "Duel time",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "The weapon this player killed the most with.",
+      "k": "best_weapon",
+      "l": "Best weapon",
+      "s": false,
+      "t": "icon",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "The weapon this player was killed by the most.",
+      "k": "died_to",
+      "l": "Most died to",
+      "s": false,
+      "t": "icon",
+      "tn": "accent"
+    }
+  ],
+  "empty": "",
+  "icons": {},
+  "maxh": 620,
+  "rows": [
+    {
+      "c": [
+        [
+          "Alpha",
+          "★ Alpha",
+          null,
+          null,
+          null
+        ],
+        [
+          "T",
+          "T",
+          null,
+          "warning",
+          null
+        ],
+        [
+          2.0,
+          "2.00",
+          null,
+          null,
+          1.0
+        ],
+        [
+          2.0,
+          "2",
+          1.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          4.0,
+          "4",
+          1.0,
+          null,
+          null
+        ],
+        [
+          2.0,
+          "2",
+          1.0,
+          null,
+          null
+        ],
+        [
+          50.0,
+          "50.0%",
+          0.5,
+          null,
+          null
+        ],
+        [
+          100.0,
+          "100.0%",
+          1.0,
+          null,
+          null
+        ],
+        [
+          100.0,
+          "100.0%",
+          1.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          100.0,
+          "100.0%",
+          1.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          100.0,
+          "100.0%",
+          1.0,
+          null,
+          null
+        ],
+        [
+          "T",
+          "T",
+          null,
+          null,
+          null
+        ],
+        [
+          0.2,
+          "0.2°",
+          null,
+          null,
+          null
+        ],
+        [
+          0.16,
+          "0.16 s",
+          null,
+          null,
+          null
+        ],
+        [
+          "ak47",
+          "AK-47",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "N/A",
+          null,
+          null,
+          null
+        ]
+      ],
+      "i": 0,
+      "s": "warning"
+    },
+    {
+      "c": [
+        [
+          "Bravo",
+          "Bravo",
+          null,
+          null,
+          null
+        ],
+        [
+          "T",
+          "T",
+          null,
+          "warning",
+          null
+        ],
+        [
+          0.0,
+          "0.00",
+          null,
+          null,
+          0.0
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          "T",
+          "T",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "N/A",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "N/A",
+          null,
+          null,
+          null
+        ]
+      ],
+      "i": 1,
+      "s": "warning"
+    },
+    {
+      "c": [
+        [
+          "Charlie",
+          "Charlie",
+          null,
+          null,
+          null
+        ],
+        [
+          "CT",
+          "CT",
+          null,
+          "info",
+          null
+        ],
+        [
+          0.0,
+          "0.00",
+          null,
+          null,
+          0.0
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          2.0,
+          "2",
+          1.0,
+          null,
+          null
+        ],
+        [
+          2.0,
+          "2",
+          0.5,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          "CT",
+          "CT",
+          null,
+          null,
+          null
+        ],
+        [
+          0.2,
+          "0.2°",
+          null,
+          null,
+          null
+        ],
+        [
+          0.16,
+          "0.16 s",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "N/A",
+          null,
+          null,
+          null
+        ],
+        [
+          "ak47",
+          "AK-47",
+          null,
+          null,
+          null
+        ]
+      ],
+      "i": 2,
+      "s": "info"
+    },
+    {
+      "c": [
+        [
+          "Delta",
+          "Delta",
+          null,
+          null,
+          null
+        ],
+        [
+          "CT",
+          "CT",
+          null,
+          "info",
+          null
+        ],
+        [
+          0.0,
+          "0.00",
+          null,
+          null,
+          0.0
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0",
+          0.0,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          "CT",
+          "CT",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "—",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "N/A",
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "N/A",
+          null,
+          null,
+          null
+        ]
+      ],
+      "i": 3,
+      "s": "info"
+    }
+  ],
+  "sel": 0
+}

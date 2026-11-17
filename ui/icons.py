@@ -231,11 +231,6 @@ def icon(key: str) -> dict | None:
     return _load_icon(str(key or ""))
 
 
-def icon_uri(key: str) -> str | None:
-    ic = icon(key)
-    return ic["uri"] if ic else None
-
-
 def payload(keys) -> dict[str, list]:
     """{key: [data-uri, w, h]} for JS payloads - only the keys asked for,
     only the ones that exist. Payloads stay small: one entry per distinct

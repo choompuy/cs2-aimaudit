@@ -49,7 +49,8 @@ def _app_version() -> str:
             cwd=os.path.dirname(os.path.abspath(__file__)),
         )
         return out.stdout.strip() or "dev"
-    except Exception:  # noqa: BLE001 - no git / no repo: footer still renders
+    except (OSError, subprocess.SubprocessError):
+        # no git on PATH / not a repo / the call timed out: footer still renders
         return "dev"
 
 

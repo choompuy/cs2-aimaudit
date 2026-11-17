@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 import struct
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 import pandas as pd
@@ -38,6 +38,11 @@ from core.filters import apply_filters
 from core.loader import _norm_alive, build_id_lookup, fix_ids, tickrate_from_header
 
 from core.metrics import _enemy_kill_rows
+
+if TYPE_CHECKING:
+    # annotation-only (F821): kill_points' `f: "Filters | None"` resolves
+    # without another runtime import next to apply_filters above
+    from core.filters import Filters
 
 
 def _timeline_speed(df: pd.DataFrame, tickrate: int = TICKRATE) -> pd.DataFrame:
@@ -290,102 +295,6 @@ def timeline_data(
     df = _timeline_speed(df, tickrate)
     missing = [x for x in BUTTONS if x not in df.columns]
     return df.sort_values("tick").reset_index(drop=True), missing
-
-
-def replay_data(
-    path: str,
-    sids: list[str],
-    tick: int,
-    before_s: float = 3.0,
-    after_s: float = 0.75,
-    tickrate: int | None = None,
-):
-    """
-    Tick-level data of the duellists around one duel, for the 2D replay.
-
-    One parse for all `sids` (the two players of the duel), split per
-    player: ({sid: frame sorted by tick}, missing_buttons). Each frame has
-    X / Y / Z, pitch / yaw, `speed` (same rules as the timeline: NaN on
-    gaps, teleports and a dead pawn), `is_alive` and the held keys.
-    Nothing but the duellists is read - grenades, teammates and other
-    enemies are not part of a duel replay.
-    """
-    parser = DemoParser(path)
-    if tickrate is None:
-        try:
-            tickrate = tickrate_from_header(parser.parse_header())
-        except Exception:  # noqa: BLE001 - header is optional here
-            tickrate = TICKRATE
-    ticks = list(
-        range(tick - int(before_s * tickrate), tick + int(after_s * tickrate) + 1)
-    )
-    df = None
-    last_err: Exception | None = None
-    for props in (
-        POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS,
-        POS + ["buttons"] + ALIVE_PROPS,
-        POS + ALIVE_PROPS,
-        POS,
-    ):
-        try:
-            df = parser.parse_ticks(props, ticks=ticks, players=[int(x) for x in sids])
-            break
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-    if df is None:
-        raise last_err  # type: ignore[misc]
-    # exact SteamIDs (the raw column is float-rounded), like every tick frame
-    flookup, name_to_sid = build_id_lookup(parser.parse_player_info())
-    df["steamid"] = fix_ids(
-        df["steamid"],
-        flookup,
-        df["name"] if "name" in df.columns else None,
-        name_to_sid,
-    )
-    df = _norm_alive(_decode_buttons(df))
-    frames: dict[str, pd.DataFrame] = {}
-    for sid in sids:
-        d = df[df["steamid"] == sid].drop_duplicates("tick")
-        frames[sid] = (
-            _timeline_speed(d, tickrate).sort_values("tick").reset_index(drop=True)
-        )
-    missing = [x for x in BUTTONS if x not in df.columns]
-    return frames, missing
-
-
-def _live_freeze_ends(parser) -> list[int]:
-    """
-    Sorted ticks of round_freeze_end events of the LIVE match: warmup
-    freeze ends and everything before begin_new_match (restarts, the knife
-    round) are dropped, so index i maps to live round i+1.
-    """
-    try:
-        ev = parser.parse_events(["round_freeze_end", "begin_new_match"])
-    except Exception:  # noqa: BLE001 - old parser / no events
-        return []
-    freeze = dict(ev).get("round_freeze_end", pd.DataFrame())
-    bnm = dict(ev).get("begin_new_match", pd.DataFrame())
-    live_start = None
-    if len(bnm) and "tick" in bnm.columns:
-        t = pd.to_numeric(bnm["tick"], errors="coerce").dropna()
-        if len(t):
-            live_start = int(t.max())
-    out: list[int] = []
-    if len(freeze) and "tick" in freeze.columns:
-        t = pd.to_numeric(freeze["tick"], errors="coerce").dropna()
-        warm = (
-            freeze["is_warmup_period"].fillna(False).astype(bool)
-            if "is_warmup_period" in freeze.columns
-            else pd.Series(False, index=freeze.index)
-        )
-        for tt, ww in zip(t, warm[t.notna()]):
-            ti = int(tt)
-            if ww:
-                continue
-            if live_start is not None and ti < live_start:
-                continue
-            out.append(ti)
-    return sorted(set(out))
 
 
 def round_replay_data(

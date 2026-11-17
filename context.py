@@ -2,7 +2,7 @@
 Run context for the app: cached core calls and the shared Ctx.
 
 The cached wrappers (get_demo / get_shots / get_duels / get_timeline /
-get_replay) are st.cache_* functions keyed on the demo file. Ctx is the
+get_round_replay) are st.cache_* functions keyed on the demo file. Ctx is the
 bundle of page-shared state that the shell fills as the run progresses
 and every view reads (see views/*.render(ctx)).
 """
@@ -54,19 +54,6 @@ def get_timeline(
     path: str, mtime: float, me: str, tick: int, before_s: float, tickrate: int
 ):
     return core.timeline_data(path, me, tick, before_s=before_s, tickrate=tickrate)
-
-
-@st.cache_data(show_spinner=False)
-def get_replay(
-    path: str,
-    mtime: float,
-    me: str,
-    opp: str,
-    tick: int,
-    before_s: float,
-    tickrate: int,
-):
-    return core.replay_data(path, [me, opp], tick, before_s=before_s, tickrate=tickrate)
 
 
 @st.cache_data(show_spinner=False)

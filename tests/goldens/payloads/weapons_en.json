@@ -1,0 +1,263 @@
+{
+  "click": false,
+  "cols": [
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "weapon",
+      "l": "Weapon",
+      "s": true,
+      "t": "icon",
+      "tn": "accent"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "shots",
+      "l": "Shots",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "median_speed",
+      "l": "Median speed",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "desc",
+      "h": "",
+      "k": "median_dist",
+      "l": "Median dist",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": true,
+      "f": "asc",
+      "h": "",
+      "k": "moving",
+      "l": "On the move",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "asc",
+      "h": "",
+      "k": "risky",
+      "l": "Risky",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "hits",
+      "l": "Hits",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "hs",
+      "l": "HS (of hits)",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "accuracy",
+      "l": "Accuracy",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    },
+    {
+      "b": true,
+      "f": "desc",
+      "h": "",
+      "k": "first_acc",
+      "l": "1st-shot accuracy",
+      "s": false,
+      "t": "num",
+      "tn": "context"
+    }
+  ],
+  "empty": "",
+  "icons": {},
+  "maxh": 620,
+  "rows": [
+    {
+      "c": [
+        [
+          "ak47",
+          "AK-47",
+          null,
+          null,
+          null
+        ],
+        [
+          2.0,
+          "2",
+          1.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0 u/s",
+          null,
+          null,
+          null
+        ],
+        [
+          500.0,
+          "500 u",
+          null,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          1.0,
+          "1",
+          1.0,
+          null,
+          null
+        ],
+        [
+          100.0,
+          "100.0%",
+          1.0,
+          null,
+          null
+        ],
+        [
+          50.0,
+          "50.0%",
+          0.5,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ]
+      ],
+      "i": 0,
+      "s": null
+    },
+    {
+      "c": [
+        [
+          "awp",
+          "AWP",
+          null,
+          null,
+          null
+        ],
+        [
+          2.0,
+          "2",
+          1.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0 u/s",
+          null,
+          null,
+          null
+        ],
+        [
+          500.0,
+          "500 u",
+          null,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ],
+        [
+          1.0,
+          "1",
+          1.0,
+          null,
+          null
+        ],
+        [
+          100.0,
+          "100.0%",
+          1.0,
+          null,
+          null
+        ],
+        [
+          50.0,
+          "50.0%",
+          0.5,
+          null,
+          null
+        ],
+        [
+          0.0,
+          "0.0%",
+          0.0,
+          null,
+          null
+        ]
+      ],
+      "i": 1,
+      "s": null
+    }
+  ],
+  "sel": null
+}

@@ -6,9 +6,15 @@ impact, per-player and per-weapon stats.
 from __future__ import annotations
 
 import bisect
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    # annotation-only (F821): the `f: "Filters | None"` hints below resolve
+    # without importing core.filters at runtime here
+    from core.filters import Filters
 
 from core.model import (
     Demo,

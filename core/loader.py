@@ -994,7 +994,7 @@ def _parse_version() -> str:
         code = "nocode"
     try:
         dp = importlib.metadata.version("demoparser2")
-    except Exception:  # noqa: BLE001
+    except importlib.metadata.PackageNotFoundError:
         dp = "x"
     return re.sub(r"[^\w.\-]", "_", f"f1-{dp}-{code}")
 

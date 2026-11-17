@@ -47,7 +47,9 @@ def _url_unpack(s: str) -> dict | None:
         pad = "=" * (-len(s) % 4)
         d = json.loads(base64.urlsafe_b64decode(s + pad).decode())
         return d if isinstance(d, dict) else None
-    except Exception:  # noqa: BLE001 - a bad link must not break the app
+    except ValueError:
+        # binascii.Error (bad base64), UnicodeDecodeError and JSONDecodeError
+        # are all ValueError subclasses: a bad link must not break the app
         return None
 
 

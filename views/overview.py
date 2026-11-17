@@ -23,7 +23,7 @@ def render(ctx) -> None:
         st.caption(t("ov_scope_note"))
     _tcol, _ = st.columns([1, 2])
     with _tcol:
-        ov_full = st.toggle(t("all_columns"), key="ov_full")
+        ov_full = st.toggle(t("all_columns"), key="ov_full", persist_state="session")
     st.caption(t("ov_click_hint"))
 
     team_order = ["T", "CT"] + sorted(set(summary["team"]) - {"T", "CT"})

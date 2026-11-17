@@ -253,11 +253,11 @@ def debug_report(
     allowed speed, hit), their duels and the all-player summary.
     """
 
-    try:
-        import importlib.metadata as im
+    import importlib.metadata as im
 
+    try:
         dp_ver = im.version("demoparser2")
-    except Exception:  # noqa: BLE001
+    except im.PackageNotFoundError:
         dp_ver = "unknown"
     try:
         size = os.path.getsize(demo.path)

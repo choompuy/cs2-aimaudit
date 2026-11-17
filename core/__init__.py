@@ -149,7 +149,6 @@ from core.replay import (
     on_lower_level,
     radar_roots,
     duel_telemetry,
-    replay_data,
     round_duels,
     round_replay_data,
     timeline_data,

@@ -7,6 +7,7 @@ every check runs against fixtures built in-memory.
 Run from the repo root: python tests/test_sources.py
 """
 
+import datetime
 import io
 import json
 import os
@@ -359,7 +360,7 @@ def test_store_files():
         rec = sm.MatchRecord(
             provider="steam",
             match_id="m1",
-            played_at=sm.datetime(2026, 1, 2, 3, 4, 5, tzinfo=sm.timezone.utc),
+            played_at=sm.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.timezone.utc),
             score=(13, 5),
             result="win",
         )
@@ -907,14 +908,14 @@ def test_steam_webapi_sharecode():
 
     tr = FakeTransport()
     url_base = "https://api.steampowered.com/ICSGOPlayers_730/GetNextMatchSharingCode/v1"
-    tr.add("GET", f"{url_base}?key=K&steamid=765&knowncode=CSGO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE",
+    tr.add("GET", f"{url_base}?key=K&steamid=765&steamidkey=auth&knowncode=CSGO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE",
            {"result": {"nextcode": "CSGO-FFFFF-GGGGG-HHHHH-IIIII-JJJJJ"}})
     got = ssteam.next_share_code(tr, "K", "765", "auth", "CSGO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE")
     check("next code returned", got == "CSGO-FFFFF-GGGGG-HHHHH-IIIII-JJJJJ")
-    tr.add("GET", f"{url_base}?key=K&steamid=765&knowncode=CSGO-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ",
+    tr.add("GET", f"{url_base}?key=K&steamid=765&steamidkey=auth&knowncode=CSGO-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ",
            {"result": {}})
     check("empty result -> None", ssteam.next_share_code(tr, "K", "765", "auth", "CSGO-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ") is None)
-    tr.add("GET", f"{url_base}?key=BAD&steamid=765&knowncode=x", _http_error(403))
+    tr.add("GET", f"{url_base}?key=BAD&steamid=765&steamidkey=auth&knowncode=x", _http_error(403))
     try:
         ssteam.next_share_code(tr, "BAD", "765", "auth", "x")
         check("403 -> AuthError", False)

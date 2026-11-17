@@ -13,6 +13,8 @@ Where CS2-AimAudit keeps its own files: ONE folder next to the launcher.
         home/          Streamlit's own ~/.streamlit (start.bat points USERPROFILE here)
         radars/        radar images + map_data.json (start.bat fetches them)
         icons/         weapon / status icons + manifest.json (start.bat fetches them)
+        logs/          notes.log - support notes (a corrupt cache dropped, a
+                       cache write failed); trimmed to the last 200 lines
         tools/         the Steam helper (boiler-writter, from Settings)
         library.json   the library: copies AND linked demos (name, path, map ...)
         state.json     the last selected demo and player
@@ -160,6 +162,35 @@ def radars_dir() -> str:
 def icons_dir() -> str:
     """Weapon / status icons + manifest.json (tools/fetch_icons.py)."""
     return _sub("icons")
+
+
+def logs_dir() -> str:
+    """Support notes the user cannot see in the UI (see log_note)."""
+    return _sub("logs")
+
+
+# Best-effort support notes: cache events without a UI surface (a corrupt
+# cache was dropped, a write failed because the disk is full). Nothing
+# secret ever goes in (file names and exception types only), the log is
+# trimmed to the last LOG_MAX_LINES lines, and a failure to log is swallowed:
+# a support note must never break the app.
+LOG_MAX_LINES = 200
+
+
+def log_note(tag: str, msg: str) -> None:
+    """Append one `<utc iso time> <tag>: <msg>` line to data/logs/notes.log."""
+    f = os.path.join(logs_dir(), "notes.log")
+    try:
+        line = f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} {tag}: {msg}\n"
+        try:
+            with open(f, encoding="utf-8") as fh:
+                old = fh.readlines()
+        except OSError:
+            old = []
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.writelines(old[-(LOG_MAX_LINES - 1):] + [line])
+    except OSError:
+        return
 
 
 def library_path() -> str:
@@ -424,21 +455,6 @@ def add_link(path) -> dict:
     return _decorate(entry)
 
 
-def add_folder(folder) -> list[dict]:
-    """Link every demo file directly inside `folder` (not recursive); the entries."""
-    d = _clean_path(folder)
-    if not os.path.isdir(d):
-        raise ValueError(f"Folder not found: {d}")
-    out: list[dict] = []
-    for f in sorted(os.scandir(d), key=lambda x: x.name.lower()):
-        if f.is_file() and not f.name.startswith(".") and f.name.lower().endswith(DEMO_EXTS):
-            try:
-                out.append(add_link(f.path))
-            except (ValueError, OSError):
-                continue
-    return out
-
-
 def relink(demo_id: str, path) -> dict:
     """Point a linked demo at a new location (it was moved or renamed)."""
     p = _clean_path(path)
@@ -623,7 +639,10 @@ def read_parsed(path: str, code_ver: str):
     try:
         with open(f, "rb") as fh:
             obj = pickle.load(fh)  # our own file in our own data folder
-    except Exception:  # noqa: BLE001 - truncated / from another build: reparse
+    except Exception as e:  # noqa: BLE001 - truncated / from another build: reparse
+        # pickle.load may raise anything (Python docs: arbitrary exceptions
+        # from __setstate__) - the note records which cache was dropped and why
+        log_note("cache", f"dropped unreadable parsed cache: {type(e).__name__}")
         _remove(f)
         return None
     try:
@@ -643,7 +662,10 @@ def write_parsed(path: str, code_ver: str, obj, max_bytes: int | None = None) ->
         with open(tmp, "wb") as fh:
             pickle.dump(obj, fh, protocol=pickle.HIGHEST_PROTOCOL)
         os.replace(tmp, f)
-    except Exception:  # noqa: BLE001 - a full disk must never break the analysis
+    except (OSError, TypeError, pickle.PicklingError) as e:
+        # OSError = a full disk (the analysis itself keeps working); the
+        # pickling pair = obj suddenly unpicklable (a code change)
+        log_note("cache", f"parsed cache write failed: {type(e).__name__}")
         _remove(tmp)
         return False
     id8 = os.path.basename(f).split("-")[0]
@@ -698,7 +720,8 @@ def read_matchstats(path: str, code_ver: str) -> dict | None:
     try:
         with open(f, encoding="utf-8") as fh:
             d = json.load(fh)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        log_note("cache", f"dropped unreadable match stats: {type(e).__name__}")
         _remove(f)
         return None
     return d if isinstance(d, dict) else None
@@ -714,7 +737,9 @@ def write_matchstats(path: str, code_ver: str, d: dict) -> bool:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(d, fh, ensure_ascii=False, separators=(",", ":"))
         os.replace(tmp, f)
-    except Exception:  # noqa: BLE001 - a full disk must never break the analysis
+    except (OSError, TypeError, ValueError) as e:
+        # OSError = a full disk; TypeError/ValueError = d no longer JSON-able
+        log_note("cache", f"match stats write failed: {type(e).__name__}")
         _remove(tmp)
         return False
     key = os.path.basename(f).split("-")[0]

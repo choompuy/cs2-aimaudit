@@ -165,7 +165,12 @@ python tests/test_sources.py     # импорт матчей (Steam), без с�
 python tests/test_icons.py       # санитайзер / алиасы / запасные варианты иконок
 python tests/check_ui.py         # проверки i18n / схемы таблиц / слоёв
 python tests/smoke_app.py --fast # сквозные AppTest-сценарии (фейковый парсер)
+tools/check_goldens.py          # побайтовая сверка голденов payloads (запускать через python)
+cd tests/js && npm ci && cd ../.. && python tests/check_roundrep_js.py
 ```
+
+JS-строке нужен один раз Node (`npm ci` в `tests/js`); без него
+`check_roundrep_js.py` пропускается. CI запускает и то, и другое.
 
 - `core/` — парсинг и все метрики (demoparser2), без UI.
 - `sources/` — импорт матчей из Steam: провайдер, HTTP-транспорт,

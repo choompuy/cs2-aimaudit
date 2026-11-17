@@ -1,0 +1,239 @@
+{
+  "click": true,
+  "cols": [
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "round",
+      "l": "Раунд",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "Сколько секунд прошло от старта живого раунда (без фризтайма): 0 — раунд только начался, ~115 — конец затяжного.",
+      "k": "round_sec",
+      "l": "Сек. раунда",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "result",
+      "l": "Результат",
+      "s": false,
+      "t": "badge",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "opponent",
+      "l": "Противник",
+      "s": true,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "weapon",
+      "l": "Оружие",
+      "s": false,
+      "t": "icon",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "hs",
+      "l": "HS",
+      "s": false,
+      "t": "text",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "desc",
+      "h": "",
+      "k": "distance",
+      "l": "Дистанция",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "first",
+      "l": "Первым выстрелил",
+      "s": false,
+      "t": "badge",
+      "tn": "accent"
+    },
+    {
+      "b": false,
+      "f": "asc",
+      "h": "",
+      "k": "aim_err",
+      "l": "Ошибка прицела",
+      "s": false,
+      "t": "num",
+      "tn": "accent"
+    }
+  ],
+  "empty": "",
+  "icons": {},
+  "maxh": 720,
+  "rows": [
+    {
+      "c": [
+        [
+          1.0,
+          "1",
+          null,
+          null,
+          null
+        ],
+        [
+          25.16,
+          "25.2 s",
+          null,
+          null,
+          null
+        ],
+        [
+          "kill",
+          "килл",
+          null,
+          "positive",
+          null
+        ],
+        [
+          "Charlie",
+          "Charlie",
+          null,
+          null,
+          null
+        ],
+        [
+          "ak47",
+          "АК-47",
+          null,
+          null,
+          null
+        ],
+        [
+          1.0,
+          "✓",
+          null,
+          null,
+          null
+        ],
+        [
+          500.0,
+          "500 u",
+          null,
+          null,
+          null
+        ],
+        [
+          "me",
+          "я",
+          null,
+          "positive",
+          null
+        ],
+        [
+          0.2291818957535779,
+          "0.2°",
+          null,
+          null,
+          null
+        ]
+      ],
+      "i": 0,
+      "s": "positive"
+    },
+    {
+      "c": [
+        [
+          2.0,
+          "2",
+          null,
+          null,
+          null
+        ],
+        [
+          25.16,
+          "25.2 s",
+          null,
+          null,
+          null
+        ],
+        [
+          "kill",
+          "килл",
+          null,
+          "positive",
+          null
+        ],
+        [
+          "Charlie",
+          "Charlie",
+          null,
+          null,
+          null
+        ],
+        [
+          "awp",
+          "AWP",
+          null,
+          null,
+          null
+        ],
+        [
+          1.0,
+          "✓",
+          null,
+          null,
+          null
+        ],
+        [
+          500.0,
+          "500 u",
+          null,
+          null,
+          null
+        ],
+        [
+          "me",
+          "я",
+          null,
+          "positive",
+          null
+        ],
+        [
+          0.2291818957535779,
+          "0.2°",
+          null,
+          null,
+          null
+        ]
+      ],
+      "i": 1,
+      "s": "positive"
+    }
+  ],
+  "sel": null
+}

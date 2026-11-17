@@ -10,7 +10,7 @@ written here, so the doc and the guardrails stay honest.
 | Module                            |     Lines | Responsibility                                                                                                                               |
 | --------------------------------- | --------: | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `app.py`                          |       127 | Entry point only: page config, theme injection, `Ctx` assembly, the two-level page dispatcher (`_match` is the only pipeline that loads a demo). |
-| `context.py`                      |       184 | Cached `core` calls (`get_demo`, `get_shots`, `get_duels`, `get_timeline`, `get_replay`) and the `Ctx` dataclass every page renders from.    |
+| `context.py`                      |       184 | Cached `core` calls (`get_demo`, `get_shots`, `get_duels`, `get_timeline`, `get_round_replay`) and the `Ctx` dataclass every page renders from. |
 | `shell.py`                        |       727 | App shell: the sidebar rail, navigation (`go_page`/`go_match`/`go_tab`, URL state), demo loading, the match header, the context row, the library panel. |
 | `filters_ui.py`                   |       548 | URL state (`_URL_KEYS`) and link migration, presets, callbacks, the filter panel (rendered inside the match header).                         |
 | `views/matches.py`                |       781 | The Matches page: the unified table (filters, Refresh, Add match, row actions, the download flow).                                        |
@@ -28,7 +28,7 @@ written here, so the doc and the guardrails stay honest.
 | `core/filters.py`                 |       203 | `Filters`, round halves/pistol rounds, `apply_filters`.                                                                                      |
 | `core/loader.py`                  |       897 | Demo unpacking, path resolution, `state.json`, `load_demo` and data preparation.                                                             |
 | `core/metrics.py`                 |      1114 | `shots_table`, risk model, `build_duels`, `openings_table`, `impact_stats`, `player_summary` (incl. best / died-to weapons), `weapon_stats`.   |
-| `core/replay.py`                  |       720 | `timeline_data`, `replay_data`, `round_replay_data`, `round_duels` (incl. kill-modifier flags), `duel_telemetry`, radar transforms.            |
+| `core/replay.py`                  |       720 | `timeline_data`, `round_replay_data`, `round_duels` (incl. kill-modifier flags), `duel_telemetry`, radar transforms.            |
 | `core/checks.py`                  |       353 | `data_checks`, `debug_report`.                                                                                                               |
 | `core/__init__.py`                |       153 | Facade: re-exports the public API so `import core` / `core.X` keep working.                                                                  |
 | `ui/table.py`                     |       478 | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells), `data_table` (custom component).                       |
@@ -47,8 +47,8 @@ written here, so the doc and the guardrails stay honest.
 | `sources/__init__.py`             |       169 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package - plus the `matches.json` cache glue (`read_cache` / `write_cache` / `cache_time`). |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `i18n.py`                         |    1 413 | English/Russian strings; every UI text goes through `t("key")` literals.                                                                     |
-| `store.py`                        |       836 | The ONE place that knows where files live: the `data/` folder next to `start.bat`, the demo library (copies + linked demos), caches (parsed / unpacked / matchstats / icons), parse keys. |
-| `nativedialog.py`                 |        78 | Native Windows file / folder dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
+| `store.py`                        |       836 | The ONE place that knows where files live: the `data/` folder next to `start.bat`, the demo library (copies + linked demos), caches (parsed / unpacked / matchstats / icons), support notes (`data/logs/notes.log`), parse keys. |
+| `nativedialog.py`                 |        78 | Native Windows file dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
 
 Support: `tests/test_core.py` (synthetic-match unit tests),
 `tests/test_sources.py` (match import: transport, providers, protobuf,
@@ -99,7 +99,7 @@ Nothing may be written outside the app folder: `start.bat` points `TEMP`,
 `USERPROFILE`, pip's cache and Python's `.pyc` folder into `data/`, and
 `store.py` is the only module that decides locations. Everything else asks
 `store` (`demos_dir`, `unpacked_dir`, `parsed_dir`, `radars_dir`,
-`icons_dir`, `state_path`) and never calls `tempfile.gettempdir`,
+`icons_dir`, `logs_dir`, `state_path`) and never calls `tempfile.gettempdir`,
 `mkdtemp`, `Path.home` or reads
 `APPDATA` / `LOCALAPPDATA` / `USERPROFILE` itself (`tests/check_ui.py`
 enforces it). Demos are added **by path** (a linked entry, nothing copied);
@@ -291,6 +291,10 @@ small pieces plus one dispatch line:
    always injected, so tests fake `get_json` / `post_json` / `download` and
    never touch the network. Use `sources/http.py` for anything HTTP: it
    owns the offline gate, https enforcement, retries and `.part` handling.
+   Two deliberate stubs live here until a second provider lands:
+   `HttpTransport.post_json` (a POST twin of `get_json` for a future
+   FACEIT/Web API) and `sources/steam.py::next_share_code` (CS match-history
+   pagination). Both are test-covered, neither is called by the app.
 3. **Dispatch**: extend `sources/__init__.py::list_matches` / `fetch_demo`
    with the provider id; downloads end in `store.add_demo(...)` so hashing,
    dedup and the library stay in one place, then `_bind` writes the `match`
@@ -350,7 +354,9 @@ python tests/smoke_app.py --fast # 285 AppTest checks against a fake parser
 python tests/smoke_app.py --all  # full matrix, longer
 ```
 
-`tools/dump_payloads.py` writes the golden `table_payload` JSONs for the
-three grids (Basic/All × en/ru); the dumps are git-ignored, regenerate
-them when you need a migration proof. `tools/api_snapshot.py` snapshots
-the `core` facade API the same way.
+`tools/check_goldens.py` regenerates the golden `table_payload` JSONs of
+the three grids (Basic/All × en/ru) and the `core` facade snapshot
+(`tools/api_snapshot.py` format) into a scratch folder and byte-compares
+them with the committed `tests/goldens/`; `--update` rewrites the goldens
+for a deliberate behaviour change. `tools/dump_payloads.py` still dumps
+one ad-hoc payload set to a folder of your choice.

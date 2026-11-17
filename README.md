@@ -165,7 +165,12 @@ python tests/test_sources.py     # match import (Steam), no network
 python tests/test_icons.py       # icon sanitizer / aliases / fallbacks
 python tests/check_ui.py         # i18n / schema / layering guardrails
 python tests/smoke_app.py --fast # AppTest end-to-end (fake parser)
+tools/check_goldens.py          # payload goldens byte-compare (run with python)
+cd tests/js && npm ci && cd ../.. && python tests/check_roundrep_js.py
 ```
+
+The JS line needs Node once (`npm ci` in `tests/js`); without it
+`check_roundrep_js.py` skips. CI runs both.
 
 - `core/` — parsing and all metrics (demoparser2), no UI code.
 - `sources/` — match import from Steam: the provider, the HTTP

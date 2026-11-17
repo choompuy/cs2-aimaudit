@@ -43,7 +43,7 @@ def render(ctx) -> None:
             flags.append(", ".join(fl))
         _tcol, _ = st.columns([1, 2])
         with _tcol:
-            du_full = st.toggle(t("all_columns"), key="du_full")
+            du_full = st.toggle(t("all_columns"), key="du_full", persist_state="session")
         # the weapon column is a silhouette (ui/icons.py); the label is the
         # tooltip and the plain-text fallback when icons are missing
         w_vals, w_labels, w_icons = icons.weapon_cells(ddf["weapon"])

@@ -9,7 +9,7 @@ specific message instead of a raw exception string.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 
 DEFAULT_MATCH_COUNT = 5
 MATCH_COUNT_CHOICES = (5, 10, 20)
@@ -41,15 +41,6 @@ class MatchRecord:
     demo_ref: str | None = None  # Valve demo URL / the on-disk replays path
     page_url: str | None = None
     extra: dict = field(default_factory=dict)
-
-    def age_days(self, now: datetime | None = None) -> float | None:
-        if self.played_at is None:
-            return None
-        now = now or datetime.now(timezone.utc)
-        played = self.played_at
-        if played.tzinfo is None:
-            played = played.replace(tzinfo=timezone.utc)
-        return (now - played).total_seconds() / 86400.0
 
     def to_dict(self) -> dict:
         return {

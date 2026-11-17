@@ -382,6 +382,7 @@ def _filters(t, rows: list[core.MatchRow], now: datetime) -> list[core.MatchRow]
             format_func=lambda v: t(f"mflt_p_{v}"),
             key="mflt_period",
             on_change=_limit_reset,
+            persist_state="session",
         )
         st.segmented_control(
             t("mflt_result"),
@@ -389,6 +390,7 @@ def _filters(t, rows: list[core.MatchRow], now: datetime) -> list[core.MatchRow]
             format_func=lambda v: t("all") if v == "all" else t(f"mt_result_{v}"),
             key="mflt_result",
             on_change=_limit_reset,
+            persist_state="session",
         )
         st.selectbox(
             t("mflt_map"),
@@ -396,6 +398,7 @@ def _filters(t, rows: list[core.MatchRow], now: datetime) -> list[core.MatchRow]
             format_func=lambda m: t("all") if m == "all" else _map_disp(m),
             key="mflt_map",
             on_change=_limit_reset,
+            persist_state="session",
         )
         st.selectbox(
             t("mflt_mode"),
@@ -403,6 +406,7 @@ def _filters(t, rows: list[core.MatchRow], now: datetime) -> list[core.MatchRow]
             format_func=lambda k: t("all") if k == "all" else t(f"kind_{k}"),
             key="mflt_kind",
             on_change=_limit_reset,
+            persist_state="session",
         )
         st.button(t("mflt_reset"), key="mflt_reset", on_click=_mflt_reset)
     return [r for r in rows if _keep(r, now)]

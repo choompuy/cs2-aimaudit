@@ -3673,6 +3673,37 @@ check(
     store.read_parsed(_p1, "v2") is None
     and not os.path.exists(os.path.join(store.parsed_dir(), f"{_e1['id'][:8]}-v2.pkl")),
 )
+# data/logs/notes.log: the support notes for events without a UI surface
+_logs = os.path.join(store.logs_dir(), "notes.log")
+_log_txt = Path(_logs).read_text(encoding="utf-8") if os.path.isfile(_logs) else ""
+check(
+    "dropping a corrupt cache is noted in data/logs/notes.log",
+    "dropped unreadable parsed cache" in _log_txt,
+    _log_txt[-200:],
+)
+store.log_note("test", "hello")
+_lines = Path(_logs).read_text(encoding="utf-8").splitlines()
+check("log_note appends a tagged line", _lines[-1].endswith("test: hello"), _lines[-1])
+for _i in range(store.LOG_MAX_LINES + 50):
+    store.log_note("test", f"filler {_i}")
+_lines = Path(_logs).read_text(encoding="utf-8").splitlines()
+check(
+    "log_note keeps the log trimmed to LOG_MAX_LINES",
+    len(_lines) == store.LOG_MAX_LINES and _lines[-1].endswith("test: filler 249"),
+    f"{len(_lines)} lines, last={_lines[-1] if _lines else ''}",
+)
+_real_replace = store.os.replace
+def _full_disk(*_a, **_k):
+    raise OSError("disk full")
+store.os.replace = _full_disk
+check("a failed cache write returns False", store.write_parsed(_p1, "v5", {"a": 1}) is False)
+store.os.replace = _real_replace
+_log_txt = Path(_logs).read_text(encoding="utf-8")
+check(
+    "a failed cache write is noted in the log",
+    "parsed cache write failed: OSError" in _log_txt,
+    _log_txt[-120:],
+)
 _p2 = store.demo_path(_e2)
 store.write_parsed(_p1, "v3", b"x" * 4000)
 os.utime(os.path.join(store.parsed_dir(), f"{_e1['id'][:8]}-v3.pkl"), (1, 1))  # oldest
@@ -3972,24 +4003,13 @@ check(
     os.path.isfile(_arc) and not os.path.exists(_unpacked) and store.read_parsed(_unpacked, "v1") is None,
 )
 
-# a whole folder at once
-_fdir = os.path.join(tempfile.mkdtemp(prefix="cs2aa_fold_"), "replays")
-os.makedirs(os.path.join(_fdir, "sub"))
-for _n in ("a.dem", "b.dem.bz2", ".hidden.dem", "notes.txt"):
+# two more linked demos (a "whole folder at once" flow was removed with
+# store.add_folder: the UI only links individual files now)
+_fdir = tempfile.mkdtemp(prefix="cs2aa_fold_")
+for _n in ("a.dem", "b.dem.bz2"):
     open(os.path.join(_fdir, _n), "wb").write(b"PBDEMS2\0" + b"2" * 30)
-open(os.path.join(_fdir, "sub", "deep.dem"), "wb").write(b"PBDEMS2\0" + b"3" * 30)
-_found = store.add_folder(_fdir)
-check(
-    "add_folder links the demo files directly inside (not hidden, not other types, not subfolders)",
-    sorted(e["name"] for e in _found) == ["a", "b"] and all(e["mode"] == "link" for e in _found),
-    [e["name"] for e in _found],
-)
-check("add_folder twice adds nothing new", sorted(e["id"] for e in store.add_folder(_fdir)) == sorted(e["id"] for e in _found))
-try:
-    store.add_folder(os.path.join(_fdir, "nope"))
-    check("add_folder on a missing folder -> ValueError", False)
-except ValueError:
-    check("add_folder on a missing folder -> ValueError", True)
+store.add_link(os.path.join(_fdir, "a.dem"))
+store.add_link(os.path.join(_fdir, "b.dem.bz2"))
 _rep2 = store.storage_report()
 check(
     "storage report counts linked demos separately (and the fallback flag)",
@@ -4026,11 +4046,11 @@ try:
     nativedialog.subprocess.run = _fake_run(b'banner\n["C:\\\\x\\\\a.dem", "D:\\\\b.dem"]\n')
     check("dialog: chosen files come back as a list", nativedialog.pick_files() == ["C:\\x\\a.dem", "D:\\b.dem"], nativedialog.pick_files())
     nativedialog.subprocess.run = _fake_run(b"[]\n")
-    check("dialog: cancel -> []", nativedialog.pick_files() == [] and nativedialog.pick_folder() == [])
+    check("dialog: cancel -> []", nativedialog.pick_files() == [])
     nativedialog.subprocess.run = _fake_run(b"", rc=1)
     check("dialog: no tkinter / headless (exit code 1) -> None", nativedialog.pick_files() is None)
     nativedialog.subprocess.run = _fake_run(b"not json at all")
-    check("dialog: garbage output -> None", nativedialog.pick_folder() is None)
+    check("dialog: garbage output -> None", nativedialog.pick_files() is None)
     nativedialog.subprocess.run = _fake_run(exc=OSError("no python"))
     check("dialog: cannot start the child -> None", nativedialog.pick_files() is None)
 finally:
