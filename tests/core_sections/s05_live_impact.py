@@ -1,10 +1,10 @@
 """knife round / live match start, halves and presets from sides, impact (openings / trades / multi-kills / filters).
 
-Split out of tests/test_core.py (R5); runs at import in
+Split out of tests/test_core.py; runs at import in
 the runner's order - see core_sections/__init__.py.
 """
 
-# --- R5 imports (generated; keep in sync with the providers) ---
+# --- shared fixtures and helpers (see _shared.py) ---
 from ._shared import (  # noqa: F401
     FakeParser,
     IDS,
@@ -835,4 +835,3 @@ finally:
         os.environ.pop("AIMAUDIT_RADAR_DIR", None)
     else:
         os.environ["AIMAUDIT_RADAR_DIR"] = _old_env
-

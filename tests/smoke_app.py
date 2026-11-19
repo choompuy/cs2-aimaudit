@@ -838,7 +838,7 @@ def scenario_settings():
     )
     act(at, "settings: thr to 200", lambda: at.slider(key="thr").set_value(200).run())
     act(at, "settings: safe_dist to 1000", lambda: at.slider(key="safe_dist").set_value(1000).run())
-    # the acceptance of stage 2: the values survive Settings -> Matches -> a match
+    # the values survive Settings -> Matches -> a match
     act(at, "settings: to the matches list", lambda: at.button(key="nav_matches").click().run())
     check("settings: on the list", ss_get(at, "page") == "matches" and not at.exception, err_of(at))
     check("settings: thr survived the trip to the list", ss_get(at, "thr") == 200, ss_get(at, "thr"))
@@ -1002,7 +1002,7 @@ def scenario_duel_strip():
 
 
 def scenario_roundtrip():
-    """The acceptance path of stage 4: Matches -> row -> tabs -> back,
+    """The path Matches -> row -> tabs -> back,
     and nothing is lost on the way."""
     print("== match view round trip ==")
     at = open_demo(make_match([1, 2, 13]), "roundtrip.dem")

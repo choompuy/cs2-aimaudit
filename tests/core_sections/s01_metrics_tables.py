@@ -1,10 +1,10 @@
 """allowed_speed, load_demo, shots_table, build_duels, summary, shot/duel context (old + unsupported demos).
 
-Split out of tests/test_core.py (R5); runs at import in
+Split out of tests/test_core.py; runs at import in
 the runner's order - see core_sections/__init__.py.
 """
 
-# --- R5 imports (generated; keep in sync with the providers) ---
+# --- shared fixtures and helpers (see _shared.py) ---
 from ._shared import (  # noqa: F401
     FakeParser,
     IDS,
@@ -263,4 +263,3 @@ check(
     (unsup_shots["zone"] == "BombsiteA").any(),
     unsup_shots["zone"].head().tolist(),
 )
-

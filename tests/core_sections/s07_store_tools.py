@@ -1,10 +1,10 @@
 """store (data folder, library, caches, linked demos), tools/fetch_radars, nativedialog, match list merge, matchstats cache.
 
-Split out of tests/test_core.py (R5); runs at import in
+Split out of tests/test_core.py; runs at import in
 the runner's order - see core_sections/__init__.py.
 """
 
-# --- R5 imports (generated; keep in sync with the providers) ---
+# --- shared fixtures and helpers (see _shared.py) ---
 from ._shared import (  # noqa: F401
     FAIL,
     FakeParser,

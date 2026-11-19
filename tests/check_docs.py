@@ -1,5 +1,5 @@
 """
-Docs numbers machine-checked (F6): the module table in
+Docs numbers machine-checked: the module table in
 docs/ARCHITECTURE.md carries per-file line counts, and this script keeps
 them honest - every count must be within +-15% of the file's real size,
 so the table cannot silently rot while the code moves.

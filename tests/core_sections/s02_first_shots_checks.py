@@ -1,10 +1,10 @@
 """first shots / mouse flick, data_checks (+ scoreboard cross-check), fix_ids, debug_report, punch variants, timeline buttons, decompressed_demo.
 
-Split out of tests/test_core.py (R5); runs at import in
+Split out of tests/test_core.py; runs at import in
 the runner's order - see core_sections/__init__.py.
 """
 
-# --- R5 imports (generated; keep in sync with the providers) ---
+# --- shared fixtures and helpers (see _shared.py) ---
 from ._shared import (  # noqa: F401
     FakeParser,
     S1,
@@ -567,4 +567,3 @@ try:
         _expect_value_error(p)
 except ImportError:
     print("  skip broken zst (zstandard not installed)")
-

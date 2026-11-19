@@ -1,10 +1,10 @@
 """crouch-aware angle_err/head_ang, counter-strafe quality, duel shots by crosshair proximity, no hurt / no_events / corrupt archives.
 
-Split out of tests/test_core.py (R5); runs at import in
+Split out of tests/test_core.py; runs at import in
 the runner's order - see core_sections/__init__.py.
 """
 
-# --- R5 imports (generated; keep in sync with the providers) ---
+# --- shared fixtures and helpers (see _shared.py) ---
 from ._shared import (  # noqa: F401
     FakeParser,
     IDS,
@@ -423,4 +423,3 @@ check(
     not (_parts() - _parts_before),
     str(sorted(_parts() - _parts_before)[:2]),
 )
-

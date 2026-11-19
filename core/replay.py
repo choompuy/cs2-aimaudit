@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 import struct
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -27,7 +27,6 @@ from core.model import (
     POS,
     TICKRATE,
     _decode_buttons,
-    _round_col,
     _safe_int,
     _speed_from_positions,
     norm_weapon,

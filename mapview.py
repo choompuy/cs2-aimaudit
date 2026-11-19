@@ -14,9 +14,7 @@ import base64
 from functools import lru_cache
 
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 import core
 
@@ -218,5 +216,3 @@ def build_figure(
         fig.update_xaxes(title_text="X")
         fig.update_yaxes(title_text="Y", scaleanchor="x", scaleratio=1)
     return fig
-
-

@@ -4,7 +4,7 @@ Synthetic tests for CS2-AimAudit core.py with a fake demoparser2.
 Builds a tiny fake match (4 players, warmup shots, a duel, a teamkill,
 a lonely shot) and verifies every core metric without a real .dem file.
 Run from the repo root: python tests/test_core.py
-(R5 split: the sections live in tests/core_sections/, this module
+(The sections live in tests/core_sections/, this module
 is the shared header - env, imports, check(), the fake parser.)
 """
 

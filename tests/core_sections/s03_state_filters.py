@@ -1,10 +1,10 @@
 """app state, tickrate from header, halftime sides, wilson_ci, rank_in_lobby, weapon_class, apply_filters, round presets.
 
-Split out of tests/test_core.py (R5); runs at import in
+Split out of tests/test_core.py; runs at import in
 the runner's order - see core_sections/__init__.py.
 """
 
-# --- R5 imports (generated; keep in sync with the providers) ---
+# --- shared fixtures and helpers (see _shared.py) ---
 from ._shared import (  # noqa: F401
     FakeParser,
     S1,
@@ -384,4 +384,3 @@ dsp, _, _ = core.apply_filters(
     core.Filters(rounds_set={1, 13}),
 )
 check("rounds_set filter frames", list(dsp["round"]) == [1, 13])
-
