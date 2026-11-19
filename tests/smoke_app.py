@@ -2621,10 +2621,7 @@ def scenario_tab_state_keep():
     Regression for the state-loss bug: the "all columns / all metrics"
     toggles and the Map controls render only on their own tab, so every
     tab switch used to reset them (ov_full, sh_all, du_full, map_show,
-    map_lines). persist_state="session" keeps the values alive; the
-    golden overview_all_ru.json was regenerated for the same reason (it
-    used to fossilize the reset: the "all columns" capture really held
-    the basic table).
+    map_lines). persist_state="session" keeps the values alive.
     """
     print("== tab widgets survive tab switches ==")
     demo = make_match([1, 2])

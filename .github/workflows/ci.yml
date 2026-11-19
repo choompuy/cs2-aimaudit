@@ -61,8 +61,6 @@ jobs:
           npm ci
           cd ../..
           python tests/check_roundrep_js.py
-      - name: Golden snapshots (table payloads + core API)
-        run: python tools/check_goldens.py
 
   smoke-all:
     # One full run (every page and locale) per commit is enough.

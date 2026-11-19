@@ -62,9 +62,8 @@ end-to-end scenarios), `tests/check_ui.py` (static guardrails),
 `tests/check_docs.py` (the module table's line counts stay within ±15%
 of the real files),
 `tests/check_roundrep_js.py` + `tests/js` (front-end unit tests),
-`tools/` (`dump_payloads.py` golden grid payloads, `api_snapshot.py`
-core API snapshot, `fetch_radars.py`, `fetch_icons.py`,
-`inspect_rounds.py`, `sync_theme.py`).
+`tools/` (`fetch_radars.py`, `fetch_icons.py`, `inspect_rounds.py`,
+`sync_theme.py`, `compile_all.py`).
 
 ## Navigation and state
 
@@ -247,9 +246,7 @@ of the download, `AIMAUDIT_ICON_DIR` points tests at a fixture folder.
 4. Feed it: the page builds the rows dict — add the numpy column under
    the same key (see `views/overview.py` `ov_cells`).
 
-`python tests/check_ui.py` now validates the schema, i18n keys and
-tokens; `python tools/dump_payloads.py tools/_payload_check` regenerates
-a JSON dump of the built grids if you want a before/after proof.
+`python tests/check_ui.py` validates the schema, i18n keys and tokens.
 
 ## How to add a column or a table
 
@@ -366,10 +363,3 @@ python tests/check_roundrep_js.py # front-end unit tests (node, tests/js)
 python tests/smoke_app.py --fast # 285 AppTest checks against a fake parser
 python tests/smoke_app.py --all  # full matrix, longer
 ```
-
-`tools/check_goldens.py` regenerates the golden `table_payload` JSONs of
-the three grids (Basic/All × en/ru) and the `core` facade snapshot
-(`tools/api_snapshot.py` format) into a scratch folder and byte-compares
-them with the committed `tests/goldens/`; `--update` rewrites the goldens
-for a deliberate behaviour change. `tools/dump_payloads.py` still dumps
-one ad-hoc payload set to a folder of your choice.

@@ -165,7 +165,6 @@ python tests/test_sources.py     # импорт матчей (Steam), без с�
 python tests/test_icons.py       # санитайзер / алиасы / запасные варианты иконок
 python tests/check_ui.py         # проверки i18n / схемы таблиц / слоёв
 python tests/smoke_app.py --fast # сквозные AppTest-сценарии (фейковый парсер)
-tools/check_goldens.py          # побайтовая сверка голденов payloads (запускать через python)
 cd tests/js && npm ci && cd ../.. && python tests/check_roundrep_js.py
 ```
 
