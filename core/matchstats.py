@@ -20,7 +20,11 @@ import pandas as pd
 
 import store
 from core.loader import PARSE_VERSION
-from core.metrics import build_duels, impact_stats, player_summary, round_winners, shots_table
+from core.duels import build_duels
+from core.impact import impact_stats
+from core.openings import round_winners
+from core.shots import shots_table
+from core.summary import player_summary
 
 # the summary format itself (content changes bump PARSE_VERSION through the
 # loader hash, this marks structural changes of the JSON)

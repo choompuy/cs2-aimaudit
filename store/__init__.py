@@ -1,0 +1,102 @@
+"""
+The store package: the ONE place that knows where CS2-AimAudit's files
+live. Four areas, all re-exported here so `store.X` keeps working:
+
+- store.paths      - the data folder, its subfolders and file names
+- store.library    - the demo library (copies + linked demos)
+- store.caches     - parsed / matchstats caches, storage report and clear
+- store.importdata - accounts.json / matches.json (match import)
+
+Nothing here touches the network; plain Python only (no Streamlit, no
+demo parsing) so it can be tested on its own. See store/paths.py for
+the folder map and the AIMAUDIT_DATA_DIR / read-only-fallback rules.
+"""
+
+from __future__ import annotations
+
+from store.paths import (
+    APP_DIR,
+    DEMO_EXTS,
+    FALLBACK_DIR,
+    LOG_MAX_LINES,
+    PARSED_MAX_BYTES,
+    _ID_RE,
+    _SUFFIXES,
+    _app_dir,
+    _now,
+    _resolve,
+    _safe,
+    _sub,
+    _unlink_freed,
+    _writable,
+    accounts_path,
+    data_dir,
+    data_dir_is_fallback,
+    demo_key,
+    demos_dir,
+    human_size,
+    icons_dir,
+    library_path,
+    log_note,
+    logs_dir,
+    matches_cache_path,
+    matchstats_dir,
+    parsed_dir,
+    radars_dir,
+    split_demo_name,
+    state_path,
+    tools_dir,
+    unpacked_dir,
+)
+
+from store.library import (
+    _adopt_files,
+    _check_demo_file,
+    _clean_path,
+    _decorate,
+    _entry,
+    _hash_file,
+    _keep_entries,
+    _read_library,
+    _scan_demo_files,
+    _sync,
+    _update,
+    _write_library,
+    add_demo,
+    add_link,
+    delete_all_demos,
+    delete_demo,
+    demo_path,
+    get_demo,
+    link_id,
+    list_demos,
+    relink,
+    touch,
+    update_meta,
+)
+
+from store.caches import (
+    _matchstats_file,
+    _parsed_file,
+    clear_cache,
+    clear_icons,
+    dir_size,
+    parse_key,
+    prune_parsed,
+    read_matchstats,
+    read_parsed,
+    storage_report,
+    write_matchstats,
+    write_parsed,
+)
+
+from store.importdata import (
+    _read_json_file,
+    _write_json_file,
+    find_by_match,
+    mark_analyzed,
+    read_accounts,
+    read_matches_cache,
+    write_accounts,
+    write_matches_cache,
+)

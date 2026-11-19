@@ -363,33 +363,3 @@ class SteamProvider:
                 os.remove(dest)
             except OSError:
                 pass
-
-
-# ----------------------------------------------------- Web API (optional)
-def next_share_code(transport, api_key: str, steamid64: str, auth_code: str, known_code: str) -> str | None:
-    """
-    Steam Web API GetNextMatchSharingCode: the share code after `known_code`.
-
-    Returns None at the end of the history (HTTP 202). A bad known code raises
-    ShareCodeError; a bad auth code or an unavailable backend raises AuthError
-    without retry storms (the transport's retries are bounded to 3 attempts).
-
-    Deviation from the app's "keys never in URLs" rule, documented on purpose:
-    Valve's Web API has no header authentication - the key can only travel as
-    a query parameter. This optional helper is not reachable from the UI.
-    """
-    from sources.model import AuthError
-
-    url = (
-        "https://api.steampowered.com/ICSGOPlayers_730/GetNextMatchSharingCode/v1"
-        f"?key={api_key}&steamid={steamid64}"
-        f"&steamidkey={auth_code}&knowncode={known_code}"
-    )
-    try:
-        data = transport.get_json(url)
-    except ProviderError as e:
-        if isinstance(e, AuthError):
-            raise
-        raise ShareCodeError(str(e)) from e
-    code = ((data.get("result") or {}).get("nextcode")) or ""
-    return code or None

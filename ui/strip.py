@@ -85,10 +85,6 @@ def strip_payload(
     }
 
 
-def _renderer():
-    return component.declare("aimaudit_strip", _CSS, _JS)
-
-
 def duel_strip(
     items: Sequence[Mapping[str, Any]],
     selected: int | None,
@@ -100,10 +96,10 @@ def duel_strip(
 ) -> None:
     """Render the duel strip; a chip click / hotkey calls on_select(i)."""
     payload = strip_payload(items, selected, round_label=round_label, labels=labels)
-    kwargs: dict = {}
-    if on_select is not None:
-        kwargs["on_sel_change"] = component.event_callback(key, "sel", on_select)
-    _renderer()(key=key, data=payload, **kwargs)
+    component.render(
+        "aimaudit_strip", _CSS, _JS, key=key, data=payload,
+        trigger="sel", handler=on_select,
+    )
 
 
 _CSS = """

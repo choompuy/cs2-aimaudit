@@ -21,7 +21,10 @@ from core.model import (
     is_gun,
 )
 
-from core.metrics import duels_for, impact_stats, openings_table, player_summary
+from core.duels import duels_for
+from core.impact import impact_stats
+from core.openings import openings_table
+from core.summary import player_summary
 
 
 # ---------------------------------------------------------- data quality

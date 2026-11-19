@@ -78,26 +78,36 @@ from core.filters import (
     round_bounds,
 )
 
-from core.loader import (
-    COMPRESSED_EXTS,
-    DemoParser,
-    PARSE_VERSION,
+from core.ids import (
     _add_speed,
     _extract_punch,
     _norm_alive,
-    _parse_round_sides,
-    _parse_version,
+    build_id_lookup,
+    fix_ids,
+)
+
+from core.unpack import (
+    COMPRESSED_EXTS,
     _unpack,
     _unpack_dir,
     _zstandard_module,
-    build_id_lookup,
     decompressed_demo,
-    fix_ids,
+)
+
+from core.phases import (
+    _parse_ticks_tiered,
+    tickrate_from_header,
+)
+
+from core.loader import (
+    DemoParser,
+    PARSE_VERSION,
+    _parse_round_sides,
+    _parse_version,
     load_demo,
     load_demo_cached,
     load_state,
     save_state,
-    tickrate_from_header,
 )
 
 from core.matchlist import (
@@ -119,23 +129,35 @@ from core.matchstats import (
     write_cached,
 )
 
-from core.metrics import (
-    _enemy_kill_rows,
-    _hurts_of,
+from core.shots import (
     _match_hits,
     _nearest_enemy_dist,
-    _round_side_keep,
     add_risk,
     add_stop_quality,
+    shots_table,
+)
+
+from core.duels import (
     build_duels,
     duels_for,
-    hitgroup_counts,
-    impact_stats,
+)
+
+from core.openings import (
+    _enemy_kill_rows,
+    _round_side_keep,
     openings_table,
-    player_summary,
     round_outcomes,
     round_winners,
-    shots_table,
+)
+
+from core.impact import (
+    impact_stats,
+)
+
+from core.summary import (
+    _hurts_of,
+    hitgroup_counts,
+    player_summary,
     weapon_stats,
 )
 

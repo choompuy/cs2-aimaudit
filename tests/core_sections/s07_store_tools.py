@@ -35,11 +35,11 @@ check(
         for d in (store.demos_dir(), store.unpacked_dir(), store.parsed_dir(), store.radars_dir())
     ),
 )
-_save = (store.APP_DIR, store.FALLBACK_DIR, os.environ.pop("AIMAUDIT_DATA_DIR"))
+_save = (store.paths.APP_DIR, store.paths.FALLBACK_DIR, os.environ.pop("AIMAUDIT_DATA_DIR"))
 try:
     _app = tempfile.mkdtemp(prefix="cs2aa_app_")
-    store.APP_DIR, store.FALLBACK_DIR = _app, tempfile.mkdtemp(prefix="cs2aa_home_")
-    store._resolve.cache_clear()
+    store.paths.APP_DIR, store.paths.FALLBACK_DIR = _app, tempfile.mkdtemp(prefix="cs2aa_home_")
+    store.paths._resolve.cache_clear()
     check(
         "default data folder is <app folder>/data, next to the launcher",
         store.data_dir() == os.path.join(_app, "data"),
@@ -48,17 +48,17 @@ try:
     _ro = tempfile.mkdtemp(prefix="cs2aa_ro_")
     with open(os.path.join(_ro, "data"), "w") as fh:  # a FILE named data: not usable
         fh.write("x")
-    store.APP_DIR = _ro
-    store._resolve.cache_clear()
+    store.paths.APP_DIR = _ro
+    store.paths._resolve.cache_clear()
     check(
         "app folder not writable -> falls back to the visible per-user folder",
-        store.data_dir() == store.FALLBACK_DIR and store.data_dir_is_fallback(),
+        store.data_dir() == store.paths.FALLBACK_DIR and store.data_dir_is_fallback(),
         store.data_dir(),
     )
 finally:
-    store.APP_DIR, store.FALLBACK_DIR = _save[0], _save[1]
+    store.paths.APP_DIR, store.paths.FALLBACK_DIR = _save[0], _save[1]
     os.environ["AIMAUDIT_DATA_DIR"] = _save[2]
-    store._resolve.cache_clear()
+    store.paths._resolve.cache_clear()
 check("env folder is back after the test", store.data_dir() == _dd and not store.data_dir_is_fallback())
 
 _had_frozen = hasattr(sys, "frozen")
@@ -75,7 +75,7 @@ finally:
     sys.executable = _old_exe
     if not _had_frozen:
         del sys.frozen
-check("not frozen: next to the sources", store._app_dir() == os.path.dirname(os.path.abspath(store.__file__)))
+check("not frozen: next to the sources", store._app_dir() == os.path.dirname(os.path.dirname(os.path.abspath(store.__file__))))
 
 print("== store: demo library ==")
 check("empty library lists nothing", store.list_demos() == [])
@@ -183,12 +183,12 @@ check(
     len(_lines) == store.LOG_MAX_LINES and _lines[-1].endswith("test: filler 249"),
     f"{len(_lines)} lines, last={_lines[-1] if _lines else ''}",
 )
-_real_replace = store.os.replace
+_real_replace = store.caches.os.replace
 def _full_disk(*_a, **_k):
     raise OSError("disk full")
-store.os.replace = _full_disk
+store.caches.os.replace = _full_disk
 check("a failed cache write returns False", store.write_parsed(_p1, "v5", {"a": 1}) is False)
-store.os.replace = _real_replace
+store.caches.os.replace = _real_replace
 _log_txt = Path(_logs).read_text(encoding="utf-8")
 check(
     "a failed cache write is noted in the log",

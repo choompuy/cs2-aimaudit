@@ -98,6 +98,8 @@ bad(
 APP_CODE = [p for p in APP_SOURCES if p.name != "i18n.py"]
 for _d in ("core", "sources"):
     APP_CODE += sorted((ROOT / _d).glob("*.py"))
+if (ROOT / "store").is_dir():
+    APP_CODE += sorted((ROOT / "store").glob("*.py"))
 for _f in ("store.py", "mapview.py", "nativedialog.py"):
     if (ROOT / _f).is_file():
         APP_CODE.append(ROOT / _f)
@@ -343,8 +345,8 @@ for _var, _why in (
     )
 
 # No module may pick a folder outside the app folder by itself: temp dirs,
-# the profile, %APPDATA%. store.py is the one place that knows locations
-# (its documented read-only fallback); everything else asks store.
+# the profile, %APPDATA%. the store package is the one place that knows
+# locations (its documented read-only fallback); everything else asks store.
 _OUTSIDE = re.compile(
     r"gettempdir|mkdtemp|TemporaryDirectory|NamedTemporaryFile|"
     r"expanduser\(\s*[\"']~|Path\.home|LOCALAPPDATA|APPDATA|USERPROFILE"
@@ -352,7 +354,7 @@ _OUTSIDE = re.compile(
 _outside_hits = []
 for _py in sorted(ROOT.rglob("*.py")):
     _rel = _py.relative_to(ROOT).as_posix()
-    if _rel.startswith(("tests/", ".venv/", "data/")) or _rel == "store.py":
+    if _rel.startswith(("tests/", ".venv/", "data/", "store/")) or _rel == "store.py":
         continue
     for _i, _line in enumerate(_py.read_text(encoding="utf-8").splitlines(), 1):
         if _line.lstrip().startswith("#"):
@@ -360,7 +362,7 @@ for _py in sorted(ROOT.rglob("*.py")):
         if _OUTSIDE.search(_line):
             _outside_hits.append(f"{_rel}:{_i}: {_line.strip()[:70]}")
 bad(
-    "no module writes outside the app folder on its own (only store.py knows locations)",
+    "no module writes outside the app folder on its own (only the store package knows locations)",
     not _outside_hits,
     _outside_hits[:4],
 )
@@ -761,6 +763,7 @@ def _local_modules() -> dict[str, Path]:
         (ROOT.glob("theme/*.py"), "theme"),
         (ROOT.glob("views/*.py"), "views"),
         (ROOT.glob("sources/*.py"), "sources"),
+        (ROOT.glob("store/*.py"), "store"),
     ):
         for path in pattern:
             name = path.stem

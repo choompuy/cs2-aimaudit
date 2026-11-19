@@ -222,10 +222,6 @@ def table_payload(
     }
 
 
-def _renderer():
-    return component.declare("aimaudit_table", _CSS, _JS)
-
-
 def data_table(
     rows: Mapping[str, Sequence],
     cols: Sequence[Col],
@@ -248,10 +244,10 @@ def data_table(
         empty=empty,
         icons=icons,
     )
-    kwargs: dict = {}
-    if on_click is not None:
-        kwargs["on_clicked_change"] = component.event_callback(key, "clicked", on_click)
-    _renderer()(key=key, data=payload, **kwargs)
+    component.render(
+        "aimaudit_table", _CSS, _JS, key=key, data=payload,
+        trigger="clicked", handler=on_click,
+    )
 
 
 _CSS = """

@@ -519,10 +519,6 @@ def round_payload(
     }
 
 
-def _renderer():
-    return component.declare("aimaudit_roundrep2", _CSS, _JS)
-
-
 def round_replay(
     payload: dict,
     *,
@@ -534,7 +530,7 @@ def round_replay(
     A round-bar chip click calls ``on_round(n)`` - the ONE Streamlit
     trigger the component has (switching rounds needs a new payload).
     """
-    kwargs: dict = {}
-    if on_round is not None:
-        kwargs["on_rnd_change"] = component.event_callback(key, "rnd", on_round)
-    _renderer()(key=key, data=payload, **kwargs)
+    component.render(
+        "aimaudit_roundrep2", _CSS, _JS, key=key, data=payload,
+        trigger="rnd", handler=on_round,
+    )

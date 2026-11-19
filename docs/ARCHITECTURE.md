@@ -27,30 +27,41 @@ written here, so the doc and the guardrails stay honest.
 | `core/matchstats.py`              |       163 | The per-match summary cache behind the Matches table (compute from a parsed demo, read/write the JSON cache, resolve "me").                 |
 | `core/model.py`                   |       788 | Constants, the `Demo` container, pure helpers (weapons, angles, `wilson_ci`, `rank_in_lobby`).                                               |
 | `core/filters.py`                 |       203 | `Filters`, round halves/pistol rounds, `apply_filters`.                                                                                      |
-| `core/loader.py`                  |       1 180 | Demo unpacking, path resolution, `state.json`, `load_demo` and data preparation.                                                             |
-| `core/metrics.py`                 |      1114 | `shots_table`, risk model, `build_duels`, `openings_table`, `impact_stats`, `player_summary` (incl. best / died-to weapons), `weapon_stats`.   |
+| `core/ids.py`                     |       191 | SteamID resolution (`build_id_lookup` / `fix_ids`) and frame normalization (punch, alive, fire-tick speed).                                |
+| `core/unpack.py`                  |       148 | Compressed demos: `.bz2` / `.gz` / `.zip` / `.zst` stream-decompression into `cache/unpacked`, `.part` safety, ValueError contract.         |
+| `core/phases.py`                  |       695 | The parse phases `load_demo` walks through (players, events, warmup / knife / restart exclusion, tick table, mouse, totals, round windows). |
+| `core/loader.py`                  |       217 | `load_demo` orchestration + `PARSE_VERSION` (hash of the core package), `state.json`, per-round sides, the parsed-demo cache.               |
+| `core/shots.py`                   |       305 | `shots_table` (one row per gun shot: speed, dist, state, hit) + `add_stop_quality` / `add_risk`.                                             |
+| `core/duels.py`                   |       316 | `build_duels`, `duels_for`: the shots both duelists fired, aimed at each other, with the first-shot numbers.                                 |
+| `core/openings.py`                |       281 | Round structure: `round_outcomes` / `round_winners`, `openings_table`, the shared `_enemy_kill_rows` / `_round_side_keep` / `_top_weapon`.   |
+| `core/impact.py`                  |       164 | `impact_stats`: openings, trades, multi-kills, assists from the enemy-kill rows.                                                            |
+| `core/summary.py`                 |       282 | `player_summary` (overview row, best / died-to weapons), `weapon_stats`, `hitgroup_counts`, `_hurts_of`.                                    |
 | `core/replay.py`                  |       720 | `timeline_data`, `round_replay_data`, `round_duels` (incl. kill-modifier flags), `duel_telemetry`, radar transforms.            |
 | `core/checks.py`                  |       353 | `data_checks`, `debug_report`.                                                                                                               |
 | `core/__init__.py`                |       300 | Facade: re-exports the public API so `import core` / `core.X` keep working.                                                                  |
-| `ui/table.py`                     |       478 | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells), `data_table` (custom component).                       |
-| `ui/component.py`                 |        38 | Custom-component glue: `declare` + `event_callback`, shared by table / strip / roundrep.                                                |
+| `ui/table.py`                     |       490 | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells), `data_table` (custom component).                       |
+| `ui/component.py`                 |        61 | Custom-component glue: `declare` + `event_callback` + `render` (declare, wire the trigger callback, render the payload), shared by table / strip / roundrep. |
 | `ui/schema.py` + `ui/tables.toml` | 338 + 354 | The table schema: loader, `build_cols`, `table`, `validate`; the TOML is the single source of truth for grids (incl. `[table.matches]`).     |
 | `ui/charts.py`                    |        86 | `style_figure` and shared chart builders.                                                                                                    |
 | `ui/format.py`                    |        63 | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`, `map_name`.                                                                           |
-| `ui/strip.py`                     |       352 | The duel navigation strip (Timeline).                                                                                                        |
+| `ui/strip.py`                     |       339 | The duel navigation strip (Timeline).                                                                                                        |
 | `ui/icons.py`                     |       360 | The icon set loader: SVG sanitizer, SHA-256 verification, weapon-name aliases, `weapon_info` / `weapon_cells` / `payload` for grids and the replay. |
-| `ui/roundrep.py`                  |       540 | 2D replay component: `round_payload` (pure JSON model, carries the round's `icons` / `wlab`) + `round_replay`; front end in `roundrep.js` / `.css`. |
+| `ui/roundrep.py`                  |       536 | 2D replay component: `round_payload` (pure JSON model, carries the round's `icons` / `wlab`) + `round_replay`; front end in `roundrep.js` / `.css`. |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css` (incl. the sidebar rail), the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `sources/model.py`                |       162 | The match-import model: `MatchRecord`, `DemoState`, the Steam config and the localized `ProviderError` family.                               |
-| `sources/http.py`                 |       214 | Shared urllib transport: timeouts, 429/Retry-After and 5xx retries, streaming downloads to `.part`, https-only, `AIMAUDIT_OFFLINE`.           |
+| `sources/http.py`                 |       206 | Shared urllib transport: timeouts, 429/Retry-After and 5xx retries, streaming downloads to `.part`, https-only, `AIMAUDIT_OFFLINE`.           |
 | `sources/steam_gc.py`             |       266 | Dependency-free protobuf wire reader for `CMsgGCCStrike15_v2_MatchList` (field numbers from SteamDatabase/Protobufs).                        |
-| `sources/steam.py`                |       380 | boiler-writter runner + hash-pinned install, the share-code codec, Valve demo downloads, optional Web API share-code chaining.               |
+| `sources/steam.py`                |       365 | boiler-writter runner + hash-pinned install, the share-code codec, Valve demo downloads.                                                          |
 | `sources/inbox.py`                |       162 | The CS2 replays folder (Watch -> Your Matches) as a match source (registry + libraryfolders.vdf).                                            |
 | `sources/__init__.py`             |       169 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package - plus the `matches.json` cache glue (`read_cache` / `write_cache` / `cache_time`). |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `i18n.py`                         |        45 | Thin loader: `STR`/`LANGS`/`make_t` built from the `i18n/<lang>.toml` files; fails fast on a missing `en.toml`, a non-flat file or a file/LANGS mismatch. |
 | `i18n/en.toml` + `i18n/ru.toml`   | 653 + 653 | The UI strings themselves (648 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
-| `store.py`                        |       836 | The ONE place that knows where files live: the `data/` folder next to `start.bat`, the demo library (copies + linked demos), caches (parsed / unpacked / matchstats / icons), support notes (`data/logs/notes.log`), parse keys. |
+| `store/` (package)                |       102 | The ONE place that knows where files live; the facade re-exports everything so `store.X` is unchanged.                                       |
+| `store/paths.py`                  |       249 | The `data/` folder next to `start.bat`: AIMAUDIT_DATA_DIR, the read-only fallback, every subfolder, file names / demo ids, `log_note`.      |
+| `store/library.py`                |       388 | The demo library: copies AND linked demos, add / relink / delete, the disk sync that adopts dropped files.                                  |
+| `store/caches.py`                 |       233 | Parsed / matchstats caches (parse keys, LRU pruning), the storage report and the clear actions.                                             |
+| `store/importdata.py`             |        66 | accounts.json / matches.json: atomic writes, a corrupt file counts as empty.                                                                |
 | `state.py`                        |       170 | The `session_state` registry: key-name constants, typed get_*/set_* for the keys shared by 2+ modules, and the navigation mutators (`go_page`/`go_match`/`go_tab`/`leave_match`, re-exported by `shell`). |
 | `nativedialog.py`                 |        95 | Native Windows file dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
 
@@ -108,8 +119,8 @@ library entry (the match view asks once).
 
 Nothing may be written outside the app folder: `start.bat` points `TEMP`,
 `USERPROFILE`, pip's cache and Python's `.pyc` folder into `data/`, and
-`store.py` is the only module that decides locations. Everything else asks
-`store` (`demos_dir`, `unpacked_dir`, `parsed_dir`, `radars_dir`,
+The `store` package is the only module that decides locations. Everything
+else asks it (`demos_dir`, `unpacked_dir`, `parsed_dir`, `radars_dir`,
 `icons_dir`, `logs_dir`, `state_path`) and never calls `tempfile.gettempdir`,
 `mkdtemp`, `Path.home` or reads
 `APPDATA` / `LOCALAPPDATA` / `USERPROFILE` itself (`tests/check_ui.py`
@@ -134,7 +145,7 @@ filters_ui.py  shell.py  views/   Streamlit pages and panels
 
 sources/                    match import (Steam): a leaf like core/ -
                             no Streamlit at all, no views/shell knowledge; may
-                            import store.py for paths (store itself is a
+                            import store for paths (the store package is a
                             stdlib-only leaf under everything).
 ```
 
@@ -234,9 +245,11 @@ of the download, `AIMAUDIT_ICON_DIR` points tests at a fixture folder.
 
 ## How to add a metric (a `tables.toml` row)
 
-1. Compute it: extend the producing function in `core/metrics.py`
-   (`player_summary` for overview-style rows, `weapon_stats` for weapons,
-   `build_duels` for duels) and add the raw column to the DataFrame.
+1. Compute it: extend the producing function in the metric module it
+   belongs to (`core/summary.py::player_summary` for overview-style rows,
+   `weapon_stats` for weapons, `core/duels.py::build_duels` for duels,
+   `core/shots.py::shots_table` for shot-level cells) and add the raw
+   column to the DataFrame.
 2. Describe it: add a `[metric.<id>]` block with `fmt`, `best`, `grade`,
    `bar`, `tone` as needed, plus `col_<id>` (and optional
    `col_<id>_help`) in **both** language files (`i18n/en.toml`,
@@ -298,13 +311,9 @@ small pieces plus one dispatch line:
    Failures raise the localized `ProviderError` subclasses, never raw
    exceptions.
 2. **Client**: a small class taking `(cfg, *, transport)` - the transport is
-   always injected, so tests fake `get_json` / `post_json` / `download` and
+   always injected, so tests fake `get_json` / `download` and
    never touch the network. Use `sources/http.py` for anything HTTP: it
    owns the offline gate, https enforcement, retries and `.part` handling.
-   Two deliberate stubs live here until a second provider lands:
-   `HttpTransport.post_json` (a POST twin of `get_json` for a future
-   FACEIT/Web API) and `sources/steam.py::next_share_code` (CS match-history
-   pagination). Both are test-covered, neither is called by the app.
 3. **Dispatch**: extend `sources/__init__.py::list_matches` / `fetch_demo`
    with the provider id; downloads end in `store.add_demo(...)` so hashing,
    dedup and the library stay in one place, then `_bind` writes the `match`

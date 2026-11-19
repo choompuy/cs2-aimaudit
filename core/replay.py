@@ -34,15 +34,9 @@ from core.model import (
 
 from core.filters import apply_filters
 
-from core.loader import (
-    _norm_alive,
-    _parse_ticks_tiered,
-    build_id_lookup,
-    fix_ids,
-    tickrate_from_header,
-)
-
-from core.metrics import _enemy_kill_rows
+from core.ids import _norm_alive, build_id_lookup, fix_ids
+from core.openings import _enemy_kill_rows
+from core.phases import _parse_ticks_tiered, tickrate_from_header
 
 if TYPE_CHECKING:
     # annotation-only (F821): kill_points' `f: "Filters | None"` resolves
