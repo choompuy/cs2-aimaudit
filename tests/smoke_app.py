@@ -322,10 +322,17 @@ _demo_n = [0]
 
 
 def fresh_at(timeout=300, **session):
-    """A run of the real app.py with session_state pre-set."""
+    """A run of the real app.py with session_state pre-set; a `match` /
+    `match_tab` pair also lands in ?m= / ?tab= (the URL is the truth about
+    the open match, and the Matches page re-reads it every run)."""
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=timeout)
     for k, v in session.items():
         at.session_state[k] = v
+    if session.get("match"):
+        at.query_params["m"] = session["match"]
+        tab = session.get("match_tab") or "overview"
+        if tab != "overview":
+            at.query_params["tab"] = tab
     at.run()
     return at
 
@@ -444,12 +451,15 @@ def pick(at, kind, key, value):
 def goto(at, page):
     """
     Switch the page: a match tab (overview / shooting / duels / map /
-    replay, plus the retired timeline) opens the current - or last - demo as
-    a match; a top-level id navigates the sidebar (matches means the LIST,
-    exactly like shell.go_page). Only the active page renders, so switch
-    before interacting with widgets that live on it.
+    replay, plus the retired timeline) opens the current - or last - demo
+    as a match (a list row click: ?m= plus the tab); a top-level id
+    navigates like a rail click (st.page_link: ?p= carries it and the
+    other params are cleared, so Matches means the LIST). Only the active
+    page renders, so switch before interacting with widgets that live on
+    it.
     """
     if page in ("overview", "shooting", "duels", "map", "replay", "timeline"):
+        tab = "duels" if page == "timeline" else page
         mid = ss_get(at, "match") or ss_get(at, "demo_id")
         if mid is None:
             mid = core.load_state().get("last_demo")
@@ -459,20 +469,27 @@ def goto(at, page):
                 mid = lib[0]["id"] if lib else None
         if mid is None:
             # nothing to open: stay on the matches list
-            at.session_state["page"] = "matches"
+            at.query_params["p"] = "matches"
+            at.query_params.pop("m", None)
+            at.query_params.pop("tab", None)
             try:
                 del at.session_state["match"]
             except KeyError:
                 pass
         else:
-            at.session_state["page"] = "matches"
             at.session_state["match"] = mid
             at.session_state["demo_id"] = mid
-            at.session_state["match_tab"] = "duels" if page == "timeline" else page
+            at.session_state["match_tab"] = tab
+            at.query_params["m"] = mid
+            at.query_params["tab"] = tab
     else:
-        at.session_state["page"] = page
+        # a rail click: the target page goes into ?p= (shell.load_nav_url
+        # consumes it), the rest of the params clear with the navigation
+        for k in ("m", "tab", "f"):
+            at.query_params.pop(k, None)
+        at.query_params["p"] = page
         if page == "matches":
-            # the sidebar item lands on the LIST, like shell.go_page
+            # the rail item means the LIST, like shell.go_page
             try:
                 del at.session_state["match"]
             except KeyError:
@@ -487,10 +504,10 @@ def open_match(at, did, name="open the match again"):
         at,
         name,
         lambda: (
-            at.session_state.__setitem__("page", "matches"),
             at.session_state.__setitem__("match", did),
             at.session_state.__setitem__("demo_id", did),
             at.session_state.__setitem__("demo_change", False),
+            at.query_params.__setitem__("m", did),
             at.run(),
         ),
     )
@@ -559,10 +576,10 @@ def _shots_shown(at):
     return None
 
 
-def open_filters(at):
-    """Expand the filter card (collapsed summary row is the default)."""
-    if widget(at, "button", "flt_edit") is not None:
-        act(at, "open the filter card", lambda: at.button(key="flt_edit").click().run())
+# the filter controls live inside the Edit popover, but Streamlit mounts
+# popover bodies on every run: the widgets are always reachable in
+# AppTest (no open step needed - the old open_filters collapsed-card
+# dance is gone with the card)
 
 
 # ---------------------------------------------------------------- scenarios
@@ -572,7 +589,6 @@ def scenario_one_round():
     at = open_demo(make_match([1]), "one_round.dem")
     check("runs without exception", not at.exception, err_of(at))
     check("no st.error on load", not at.error)
-    open_filters(at)
     check(
         "no round-range slider on a single round",
         widget(at, "slider", "flt_rounds") is None,
@@ -608,8 +624,7 @@ def scenario_one_round():
     )
     check(
         "2D replay: the filter panel is hidden (the replay is the whole round)",
-        widget(at, "segmented_control", "flt_preset") is None
-        and widget(at, "button", "flt_edit") is None,
+        widget(at, "segmented_control", "flt_preset") is None,
     )
     # the payload behind the canvas: the whole round, every player, with
     # HP / weapon / keys - checked straight against the fake demo so the
@@ -733,39 +748,41 @@ def scenario_round_replay():
 
 
 def scenario_nav():
-    """The sidebar rail: navigation, old page ids, the ?p&m&tab URL state."""
+    """The sidebar rail (st.page_link over st.navigation): navigation,
+    old page ids, the ?p&m&tab URL state."""
     print("== sidebar navigation ==")
     at = open_demo(make_match([1, 2]), "nav.dem")
     did = at.session_state["match"]
-    # the rail: one button per section; the keys stay stable (nav_<id>) -
-    # the active state is the button's type, not a different key
+    # the rail: one st.page_link per section (labels are localized; the
+    # four ids in order are enough to pin the rail itself)
+    _labels = [str(link.value).strip() for link in at.sidebar.page_link]
     check(
-        "nav: four sidebar items render",
-        widget(at, "button", "nav_dashboard") is not None
-        and widget(at, "button", "nav_matches") is not None
-        and widget(at, "button", "nav_settings") is not None
-        and widget(at, "button", "nav_guide") is not None,
+        "nav: four sidebar page_links render",
+        len(_labels) == 4 and all(_labels),
+        _labels,
     )
     check(
-        "nav: the match view syncs ?m (and no ?p on matches)",
+        "nav: the match view syncs ?m (and no ?p anywhere)",
         at.query_params.get("m") == did and not at.query_params.get("p"),
         dict(at.query_params),
     )
-    # the sidebar Matches item opens the LIST (an open match is left)
-    act(at, "nav: Matches opens the list", lambda: at.button(key="nav_matches").click().run())
+    # a rail click is a page_link navigation: the page switches and the
+    # query params clear, so the sidebar Matches item opens the LIST (an
+    # open match is left) - goto() applies exactly that
+    goto(at, "matches")
     check(
         "nav: the list is shown, the match is closed",
         ss_get(at, "page") == "matches" and ss_get(at, "match") is None,
     )
-    act(at, "nav: Settings", lambda: at.button(key="nav_settings").click().run())
+    goto(at, "settings")
     check(
         "nav: the settings page renders",
         ss_get(at, "page") == "settings" and not at.exception,
         err_of(at),
     )
-    act(at, "nav: Guide", lambda: at.button(key="nav_guide").click().run())
+    goto(at, "guide")
     check("nav: the guide page renders without a demo", ss_get(at, "page") == "guide" and not at.exception, err_of(at))
-    act(at, "nav: Dashboard", lambda: at.button(key="nav_dashboard").click().run())
+    goto(at, "dashboard")
     check(
         "nav: the dashboard stub renders with a way to Matches",
         ss_get(at, "page") == "dashboard" and widget(at, "button", "dash_go_matches") is not None,
@@ -839,7 +856,7 @@ def scenario_settings():
     act(at, "settings: thr to 200", lambda: at.slider(key="thr").set_value(200).run())
     act(at, "settings: safe_dist to 1000", lambda: at.slider(key="safe_dist").set_value(1000).run())
     # the values survive Settings -> Matches -> a match
-    act(at, "settings: to the matches list", lambda: at.button(key="nav_matches").click().run())
+    goto(at, "matches")
     check("settings: on the list", ss_get(at, "page") == "matches" and not at.exception, err_of(at))
     check("settings: thr survived the trip to the list", ss_get(at, "thr") == 200, ss_get(at, "thr"))
     goto(at, "overview")
@@ -1007,7 +1024,6 @@ def scenario_roundtrip():
     print("== match view round trip ==")
     at = open_demo(make_match([1, 2, 13]), "roundtrip.dem")
     did = at.session_state["match"]
-    open_filters(at)
     act(at, "roundtrip: first-half preset", lambda: ctl(at, "segmented_control", "flt_preset").select("first").run())
     check("roundtrip: preset set", ss_get(at, "flt_preset") == "first", ss_get(at, "flt_preset"))
     act(at, "roundtrip: to the duels tab", lambda: ctl(at, "segmented_control", "match_tab").select("duels").run())
@@ -1052,7 +1068,6 @@ def scenario_two_rounds():
     print("== two-round demo (presets, custom slider, filters) ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "two_rounds.dem")
     check("runs without exception", not at.exception, err_of(at))
-    open_filters(at)
     check(
         "no slider while preset=All (slider lives in Custom)",
         widget(at, "slider", "flt_rounds") is None,
@@ -1121,7 +1136,6 @@ def scenario_long25():
         make_match([1, 13, 25], weapons=("ak47", "awp", "deagle")), "long25.dem"
     )
     check("runs without exception", not at.exception, err_of(at))
-    open_filters(at)
     check(
         "all six presets offered",
         n_presets(at) == (6, "all"),
@@ -1141,33 +1155,24 @@ def scenario_long25():
 
 
 def scenario_filter_panel():
-    """Persistent panel: distance bands, reset, page scope, links."""
-    print("== filter panel (persistent, distance, reset, links) ==")
+    """Popover panel: distance bands, reset, page scope, links."""
+    print("== filter panel (popover, distance, reset, links) ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel.dem")
     check("runs without exception", not at.exception, err_of(at))
-    # collapsed by default: the controls sit behind the one-line summary
-    check(
-        "collapsed: no preset control rendered",
-        widget(at, "segmented_control", "flt_preset") is None,
-    )
+    # the controls live behind the Edit popover, and Streamlit mounts a
+    # popover body on every run: they are reachable without opening it
     base = _shots_shown(at)
     check("summary line shows the shot count", bool(base), str(base))
-    check(
-        "collapsed: Edit button offered",
-        widget(at, "button", "flt_edit") is not None,
-    )
-    check(
-        "collapsed: no Reset without active filters",
-        widget(at, "button", "flt_reset_sum") is None,
-    )
-    open_filters(at)
     for k in ("flt_side", "flt_preset", "flt_dist"):
         check(
-            f"{k} segmented control visible",
+            f"{k} segmented control visible (behind the popover)",
             widget(at, "segmented_control", k) is not None,
         )
-    check("class pills visible", widget(at, "pills", "flt_classes") is not None)
-    check("done button offered", widget(at, "button", "flt_done") is not None)
+    check("class pills visible (behind the popover)", widget(at, "pills", "flt_classes") is not None)
+    check(
+        "no Reset without active filters",
+        widget(at, "button", "flt_reset") is None,
+    )
     act(
         at,
         "weapon filter awp",
@@ -1191,31 +1196,39 @@ def scenario_filter_panel():
     check(
         "reset restores the full view", _shots_shown(at) == base, str(_shots_shown(at))
     )
-    # collapsing the card keeps every selection (widget states survive
-    # only because the app re-assigns the keys while it is hidden)
+    # a closed popover keeps every selection (its widgets stay mounted)
     act(
         at,
         "weapon filter awp again",
         lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
     )
-    act(at, "collapse the filter card", lambda: at.button(key="flt_done").click().run())
+    act(
+        at,
+        "plain rerun with the popover closed",
+        lambda: at.button(key="mt_back").click().run(),
+    )
+    open_match(at, at.session_state["demo_id"], "back into the match")
     check(
-        "collapsed summary names the filter",
+        "closed popover kept the weapon filter",
+        ss_get(at, "flt_weapons") == ["awp"],
+        ss_get(at, "flt_weapons"),
+    )
+    check(
+        "summary names the filter",
         any("awp" in str(c.value) for c in at.caption),
     )
     check(
-        "collapsed: Reset offered while filters are active",
-        widget(at, "button", "flt_reset_sum") is not None,
+        "Reset offered while filters are active",
+        widget(at, "button", "flt_reset") is not None,
     )
     act(
         at,
         "reset from the summary row",
-        lambda: at.button(key="flt_reset_sum").click().run(),
+        lambda: at.button(key="flt_reset").click().run(),
     )
     check(
         "summary-row reset cleared the weapon filter", ss_get(at, "flt_weapons") == []
     )
-    open_filters(at)
     check("reset cleared the distance band", ss_get(at, "flt_dist") == "all")
     check("reset cleared the weapon filter", ss_get(at, "flt_weapons") == [])
     # Result is a duels-page control; its value must survive page hops
@@ -1288,7 +1301,6 @@ def scenario_filter_panel():
     )
     # new link round-trip: filter -> URL -> fresh app
     at3 = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel3.dem")
-    open_filters(at3)
     act(
         at3,
         "distance band mid (for the link)",
@@ -1634,7 +1646,6 @@ def scenario_matrix():
                     f"strict_dist={sdist}",
                     lambda v=sdist: at.session_state.__setitem__("strict_dist", v) or at.run(),
                 )
-            open_filters(at)
             presets = _PRESETS_BY_COUNT.get(n_presets(at)[0], ())
             for p in presets:
                 act(
@@ -2018,7 +2029,6 @@ def scenario_impact():
         )
 
     # round filter: first half preset -> 12 opening rows
-    open_filters(at)
     act(
         at,
         "round preset first half",
@@ -2120,7 +2130,6 @@ def run_real(path):
             f"player {sid}",
             lambda s=sid: at.selectbox(key="me").select(s).run(),
         )
-    open_filters(at)
     presets = _PRESETS_BY_COUNT.get(n_presets(at)[0], ())
     for p in presets:
         act(

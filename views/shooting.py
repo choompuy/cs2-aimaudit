@@ -235,30 +235,27 @@ def _build_tips(t, s) -> list:
 
 
 def _top3_card(t, s, tips, name_of) -> None:
-    """The "Top 3 things to work on" card: a severity chip (colour
-    through the .aa-chip-* classes in theme/overrides.css, token-driven)
-    + a text label, the sentence with its number, and the evidence behind
+    """The "Top 3 things to work on" card: a severity badge (st.badge,
+    the semantic palette: red HIGH / orange MED / blue INFO) + a text
+    label, the sentence with its number, and the evidence behind
     a "show me" popover or a pointer to the chart below.
 
-    72 lines, under the 80 cap: the per-tip chip/text/evidence row is one
-    visual unit - splitting the popover arms from the chip row would
+    72 lines, under the 80 cap: the per-tip badge/text/evidence row is one
+    visual unit - splitting the popover arms from the badge row would
     separate the layout from the data it renders."""
-    sev_style = {
-        2: ("sev_high", "negative"),  # red    — bad / risky
-        1: ("sev_med", "accent"),  # accent — warning
-        0: ("sev_info", "info"),  # blue   — info / good
+    sev_color = {
+        2: ("sev_high", "red"),  # red    — bad / risky
+        1: ("sev_med", "orange"),  # orange — warning
+        0: ("sev_info", "blue"),  # blue   — info / good
     }
 
     with st.container(border=True):
         st.markdown(f"**{t('top3_title')}**")
         st.caption(t("tips_caption"))
         for sev, tip_text, ev in tips[:3]:
-            sev_key, sev_token = sev_style[sev]
+            sev_key, sev_badge = sev_color[sev]
             chip, text_col, ev_col = st.columns([1, 6, 2])
-            chip.markdown(
-                f"<span class='aa-chip aa-chip-{sev_token}'>● {t(sev_key)}</span>",
-                unsafe_allow_html=True,
-            )
+            chip.badge(t(sev_key), color=sev_badge)
             text_col.markdown(tip_text)
             with ev_col:
                 if ev == "err":

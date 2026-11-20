@@ -1,13 +1,16 @@
 """
 The session_state registry: key-name constants, typed accessors for the
-keys shared by 2+ modules, and the navigation mutators (go_page /
-go_match / go_tab / leave_match, moved from shell.py so state never
-routes through the shell).
+keys shared by 2+ modules, and the small navigation mutators.
 
 Rule (docs/ARCHITECTURE.md): a module does not touch another module's
 session_state key by a string literal - the shared keys go through this
 registry. Key VALUES and widget names never change (the smoke tests and
 copied links pin them).
+
+Page switching itself (go_page / go_match) lives in shell.py: it needs
+the st.Page registry that shell.navigation() fills. What stays here are
+the key accessors and the two match-level mutators that only touch
+session_state / query params.
 
 A leaf like store.py: streamlit appears only inside the thin
 st.session_state wrappers below, never to draw UI.
@@ -24,7 +27,8 @@ MATCH_TABS = ("overview", "shooting", "duels", "map", "replay")
 LEGACY_PAGES = {"overview", "shooting", "duels", "map", "replay", "timeline"}
 
 # --------------------------------------------------------- the shared keys
-PAGE = "page"  # sidebar level
+PAGE = "page"  # the st.navigation page that is running (shell mirrors
+# it here every run; go_page / go_match in shell.py are the switches)
 MATCH = "match"  # open library demo id; absent = the Matches list
 MATCH_TAB = "match_tab"  # tab inside the match view
 LANG = "lang"  # UI language ("en" | "ru"): WIDGET-OWNED (the sidebar
@@ -131,31 +135,17 @@ def pop_pick_err() -> str | None:
 
 
 # --------------------------------------------------- navigation mutators
-def go_page(page: str) -> None:
-    """The one switch for the top level (the sidebar buttons)."""
-    set_page(page if page in NAV_PAGES else "matches")
-    if get_page() == "matches":
-        # the nav item means the LIST; an open match is left via its own
-        # back button, so the item always lands on the list
-        clear_match()
-
-
-def go_match(demo_id: str, tab: str = "overview") -> None:
-    """The one way to open a match: a list row, a fresh download. No other
-    code may set `match` / `demo_id` by hand."""
-    set_page("matches")
-    set_match(demo_id)
-    set_demo_id(demo_id)
-    if tab in MATCH_TABS:
-        set_match_tab(tab)
-
-
 def leave_match() -> None:
-    """«← Матчи»: back to the list; its filters and the loaded demo stay."""
+    """«← Матчи»: back to the list; the loaded demo and the filters stay.
+    The shareable ?m= / ?tab= go with it, so the next run lands on the
+    list (the URL is the truth about the open match)."""
     clear_match()
+    for k in ("m", "tab"):
+        st.query_params.pop(k, None)
 
 
 def go_tab(tab: str) -> None:
-    """Switch the tab of the open match (the duel window -> 2D replay)."""
+    """Switch the tab of the open match (the duel window -> 2D replay).
+    The URL follows through shell.sync_nav_url at the end of the run."""
     if tab in MATCH_TABS and has_match():
         set_match_tab(tab)

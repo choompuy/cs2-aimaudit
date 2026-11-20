@@ -183,13 +183,10 @@ def _do_toggles(at, rng, page: str, tab: str) -> str:
 
 
 def _do_nav(at, rng, page: str, tab: str) -> str:
-    """Click a sidebar nav button."""
+    """Click a sidebar nav item (a page_link navigation: ?p= carries the
+    target, the other params clear with the click)."""
     target = rng.choice(NAV)
-    button = at.button(key=f"nav_{target}")
-    if button:
-        button.click().run()
-    else:
-        smoke_app.goto(at, target)
+    smoke_app.goto(at, target)
     return f"nav->{target}"
 
 
@@ -248,9 +245,10 @@ def _do_mflt_reset(at, rng, page: str, tab: str) -> str:
 
 
 def _do_filters(at, rng, page: str, tab: str) -> str:
-    """Open / close / reset the analysis-filter card."""
-    for key in ("flt_edit", "flt_done", "flt_reset_sum"):
-        button = at.button(key=key)
+    """Reset the analysis filters / dismiss a chip (the Edit popover's
+    controls are covered by the flt_panel handler)."""
+    for key in ("flt_reset", "flt_chip_0"):
+        button = smoke_app.widget(at, "button", key)
         if button:
             button.click().run()
             return key

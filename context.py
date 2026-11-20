@@ -122,7 +122,6 @@ class Ctx:
     hurts_f = None
     res_sel = None  # kill/death filter (duels pages)
     # match_shell(ctx)
-    hdr = None  # the sticky header container (back button + tabs + filter bar)
     tab = None  # the active match tab (overview / shooting / ...)
     # page_metrics(ctx)
     summary = None

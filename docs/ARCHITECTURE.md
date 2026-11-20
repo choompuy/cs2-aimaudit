@@ -9,20 +9,20 @@ written here, so the doc and the guardrails stay honest.
 
 | Module                            |     Lines | Responsibility                                                                                                                               |
 | --------------------------------- | --------: | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app.py`                          |       127 | Entry point only: page config, theme injection, `Ctx` assembly, the two-level page dispatcher (`_match` is the only pipeline that loads a demo). |
-| `context.py`                      |       184 | Cached `core` calls (`get_demo`, `get_shots`, `get_duels`, `get_timeline`, `get_round_replay`) and the `Ctx` dataclass every page renders from. |
-| `shell.py`                        |       727 | App shell: the sidebar rail, navigation (`go_page`/`go_match`/`go_tab`, URL state), demo loading, the match header, the context row, the library panel. |
-| `filters_ui.py`                   |       548 | URL state (`_URL_KEYS`) and link migration, presets, callbacks, the filter panel (rendered inside the match header).                         |
+| `app.py`                          |       148 | Entry point only: page config, theme injection, the `st.Page` bodies (`_PAGE_FNS`) handed to `shell.navigation`, and `_match` - the only pipeline that loads a demo. |
+| `context.py`                      |       170 | Cached `core` calls (`get_demo`, `get_shots`, `get_duels`, `get_timeline`, `get_round_replay`) and the `Ctx` dataclass every page renders from. |
+| `shell.py`                        |       808 | App shell: `st.navigation` + the `st.page_link` rail + the language box (`navigation`), the URL state (`?m=&tab=`, legacy `?p=`), `go_page`/`go_match`, demo loading, the match header (`st.badge`), the context row, the library panel. |
+| `filters_ui.py`                   |       562 | URL state (`_URL_KEYS`) and link migration, presets, callbacks, the filter summary row + the Edit `st.popover`.                              |
 | `views/matches.py`                |       580 | The Matches page: the unified table (filters, Refresh, Add match, row actions, the download flow).                                        |
 | `views/_shared.py`                |        30 | Helpers shared by the pages (`steam_cfg`, `show_error`); started as the Matches/Settings duplicates.                                       |
 | `views/dashboard.py`              |        27 | The Dashboard stub (cross-match aggregates land in a future `core/aggregate.py`).                                                            |
-| `views/settings.py`               |       214 | The Settings page: language note, analysis sliders, accounts + Steam helper, Library and storage, privacy.                                   |
+| `views/settings.py`               |       204 | The Settings page: language note, analysis sliders (`persist_state="session"`), accounts + Steam helper, Library and storage, privacy.      |
 | `views/overview.py`               |        77 | Overview page (one grid for both teams).                                                                                                     |
-| `views/shooting.py`               |       578 | Shooting page: metric tiles, Top-3 issues, charts, the weapons grid.                                                                         |
+| `views/shooting.py`               |       575 | Shooting page: metric tiles, Top-3 issues (`st.badge` severities), charts, the weapons grid.                                                 |
 | `views/duels.py`                  |       198 | Duels page: the duels grid, the by-zone table, the openings table.                                                                           |
 | `views/replay.py`                 |       518 | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart); feeds the round's icons into `round_payload`.             |
 | `views/map.py`                    |       104 | Map page (`@st.fragment`, radar plot).                                                                                                       |
-| `views/extras.py`                 |       116 | Guide page (incl. the icon legend) and the debug expander rendered under every match tab.                                                    |
+| `views/extras.py`                 |        80 | Guide page and the debug expander rendered under every match tab.                                                                            |
 | `core/matchlist.py`               |       201 | The unified match list: provider records + library entries + summaries merged into `MatchRow`s (no Streamlit, no parsing).                   |
 | `core/matchstats.py`              |       163 | The per-match summary cache behind the Matches table (compute from a parsed demo, read/write the JSON cache, resolve "me").                 |
 | `core/model.py`                   |       788 | Constants, the `Demo` container, pure helpers (weapons, angles, `wilson_ci`, `rank_in_lobby`).                                               |
@@ -47,7 +47,7 @@ written here, so the doc and the guardrails stay honest.
 | `ui/strip.py`                     |       339 | The duel navigation strip (Timeline).                                                                                                        |
 | `ui/icons.py`                     |       360 | The icon set loader: SVG sanitizer, SHA-256 verification, weapon-name aliases, `weapon_info` / `weapon_cells` / `payload` for grids and the replay. |
 | `ui/roundrep.py`                  |       536 | 2D replay component: `round_payload` (pure JSON model, carries the round's `icons` / `wlab`) + `round_replay`; front end in `roundrep.js` / `.css`. |
-| `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css` (incl. the sidebar rail), the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
+| `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css` (tabular digits only), the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `sources/model.py`                |       162 | The match-import model: `MatchRecord`, `DemoState`, the Steam config and the localized `ProviderError` family.                               |
 | `sources/http.py`                 |       206 | Shared urllib transport: timeouts, 429/Retry-After and 5xx retries, streaming downloads to `.part`, https-only, `AIMAUDIT_OFFLINE`.           |
 | `sources/steam_gc.py`             |       266 | Dependency-free protobuf wire reader for `CMsgGCCStrike15_v2_MatchList` (field numbers from SteamDatabase/Protobufs).                        |
@@ -56,13 +56,13 @@ written here, so the doc and the guardrails stay honest.
 | `sources/__init__.py`             |       169 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package - plus the `matches.json` cache glue (`read_cache` / `write_cache` / `cache_time`). |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `i18n.py`                         |        45 | Thin loader: `STR`/`LANGS`/`make_t` built from the `i18n/<lang>.toml` files; fails fast on a missing `en.toml`, a non-flat file or a file/LANGS mismatch. |
-| `i18n/en.toml` + `i18n/ru.toml`   | 653 + 653 | The UI strings themselves (648 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
+| `i18n/en.toml` + `i18n/ru.toml`   | 633 + 633 | The UI strings themselves (628 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
 | `store/` (package)                |       102 | The ONE place that knows where files live; the facade re-exports everything so `store.X` is unchanged.                                       |
 | `store/paths.py`                  |       249 | The `data/` folder next to `start.bat`: AIMAUDIT_DATA_DIR, the read-only fallback, every subfolder, file names / demo ids, `log_note`.      |
 | `store/library.py`                |       388 | The demo library: copies AND linked demos, add / relink / delete, the disk sync that adopts dropped files.                                  |
 | `store/caches.py`                 |       233 | Parsed / matchstats caches (parse keys, LRU pruning), the storage report and the clear actions.                                             |
 | `store/importdata.py`             |        66 | accounts.json / matches.json: atomic writes, a corrupt file counts as empty.                                                                |
-| `state.py`                        |       170 | The `session_state` registry: key-name constants, typed get_*/set_* for the keys shared by 2+ modules, and the navigation mutators (`go_page`/`go_match`/`go_tab`/`leave_match`, re-exported by `shell`). |
+| `state.py`                        |       151 | The `session_state` registry: key-name constants, typed get_*/set_* for the keys shared by 2+ modules, and the match-level mutators (`go_tab`/`leave_match`; `go_page`/`go_match` live in `shell` - they need the `st.Page` registry). |
 | `nativedialog.py`                 |        95 | Native Windows file dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
 
 Support: `tests/test_core.py` (synthetic-match unit tests),
@@ -78,34 +78,46 @@ of the real files),
 
 ## Navigation and state
 
-Navigation is two-level and lives in `session_state`
-(never only in widget state - Streamlit drops the state of widgets a run
-does not render). The shared keys are a REGISTRY (`state.py`): key-name
-constants and typed get_*/set_* accessors; a module never touches
-another module's key by a string literal. `lang` and `me` are widget-OWNED
-keys (the sidebar selectbox / the player selectbox), so the registry only
-reads them:
+Navigation is native: `shell.navigation()` registers the four pages
+through `st.navigation` (position `"hidden"` - the rail is the app's own
+`st.page_link` list in the sidebar, so the language box sits underneath)
+and the page itself lives in the URL path (`/dashboard`, `/matches`, ...).
+`app.py` owns the page bodies (`_PAGE_FNS`); `shell` never imports `views`,
+so the import graph stays one-way. The shared keys are a REGISTRY
+(`state.py`): key-name constants and typed get_*/set_* accessors; a module
+never touches another module's key by a string literal. `lang` and `me`
+are widget-OWNED keys (the sidebar selectbox / the player selectbox), so
+the registry only reads them:
 
-- **Sidebar level**: `page` ∈ `dashboard | matches | settings | guide`,
-  switched ONLY through `state.go_page` (re-exported as `shell.go_page`;
-  the sidebar buttons - clicking
-  Matches lands on the LIST). A fresh session starts on the Matches list.
-- **Match view**: inside `page == "matches"` - `match` (the library demo id
-  of the open match, or absent = the list) and `match_tab` ∈ `overview |
-  shooting | duels | map | replay`. `state.go_match(demo_id, tab)` (the
-  `shell.go_match` re-export) is the
-  ONE way to open a match (a list row, a download, the old
-  links); `state.leave_match` is the `← Матчи` button; `state.go_tab`
-  switches tabs inside the open match.
+- **Page level**: `page` mirrors the `st.Page` that is running -
+  `navigation()` records it before anything else runs, and `_page_runner`
+  re-asserts it when the body executes. `shell.go_page` (the dashboard /
+  settings buttons) is the programmatic switch; the rail itself is
+  `st.page_link`, whose click clears the query params - so the Matches
+  item always lands on the LIST. A fresh session starts on the Matches
+  list (`default=True`).
+- **Match view**: inside the `matches` page - `match` (the library demo
+  id of the open match, or absent = the list) and `match_tab` ∈ `overview
+  | shooting | duels | map | replay`. `shell.go_match(demo_id, tab)` is
+  the ONE way to open a match (a list row, a download, the old links):
+  it sets the registry keys and the shareable `?m=` (a `st.switch_page`
+  from another page, a plain `st.query_params` write on the Matches page
+  itself). `?m=` is the truth about the open match - `apply_match_url`
+  re-reads it on every Matches run, so a rail click (params cleared)
+  lands on the list and a reload reopens the match. `state.leave_match`
+  is the `← Матчи` button; `state.go_tab` switches tabs inside the open
+  match (`?tab=` is applied once per session, then the segmented control
+  owns the tab and `sync_nav_url` mirrors it into the URL).
 - **Compatibility**: `shell.migrate_nav` turns old single-level page ids
-  (and the retired `timeline`) into `matches` + `match_tab` + the last
-  opened demo, and re-assigns `match_tab` on the pages where its widget
-  does not render. `?p=&m=&tab=` (next to the old `?f=` pack of
-  `filters_ui`) carries the same state in the URL; bad values fall back
-  safely (`parse_nav_params` is pure and unit-checked).
-- Only `app.py::_match` loads a demo; every other page opens on an empty
-  library and keeps the filter/slider widget states alive
-  (`filters_ui.preserve_filters`, `shell.preserve_analysis_settings`).
+  from `?f=` links (and the retired `timeline`) into the match view of
+  the last opened demo, on the right tab; a legacy `?p=` link still
+  switches to its page (`load_nav_url` consumes the param, so it cannot
+  loop). Bad values fall back safely (`parse_nav_params` is pure and
+  unit-checked).
+- Only `app.py::_match` loads a demo. Widget values that must survive a
+  page switch (which drops unmounted widget state) carry
+  `persist_state="session"`: the analysis sliders, every `flt_*` filter
+  control, `match_tab`, the `mflt_*` list filters and the tab toggles.
 
 The Matches table never parses demos: its number cells come from
 `core/matchstats.py`'s JSON cache (`data/cache/matchstats/`, keyed like
@@ -279,14 +291,14 @@ A **column** is the recipe above. A **table**:
    open on an empty library (no demo needed) - only `app.py::_match`
    loads demos.
 2. Add the id to `NAV_PAGES` in `shell.py` and an icon to `NAV_ICONS`;
-   the sidebar button (`nav_<id>`, `nav_<id>__on` when active) comes
-   from that one loop, and `theme/overrides.css` needs the new
-   `.st-key-nav_<id>__on button` selector for the active highlight.
+   `shell.navigation` derives the `st.Page` (url path, title) and the
+   `st.page_link` rail entry from that one loop - no CSS, no per-item
+   markup (Streamlit marks the active item itself).
 3. Add the `nav_<id>` label to BOTH language files (`i18n/en.toml`,
    `i18n/ru.toml`) — `tests/check_ui.py` fails without it.
-4. Dispatch it in `app.py` (one `elif page == "<id>":` line; pages
-   without the analysis filters stay in the `filters_ui.preserve_filters()`
-   branch) and add a smoke scenario.
+4. Provide the body in `app.py` (`_PAGE_FNS["<id>"]`; pages that never
+   show the analysis filters need nothing else - the controls carry
+   `persist_state="session"`) and add a smoke scenario.
 
 ## How to add a match tab
 
@@ -321,8 +333,8 @@ small pieces plus one dispatch line:
 4. **UI**: `views/matches.py` renders whatever lands in `matches.json`
    (`sources.read_cache`); usually only the connections-row status and the
    row action are new (account fields belong to `views/settings.py`). All
-   texts go into `i18n.py` in both locales, badges ride the `aa-badge-*`
-   classes from `theme/overrides.css`. `core/matchlist.py` picks the
+   texts go into `i18n.py` in both locales; the few badges outside the
+   grid ride `st.badge` with Streamlit's semantic palette. `core/matchlist.py` picks the
    provider up automatically through `sources.read_cache`.
 5. **Tests**: fixtures in the documented response shapes, a fake transport
    and (for helpers) a fake runner - see `tests/test_sources.py`; add the
@@ -351,9 +363,10 @@ needed to start. `views/dashboard.py` is the stub that will host it.
 1. Pick the `session_state` key (`flt_<name>`) and, if the filter should
    survive shared links, add it to `_URL_KEYS` in `filters_ui.py` (URL
    short name → session key).
-2. Render the widget in the filter panel (`filters_ui.render`) and keep
-   the widget `key` equal to the session key so presets and URL restore
-   work.
+2. Render the widget inside the Edit popover (`filters_ui._render_controls`)
+   and keep the widget `key` equal to the session key - plus
+   `persist_state="session"`, so the value survives every page and tab
+   switch (presets and URL restore rely on both).
 3. Apply it where the data is cut: `core/filters.py` (`Filters` +
    `apply_filters`) for shot/duel-level filters, or the page-level
    re-slicing in `context.py` / the view when only one view is affected

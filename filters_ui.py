@@ -1,11 +1,16 @@
 """
-The global filter bar: URL state, presets, the panel, the chips.
+The global filter bar: URL state, presets, the summary row, the popover.
 
 load_url_state() runs before the first widget (a shared link restores
 language / player / filters into session_state); render(ctx) is the
-sticky filter panel plus the URL sync. The chip/reset callbacks are
+summary line (chips + counts + Reset) with every control behind an
+st.popover trigger, plus the URL sync. The chip/reset callbacks are
 factories (_on_preset_change, _clear_rounds, _reset_filters) that close
 over this run's n_rounds / halves.
+
+The controls carry persist_state="session" (they render only inside the
+match view and must survive the other pages); the popover keeps its
+widgets mounted while it is closed, so no keep-alive is needed anywhere.
 """
 
 import base64
@@ -63,37 +68,6 @@ def load_url_state() -> None:
             for k, sk in _URL_KEYS:
                 if saved.get(k) is not None:
                     st.session_state[sk] = saved[k]
-            # a link that restores filters opens with the card expanded
-            if (
-                saved.get("weapons")
-                or saved.get("classes")
-                or saved.get("rounds")
-                or saved.get("preset") not in (None, "all")
-                or saved.get("side") not in (None, "all")
-                or saved.get("res") not in (None, "both")
-                or saved.get("dist") not in (None, "all")
-            ):
-                st.session_state["flt_open"] = True
-
-
-def preserve_filters() -> None:
-    """Re-assign the filter keys while a page without the panel runs (the
-    Matches page), so Streamlit does not drop the widget states."""
-    for k, d in (
-        ("flt_weapons", []),
-        ("flt_classes", []),
-        ("flt_side", "all"),
-        ("flt_preset", "all"),
-        ("flt_dist", "all"),
-        ("flt_res", "both"),
-    ):
-        if k in st.session_state:
-            st.session_state[k] = st.session_state[k]
-        else:
-            st.session_state[k] = d
-    if "flt_rounds" in st.session_state:
-        st.session_state["flt_rounds"] = st.session_state["flt_rounds"]
-
 
 
 # distance bands reuse the stop-quality thresholds: close is inside
@@ -283,10 +257,6 @@ def _dist_label(t, v: str) -> str:
     return t("all") if v == "all" else t(f"flt_dist_{v}")
 
 
-def _flt_show(is_open: bool):
-    st.session_state["flt_open"] = is_open
-
-
 def _active_chips(t, has_sides, show_result, n_rounds, halves):
     """One dismissible chip per active filter: (label, clear callback)."""
     # one dismissible chip per active filter: (label, clear callback)
@@ -328,30 +298,6 @@ def _active_chips(t, has_sides, show_result, n_rounds, halves):
             (fmt_result(st.session_state["flt_res"]), _clear("flt_flt_res", "both"))
         )
     return _chips
-
-
-def _keep_hidden_filter_keys(show_result, show_panel, flt_open, n_rounds):
-    """Streamlit deletes widget state when the widget is absent from a run:
-    re-assign the keys of the controls this page does not show - and of
-    the filter card while it is collapsed - so neither a page switch nor
-    folding the card loses a selection."""
-    if not show_result:
-        st.session_state["flt_res"] = st.session_state.get("flt_res", "both")
-    if not show_panel or not flt_open:
-        for _k, _d in (
-            ("flt_weapons", []),
-            ("flt_classes", []),
-            ("flt_side", "all"),
-            ("flt_preset", "all"),
-            ("flt_dist", "all"),
-            ("flt_res", "both"),
-        ):
-            st.session_state[_k] = st.session_state.get(_k, _d)
-        if n_rounds >= 2:
-            st.session_state["flt_rounds"] = st.session_state.get("flt_rounds") or (
-                1,
-                n_rounds,
-            )
 
 
 def _round_kwargs(preset, n_rounds, halves) -> dict:
@@ -401,7 +347,9 @@ def _resolve_filters(ctx, preset, n_rounds, halves, has_sides, show_result):
 
 def _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves):
     """Row 1: the round-range preset (widest slot so its options never
-    clip), the side control, the duel result control."""
+    clip), the side control, the duel result control. Every control
+    carries persist_state="session": their values must survive both the
+    pages without the panel and the tabs that hide half of them."""
     _r1 = st.columns(
         [3.9] + ([1.0] if has_sides else []) + ([1.4] if show_result else [])
     )
@@ -414,6 +362,7 @@ def _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves
             key="flt_preset",
             on_change=_on_preset_change(n_rounds, halves),
             help=t("flt_rounds_help"),
+            persist_state="session",
         )
     _c += 1
     if has_sides:
@@ -424,6 +373,7 @@ def _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves
                 format_func=lambda v: t("all") if v == "all" else v,
                 key="flt_side",
                 help=t("flt_side_help"),
+                persist_state="session",
             )
         _c += 1
     if show_result:
@@ -436,6 +386,7 @@ def _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves
                 ),
                 key="flt_res",
                 help=t("flt_res_help"),
+                persist_state="session",
             )
 
 
@@ -451,6 +402,7 @@ def _card_controls_row2(t, demo_weapons, present_classes):
             format_func=lambda v: _dist_label(t, v),
             key="flt_dist",
             help=t("flt_dist_help"),
+            persist_state="session",
         )
     with _r2[1]:
         st.pills(
@@ -460,6 +412,7 @@ def _card_controls_row2(t, demo_weapons, present_classes):
             format_func=lambda c: t(f"wc_{c}"),
             key="flt_classes",
             help=t("flt_classes_help"),
+            persist_state="session",
         )
     with _r2[2]:
         with st.popover(t("flt_more"), width="stretch"):
@@ -468,89 +421,72 @@ def _card_controls_row2(t, demo_weapons, present_classes):
                 demo_weapons,
                 key="flt_weapons",
                 help=t("flt_weapons_help"),
+                persist_state="session",
             )
 
 
-def _render_open_card(t, chips, counts, demo_weapons, present_classes,
-                      preset_opts, has_sides, show_result, n_rounds, halves):
-    """The expanded filter card: two rows of controls, the Custom range
-    slider, the active-filter chips, live counts."""
-    with st.container(border=True, key="flt_card"):
-        with st.container(
-            horizontal=True, gap="small", vertical_alignment="center"
-        ):
-            st.caption(t("flt_title"))
-            st.button(
-                t("flt_done"),
-                on_click=_flt_show,
-                args=(False,),
-                key="flt_done",
-                type="tertiary",
-                width="content",
-            )
-        _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves)
-        _card_controls_row2(t, demo_weapons, present_classes)
-        # the range slider exists only in Custom mode (and only when a
-        # range is possible at all); moving it keeps Custom selected
-        if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
-            st.slider(
-                t("flt_rounds"),
-                1,
-                n_rounds,
-                key="flt_rounds",
-                help=t("flt_rounds_help"),
-                on_change=_slider_custom,
-            )
-        # active filters: compact dismissible chips + a text-style Reset
-        if chips:
-            with st.container(
-                horizontal=True, gap="small", vertical_alignment="center"
-            ):
-                for _i, (_label, _fn) in enumerate(chips):
-                    st.button(
-                        f"{_label} ✕",
-                        on_click=_fn,
-                        key=f"flt_chip_{_i}",
-                        width="content",
-                    )
-                st.button(
-                    t("flt_reset"),
-                    on_click=_reset_filters(n_rounds),
-                    key="flt_reset",
-                    type="tertiary",
-                    width="content",
-                )
-        # live feedback while editing: the same counts the collapsed
-        # summary line shows
-        st.caption(counts)
+def _render_controls(t, demo_weapons, present_classes,
+                     preset_opts, has_sides, show_result, n_rounds, halves,
+                     counts):
+    """The filter controls (the popover body): two rows of controls, the
+    Custom range slider, live counts. The widgets stay mounted while the
+    popover is closed - Streamlit runs the body on every rerun - so their
+    state survives a close without any keep-alive."""
+    _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves)
+    _card_controls_row2(t, demo_weapons, present_classes)
+    # the range slider exists only in Custom mode (and only when a
+    # range is possible at all); moving it keeps Custom selected
+    if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
+        st.slider(
+            t("flt_rounds"),
+            1,
+            n_rounds,
+            key="flt_rounds",
+            help=t("flt_rounds_help"),
+            on_change=_slider_custom,
+            persist_state="session",
+        )
+    # live feedback while editing: the same counts the summary line shows
+    st.caption(counts)
 
 
-def _render_summary_row(t, chips, counts, hdr, n_rounds):
-    """The collapsed one-liner: active filters, how much is in view, Reset."""
+def _render_summary_row(t, chips, counts, demo_weapons, present_classes,
+                        preset_opts, has_sides, show_result, n_rounds, halves):
+    """The one-line summary in the flow: what is active, how much is in
+    view, Reset - and every control behind the Edit popover. The active
+    filters repeat below as dismissible chips (st.button: st.badge cannot
+    be clicked)."""
     _sum = (
         t("flt_sum", parts=" · ".join(_label for _label, _ in chips))
         if chips
         else t("flt_sum_none")
     )
-    with hdr:
+    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+        st.caption(f"{_sum} · {counts}")
+        with st.popover(t("flt_edit"), icon=":material/tune:"):
+            st.caption(t("flt_title"))
+            _render_controls(
+                t, demo_weapons, present_classes, preset_opts, has_sides,
+                show_result, n_rounds, halves, counts,
+            )
+        if chips:
+            st.button(
+                t("flt_reset"),
+                on_click=_reset_filters(n_rounds),
+                key="flt_reset",
+                type="tertiary",
+                width="content",
+            )
+    # one dismissible chip per active filter
+    if chips:
         with st.container(
             horizontal=True, gap="small", vertical_alignment="center"
         ):
-            st.caption(f"{_sum} · {counts}")
-            st.button(
-                t("flt_edit"),
-                on_click=_flt_show,
-                args=(True,),
-                key="flt_edit",
-                type="secondary",
-                width="content",
-            )
-            if chips:
+            for _i, (_label, _fn) in enumerate(chips):
                 st.button(
-                    t("flt_reset"),
-                    on_click=_reset_filters(n_rounds),
-                    key="flt_reset_sum",
-                    type="tertiary",
+                    f"{_label} ✕",
+                    on_click=_fn,
+                    key=f"flt_chip_{_i}",
                     width="content",
                 )
 
@@ -586,11 +522,11 @@ def _sync_filter_url(me, preset, n_rounds):
 def render(ctx) -> None:
     """The filter bar: resolve, render, sync the shareable URL.
 
-    A persistent panel (no popover): Side / Rounds / Distance segmented
-    controls plus weapon class pills; the Result control exists only on
-    the duels pages, and the guide page shows no panel at all. Active
-    filters repeat as dismissible chips with a Reset. All metrics below
-    are computed on the FILTERED frames.
+    A one-line summary (chips + counts + Reset) with every control behind
+    the Edit popover: Side / Rounds / Distance segmented controls plus
+    weapon class pills; the Result control exists only on the duels pages,
+    and the replay tab shows no bar at all. All metrics below are computed
+    on the FILTERED frames.
     """
     t = ctx.t
     (demo_weapons, present_classes, n_rounds, has_sides, halves,
@@ -601,38 +537,23 @@ def render(ctx) -> None:
     _migrate_filter_state(preset_opts, n_rounds)
 
     chips = _active_chips(t, has_sides, show_result, n_rounds, halves)
-    _flt_open = bool(st.session_state.get("flt_open"))
-    _keep_hidden_filter_keys(show_result, show_panel, _flt_open, n_rounds)
 
     preset = st.session_state.get("flt_preset", "all")
     filters, shots_f, duels_f, hurts_f, res_sel = _resolve_filters(
         ctx, preset, n_rounds, halves, has_sides, show_result
     )
 
-    # how much data is in view: the one caption shared by the collapsed
-    # summary row and the open card
+    # how much data is in view: the one caption shared by the summary
+    # row and the popover
     counts = t("flt_sum_counts", shots=len(shots_f), duels=len(duels_f))
     if not filters.empty():
         counts += " " + t("flt_sum_of", shots=len(ctx.shots), duels=len(ctx.duels_all))
 
-    # The sticky bar: the match header (back button + tabs, shell.match_shell)
-    # already created it - reuse that container so the filter summary joins
-    # the tabs in ONE sticky bar (a second keyed container would be a
-    # duplicate element id).
-    hdr = (
-        ctx.hdr
-        if getattr(ctx, "hdr", None) is not None
-        else st.container(key="hdr_sticky", gap="xsmall")
-    )
-
     if show_panel:
-        if _flt_open:
-            _render_open_card(
-                t, chips, counts, demo_weapons, present_classes,
-                preset_opts, has_sides, show_result, n_rounds, halves,
-            )
-        else:
-            _render_summary_row(t, chips, counts, hdr, n_rounds)
+        _render_summary_row(
+            t, chips, counts, demo_weapons, present_classes,
+            preset_opts, has_sides, show_result, n_rounds, halves,
+        )
 
     _sync_filter_url(ctx.me, preset, n_rounds)
     ctx.filters = filters
@@ -640,4 +561,3 @@ def render(ctx) -> None:
     ctx.duels_f = duels_f
     ctx.hurts_f = hurts_f
     ctx.res_sel = res_sel
-    ctx.hdr = hdr
