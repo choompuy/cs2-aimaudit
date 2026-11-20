@@ -454,6 +454,7 @@ def _replay_fragment(ctx) -> None:
             {"n": n, "win": o["winner"], "why": o["reason"]}
             for n, o in sorted(outcomes.items())
         ],
+        thr=ctx.thr,
         sel=sel,
         weapon_info=ui_icons.weapon_info,
         icon_of=_icon_of,
@@ -473,6 +474,10 @@ def _replay_fragment(ctx) -> None:
                     "first_victim", "first_sim", "role_killer", "role_victim",
                     "tel_speed", "tel_turn", "tel_err", "tel_dist", "tel_first",
                     "tel_shots", "tel_leg_speed", "tel_leg_err", "tel_leg_shot",
+                    "leg_move", "tel_moving", "tel_standing", "tel_leg_thr",
+                    "pt_player", "pt_weapon", "pt_armor", "pt_hp", "pt_money",
+                    "pt_helmet", "pt_money_t", "pt_gear", "pt_gear_t", "pt_kit",
+                    "pt_bomb", "pt_defusing", "pt_blind",
                 )
             },
             "exit": t("rr_exit_duel"),
