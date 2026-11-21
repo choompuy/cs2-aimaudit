@@ -13,7 +13,7 @@ local cache (read_cache / cache_time); network calls happen on explicit
 actions.
 
 Layer: this package is a leaf like core/ - no Streamlit, no views/shell
-knowledge (enforced by tests/check_ui.py). It may import store.py for paths.
+knowledge (enforced by tests/check_ui.py). It may import store/ for paths.
 """
 
 from __future__ import annotations

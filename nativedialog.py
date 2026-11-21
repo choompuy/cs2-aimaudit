@@ -59,7 +59,7 @@ def _initial_dir() -> str:
     points the profile into data\\home, where ~/Desktop does not exist -
     Windows then answers 'Location is not available' before the dialog
     even shows. The real Desktop comes from the registry; the fallback is
-    the app folder (a folder that always exists, and store.py stays the
+    the app folder (a folder that always exists, and store/ stays the
     one module that knows locations)."""
     return _desktop_from_registry() or os.getcwd()
 

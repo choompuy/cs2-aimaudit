@@ -12,7 +12,7 @@ the st.Page registry that shell.navigation() fills. What stays here are
 the key accessors and the two match-level mutators that only touch
 session_state / query params.
 
-A leaf like store.py: streamlit appears only inside the thin
+A leaf like store/: streamlit appears only inside the thin
 st.session_state wrappers below, never to draw UI.
 """
 

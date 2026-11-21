@@ -48,7 +48,7 @@ import shutil
 import subprocess
 import sys
 
-# the data folder / the sanitizer live with the app (see store.py)
+# the data folder / the sanitizer live with the app (see store/)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import store  # noqa: E402
 from tools import fetchutil  # noqa: E402

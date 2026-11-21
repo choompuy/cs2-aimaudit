@@ -18,7 +18,7 @@ import pandas as pd
 from demoparser2 import DemoParser
 
 import store
-from core.ids import build_id_lookup, fix_ids
+from core.ids import fix_ids
 from core.model import NA, SIDE_PROPS, TEAMS, Demo, _round_col, _safe_int
 from core.phases import (
     _build_rounds,
