@@ -20,7 +20,7 @@ written here, so the doc and the guardrails stay honest.
 | `views/overview.py`               |        77 | Overview page (one grid for both teams).                                                                                                     |
 | `views/shooting.py`               |       575 | Shooting page: metric tiles, Top-3 issues (`st.badge` severities), charts, the weapons grid.                                                 |
 | `views/duels.py`                  |       198 | Duels page: the duels grid, the by-zone table, the openings table.                                                                           |
-| `views/replay.py`                 |       518 | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart); feeds the round's icons into `round_payload`.             |
+| `views/replay.py`                 |       523 | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart); feeds the round's icons into `round_payload`.             |
 | `views/map.py`                    |       104 | Map page (`@st.fragment`, radar plot).                                                                                                       |
 | `views/extras.py`                 |        80 | Guide page and the debug expander rendered under every match tab.                                                                            |
 | `core/matchlist.py`               |       201 | The unified match list: provider records + library entries + summaries merged into `MatchRow`s (no Streamlit, no parsing).                   |
@@ -36,7 +36,7 @@ written here, so the doc and the guardrails stay honest.
 | `core/openings.py`                |       281 | Round structure: `round_outcomes` / `round_winners`, `openings_table`, the shared `_enemy_kill_rows` / `_round_side_keep` / `_top_weapon`.   |
 | `core/impact.py`                  |       164 | `impact_stats`: openings, trades, multi-kills, assists from the enemy-kill rows.                                                            |
 | `core/summary.py`                 |       282 | `player_summary` (overview row, best / died-to weapons), `weapon_stats`, `hitgroup_counts`, `_hurts_of`.                                    |
-| `core/replay.py`                  |       720 | `timeline_data`, `round_replay_data`, `round_duels` (incl. kill-modifier flags), `duel_telemetry`, radar transforms.            |
+| `core/replay.py`                  | 652 | `timeline_data`, `round_replay_data` (incl. the `ECONOMY_PROPS` tick columns), `round_duels` (incl. kill-modifier flags), `duel_telemetry`, radar transforms.            |
 | `core/checks.py`                  |       353 | `data_checks`, `debug_report`.                                                                                                               |
 | `core/__init__.py`                |       300 | Facade: re-exports the public API so `import core` / `core.X` keep working.                                                                  |
 | `ui/table.py`                     |       490 | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells), `data_table` (custom component).                       |
@@ -46,7 +46,7 @@ written here, so the doc and the guardrails stay honest.
 | `ui/format.py`                    |        63 | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`, `map_name`.                                                                           |
 | `ui/strip.py`                     |       339 | The duel navigation strip (Timeline).                                                                                                        |
 | `ui/icons.py`                     |       360 | The icon set loader: SVG sanitizer, SHA-256 verification, weapon-name aliases, `weapon_info` / `weapon_cells` / `payload` for grids and the replay. |
-| `ui/roundrep.py`                  |       536 | 2D replay component: `round_payload` (pure JSON model, carries the round's `icons` / `wlab`) + `round_replay`; front end in `roundrep.js` / `.css`. |
+| `ui/roundrep.py`                  | 679 | 2D replay component: `round_payload` (pure JSON model, carries the round's `icons` / `wlab`, economy runs, `thr`) + `round_replay`; front end in `roundrep.js` / `.css`. |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css` (tabular digits only), the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `sources/model.py`                |       162 | The match-import model: `MatchRecord`, `DemoState`, the Steam config and the localized `ProviderError` family.                               |
 | `sources/http.py`                 |       206 | Shared urllib transport: timeouts, 429/Retry-After and 5xx retries, streaming downloads to `.part`, https-only, `AIMAUDIT_OFFLINE`.           |
@@ -56,7 +56,7 @@ written here, so the doc and the guardrails stay honest.
 | `sources/__init__.py`             |       169 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package - plus the `matches.json` cache glue (`read_cache` / `write_cache` / `cache_time`). |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `i18n.py`                         |        45 | Thin loader: `STR`/`LANGS`/`make_t` built from the `i18n/<lang>.toml` files; fails fast on a missing `en.toml`, a non-flat file or a file/LANGS mismatch. |
-| `i18n/en.toml` + `i18n/ru.toml`   | 633 + 633 | The UI strings themselves (628 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
+| `i18n/en.toml` + `i18n/ru.toml`   | 650 + 650 | The UI strings themselves (645 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
 | `store/` (package)                |       102 | The ONE place that knows where files live; the facade re-exports everything so `store.X` is unchanged.                                       |
 | `store/paths.py`                  |       249 | The `data/` folder next to `start.bat`: AIMAUDIT_DATA_DIR, the read-only fallback, every subfolder, file names / demo ids, `log_note`.      |
 | `store/library.py`                |       388 | The demo library: copies AND linked demos, add / relink / delete, the disk sync that adopts dropped files.                                  |

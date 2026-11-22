@@ -295,6 +295,19 @@ def timeline_data(
     return df.sort_values("tick").reset_index(drop=True), missing
 
 
+# What the replay shows besides position / health: the economy of every
+# player (armor, helmet, defuse kit, money, gear value, inventory, defusing).
+ECONOMY_PROPS = [
+    "armor_value",
+    "has_helmet",
+    "has_defuser",
+    "balance",
+    "current_equip_value",
+    "inventory",
+    "is_defusing",
+]
+
+
 def _round_frames(parser, lo: int, hi: int, max_samples: int):
     """Every player's frames on the uniform grid (<= max_samples points,
     the UI interpolates): {sid: df}, the grid step and the key columns."""
@@ -303,6 +316,12 @@ def _round_frames(parser, lo: int, hi: int, max_samples: int):
     df = _parse_ticks_tiered(
         parser,
         (
+            POS
+            + BTN_NAMED
+            + ["buttons"]
+            + ALIVE_PROPS
+            + ["health", "active_weapon_name", "flash_duration"]
+            + ECONOMY_PROPS,
             POS
             + BTN_NAMED
             + ["buttons"]
@@ -391,7 +410,10 @@ def round_replay_data(
      "hits": [(tick, attacker, victim)],
      "info": how the round ended (Demo.round_info[round])}
     (hits cover EVERY pair of the round - the replay shows the whole
-    round, teammate trades included).
+    round, teammate trades included). The frames also carry the economy
+    when the parser has it: armor_value, has_helmet, has_defuser,
+    balance (money), current_equip_value, inventory, is_defusing
+    (ECONOMY_PROPS).
     """
     windows = getattr(demo, "round_windows", None) or {}
     round_no = int(round_no)

@@ -734,6 +734,60 @@ check(
     "NaN" not in _json.dumps(_rpl),
 )
 
+# --- the economy of the round: armor / kit / money / gear / inventory --------
+_eco_rows = []
+for _r in _rr_rows:
+    _t = _r["tick"]
+    _eco_rows.append(
+        {
+            **_r,
+            "armor_value": 100 if _t < 300 else 40,
+            "has_helmet": _r["name"] == "Alpha",   # (steam ids are float-rounded: tell players apart by name)
+            "has_defuser": _r["name"] == "Bravo",
+            "is_defusing": False,
+            "balance": 3000 if _t < 200 else 150,
+            "current_equip_value": 4750,
+            "inventory": ["knife", "AK-47", "Flashbang", "Flashbang", "Smoke Grenade"]
+            + (["C4 Explosive"] if _r["name"] == "Charlie" else []),
+        }
+    )
+_eco = make_match()
+_eco["ticks"] = pd.DataFrame(_eco_rows)
+_eco["events"].update(_rr_events)
+FakeParser.demos["rr_eco.dem"] = _eco
+_red = core.round_replay_data(core.load_demo("rr_eco.dem"), 1)
+check(
+    "round_replay_data: the economy columns come through when the parser has them",
+    all(c in _red["frames"][S1].columns for c in core.ECONOMY_PROPS),
+    sorted(_red["frames"][S1].columns),
+)
+_epl = round_payload(_red, names=_rnames, side_of=_rside, duels=_rdu[:1], thr=34.0)
+_ep = {p["sid"]: p for p in _epl["players"]}
+check(
+    "payload: armor + helmet, money, gear value, defuse kit as change lists (a run per change, not per sample)",
+    _ep[S1]["ar"] == [[100, 100, 1], [300, 40, 1]]
+    and _ep[S2]["ar"][0][2] == 0 and _ep[S2]["kit"] == [[100, 1]] and "kit" not in _ep[S1]
+    and _ep[S1]["mo"] == [[100, 3000], [200, 150]] and _ep[S1]["ev"] == [[100, 4750]],
+    {k: (_ep[S1].get(k), _ep[S2].get(k)) for k in ("ar", "mo", "ev", "kit")},
+)
+check(
+    "payload: the inventory as icon keys (duplicates kept), the bomb carrier has the c4; the weapon in hands as a key",
+    _ep[S1]["inv"] == [[100, ["knife", "ak47", "flashbang", "flashbang", "smokegrenade"]]]
+    and "c4" in _ep[S3]["inv"][0][1] and _ep[S1]["w"][0][1] == "ak47",
+    (_ep[S1].get("inv"), _ep[S1].get("w")),
+)
+check(
+    "payload: is_defusing stays off for everyone -> no dg runs; the moving threshold passes through",
+    all("dg" not in p for p in _epl["players"])
+    and _epl["thr"] == 34.0
+    and round_payload(_rrd, names=_rnames, side_of=_rside)["thr"] is None,
+    _epl["thr"],
+)
+check(
+    "payload: a demo without the economy props has no ar / mo / ev / inv / kit / dg arrays",
+    all(k not in p for p in _rpl["players"] for k in ("ar", "mo", "ev", "inv", "kit", "dg")),
+)
+
 # with a two-level radar the payload carries both images + level bits
 _rd1 = _tempfile.mkdtemp(prefix="cs2aa_radar1_")
 os.makedirs(os.path.join(_rd1, "radars"))

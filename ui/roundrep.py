@@ -12,9 +12,11 @@ Layout (everything client-side, like the in-game spectator HUD):
   round_end event, with the bomb plant / defuse as markers on the timeline;
 - LEFT: the players of both teams in ONE list sorted by nickname, so every
   player keeps his place from round to round (sides swap at halftime, the
-  colour dot follows them). The weapon in hands, the HP, the live speed, and
-  an eye button that hides a player from the map (the choice survives round
-  switches);
+  colour dot follows them). A row per player: the weapon in hands, the
+  armor, the HP and the money; a second line with the grenades and the
+  defuse kit, the live speed and the gear value; the team economy at the
+  bottom. An eye button hides a player from the map (the choice survives
+  round switches);
 - CENTER: the radar canvas (wheel = zoom, LMB drag = pan, double click or
   the button = reset): a small team-coloured dot per player (CT / T), a
   view-direction arrow, the name, an HP bar and the weapon; a dashed ring
@@ -68,6 +70,7 @@ duel's segment (core.duel_telemetry).
 from __future__ import annotations
 
 import math
+import re
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Sequence
@@ -108,6 +111,107 @@ def _ffilled(g: pd.DataFrame, col: str) -> np.ndarray:
     return pd.to_numeric(g[col], errors="coerce").ffill().bfill().to_numpy(float)
 
 
+def _runs(grid, values, enc) -> list[list[Any]]:
+    """[[tick, *enc(v)]] at every sample where the value CHANGES: slowly
+    changing state (armor, money, inventory) costs a few entries, not a
+    sample per tick."""
+    out: list[list[Any]] = []
+    last: Any = object()
+    for tick, v in zip(grid, values, strict=True):
+        if v != last:
+            out.append([int(tick), *enc(v)])
+            last = v
+    return out
+
+
+# inventory entries the demo prints that do not compact to their icon key
+_INV_ALIASES = {
+    "c4explosive": "c4",
+    "plantedc4": "c4",
+    "defuser": "defuse",
+    "itemdefuser": "defuse",
+    "defusekit": "defuse",
+    "incendiarygrenade": "incgrenade",
+    "decoygrenade": "decoy",
+    "zeusx27": "taser",
+    "usps": "usp_silencer",
+    "usp9": "usp_silencer",
+    "p2000": "hkp2000",
+    "m4a1s": "m4a1_silencer",
+    "mp5": "mp5sd",
+}
+
+
+def _inv_key(weapon_info, name: Any) -> str:
+    """One inventory entry -> the icon key used across the payload:
+    weapon_info's resolved key when there is one, else the compacted demo
+    name (with the few aliases that do not compact cleanly)."""
+    s = str(name or "").strip()
+    if not s:
+        return ""
+    if weapon_info is not None:
+        info = weapon_info(s)
+        if info.get("key"):
+            return info["key"]
+    c = re.sub(r"[^a-z0-9]", "", s.lower().replace("weapon_", ""))
+    c = _INV_ALIASES.get(c, c)
+    if c.endswith("knife") and not c.startswith("knife"):
+        c = "knife_" + c[: -len("knife")]
+    return c or s.lower()
+
+
+def _inv_keys(weapon_info, entry) -> tuple:
+    """One inventory snapshot -> icon keys, duplicates kept: two
+    flashbangs are two."""
+    if entry is None or (isinstance(entry, float) and math.isnan(entry)):
+        return ()
+    try:
+        items = list(entry)
+    except TypeError:
+        return ()
+    return tuple(k for k in (_inv_key(weapon_info, x) for x in items) if k)
+
+
+def _economy_fields(g, grid, inv_keys) -> dict:
+    """The economy of one player as change lists: armor (+ helmet), the
+    defuse kit, defusing right now, money, the value of the gear, and what
+    is in the inventory. Absent columns give absent fields."""
+    out: dict = {}
+    if "armor_value" in g.columns:
+        av = (
+            pd.to_numeric(g["armor_value"], errors="coerce")
+            .ffill().bfill().fillna(0).astype(int).to_numpy()
+        )
+        hv = (
+            g["has_helmet"].ffill().bfill().fillna(False).astype(bool).astype(int).to_numpy()
+            if "has_helmet" in g.columns
+            else np.zeros(len(av), dtype=int)
+        )
+        out["ar"] = _runs(
+            grid, list(zip(av.tolist(), hv.tolist(), strict=True)), lambda v: [v[0], v[1]]
+        )
+    for col, field in (("has_defuser", "kit"), ("is_defusing", "dg")):
+        if col in g.columns:
+            bv = g[col].ffill().bfill().fillna(False).astype(bool).astype(int).to_numpy()
+            runs = _runs(grid, bv.tolist(), lambda v: [v])
+            if len(runs) > 1 or (runs and runs[0][1]):
+                out[field] = runs
+    for col, field in (("balance", "mo"), ("current_equip_value", "ev")):
+        if col in g.columns:
+            mv = (
+                pd.to_numeric(g[col], errors="coerce")
+                .ffill().bfill().fillna(0).astype(int).to_numpy()
+            )
+            out[field] = _runs(grid, mv.tolist(), lambda v: [v])
+    if "inventory" in g.columns and inv_keys is not None:
+        out["inv"] = _runs(
+            grid,
+            [inv_keys(e) for e in g["inventory"].ffill().bfill().to_numpy()],
+            lambda v: [list(v)],
+        )
+    return out
+
+
 
 def _weapon_changes(g, grid, weapon_of):
     """The active-weapon timeline as [(tick, weapon)] change points."""
@@ -138,7 +242,9 @@ def _key_bits(g, grid, keys, alive):
     return kb.tolist()
 
 
-def _player_frames(data, grid, keys, two_level, radar, side_of, name_of, weapon_of):
+def _player_frames(
+    data, grid, keys, two_level, radar, side_of, name_of, weapon_of, inv_keys=None
+):
     """
     One row per player of the round, grouped by side (CT first) and sorted
     by nickname inside a side. Positions / view angles are whole numbers;
@@ -184,6 +290,8 @@ def _player_frames(data, grid, keys, two_level, radar, side_of, name_of, weapon_
                 p["fl"] = [_r1(v) for v in fl]
         if "active_weapon_name" in g.columns:
             p["w"] = _weapon_changes(g, grid, weapon_of)
+        # the economy: armor (+ helmet), kit, money, gear value, inventory
+        p.update(_economy_fields(g, grid, inv_keys))
         kb = _key_bits(g, grid, keys, alive)
         if kb is not None:
             p["kb"] = kb
@@ -311,6 +419,30 @@ def _register_badges(bomb, rd, out, kills, du, players, badge):
         if z["wb"]:
             badge("wallbang")
 
+def _register_economy_icons(players, weapon_info, badge, icons_out, wlab):
+    """The icons of the economy: every inventory item of the round, the
+    armor states and the status marks on the map (the bomb, the kit,
+    flashed)."""
+    econ_keys: set[str] = set()
+    for p in players:
+        for run in p.get("inv") or ():
+            econ_keys.update(k for k in (run[1] or ()) if k)
+    for k in sorted(econ_keys):
+        badge(k)
+        if weapon_info is not None:
+            info = weapon_info(k)
+            if info.get("key") and info.get("uri"):
+                icons_out.setdefault(info["key"], [info["uri"], info["w"], info["h"]])
+            if info.get("label"):
+                wlab.setdefault(k, info["label"])
+    if any("ar" in p for p in players):
+        for k in ("armor_none", "armor_half", "armor_full", "armor_half_helmet", "armor_helmet"):
+            badge(k)
+    if any("inv" in p for p in players):
+        for k in ("c4", "defuse", "blind"):
+            badge(k)
+
+
 def _radar_payload(radar):
     """The radar image refs + the world->radar calibration."""
     from mapview import radar_uri
@@ -344,14 +476,20 @@ def _weapon_registry(weapon_info, icons_out, wlab):
     for the payload, registering its icon + localized label on the way."""
 
     def _weapon(name: Any) -> str:
+        """The weapon's icon KEY (the short name when no icon exists). Keys,
+        not the demo's spellings, are what the front end draws, so aliases
+        (USP-S, M4A1-S, ...) land on their icon too."""
         short = _wshort(name)
+        ret = short
         if weapon_info is not None and short:
             info = weapon_info(short)
-            if info.get("key") and info.get("uri"):
-                icons_out.setdefault(info["key"], [info["uri"], info["w"], info["h"]])
+            if info.get("key"):
+                ret = info["key"]
+                if info.get("uri"):
+                    icons_out.setdefault(ret, [info["uri"], info["w"], info["h"]])
             if info.get("label"):
-                wlab[short] = info["label"]
-        return short
+                wlab[ret] = info["label"]
+        return ret
 
     return _weapon
 
@@ -439,7 +577,8 @@ def _round_model(
     _weapon = _weapon_registry(weapon_info, icons_out, wlab)
     _name = partial(_name_of, names)
     players, xall, yall = _player_frames(
-        data, grid, keys, two_level, radar, side_of, _name, _weapon
+        data, grid, keys, two_level, radar, side_of, _name, _weapon,
+        partial(_inv_keys, weapon_info),
     )
 
     _pi = partial(_pi_of, {p["sid"]: i for i, p in enumerate(players)})
@@ -459,6 +598,7 @@ def round_payload(
     duels: Sequence[Mapping[str, Any]] = (),
     rounds: Sequence[Mapping[str, Any]] = (),
     bombs: Sequence[Sequence[Any]] | None = None,
+    thr: float | None = None,
     at: int | None = None,
     sel: int | None = None,
     labels: Mapping[str, str] | None = None,
@@ -475,7 +615,8 @@ def round_payload(
     dict (or None), ``duels`` are core.round_duels' entries, ``rounds`` is
     the whole match. ``weapon_info``/``icon_of`` (ui.icons) add the
     ``icons``/``wlab`` bundles; without them the front end shows plain
-    text names, exactly like before.
+    text names, exactly like before. ``thr`` is the "moving" speed
+    threshold (u/s).
     """
     icons_out: dict[str, list] = {}
     wlab: dict[str, str] = {}
@@ -489,6 +630,7 @@ def round_payload(
     bomb_src = bombs if bombs is not None else ((data.get("info") or {}).get("bomb") or [])
     bomb = _bomb_rows(bomb_src, _pi, m.t0, m.t1)
     _register_badges(bomb, rd, out, m.kills, m.duels, m.players, _badge)
+    _register_economy_icons(m.players, weapon_info, _badge, icons_out, wlab)
 
     rp = _radar_payload(radar) if radar else None
     gb = _grid_bounds(m.xall, m.yall) if rp is None and m.xall else None
@@ -507,6 +649,7 @@ def round_payload(
         "rounds": rd,
         "out": out,
         "bomb": bomb,
+        "thr": None if thr is None else float(thr),
         "sel": sel_i,
         "at": at_t,
         "radar": rp,

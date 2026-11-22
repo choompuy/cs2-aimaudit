@@ -135,6 +135,35 @@ def svg_size(text: str) -> tuple[int, int] | None:
     return _viewbox(tag.group(0)) or _size_attrs(tag.group(0))
 
 
+def _ensure_size(text: str, w: int, h: int) -> str:
+    """Give the <svg> tag explicit width/height when they are missing.
+
+    A viewBox-only SVG has no intrinsic size: browsers that lean on it
+    (Firefox, and any canvas consumer) cannot rasterize the image at all -
+    the 2D replay tints icons through a canvas, so those would silently
+    never appear. CSS masks do not care, which is why the kill feed looked
+    fine while the map did not. Runs AFTER the sha256 check in
+    ``_load_icon``: the pinned hash still validates the file on disk, this
+    only rewrites the emitted data URI."""
+    m = _RE_SVG_TAG.search(text)
+    if not m:
+        return text
+    tag = m.group(0)
+    add = ""
+    if not re.search(r"[\s]width\s*=", tag, re.I):
+        add += f' width="{w}"'
+    if not re.search(r"[\s]height\s*=", tag, re.I):
+        add += f' height="{h}"'
+    if not add:
+        return text
+    inner = tag[len("<svg"):-1].rstrip()
+    self_close = inner.endswith("/")
+    if self_close:
+        inner = inner[:-1].rstrip()
+    new = "<svg" + inner + add + ("/>" if self_close else ">")
+    return text[: m.start()] + new + text[m.end():]
+
+
 # ------------------------------------------------------------- icon folder
 def icons_dir() -> str:
     """The folder the fetcher wrote the icons into (store knows locations)."""
@@ -208,6 +237,7 @@ def _load_icon(key: str) -> dict | None:
         if not size:
             return None
         w, h = size
+    text = _ensure_size(text, w, h)
     uri = "data:image/svg+xml;base64," + base64.b64encode(
         text.encode("utf-8")
     ).decode("ascii")
