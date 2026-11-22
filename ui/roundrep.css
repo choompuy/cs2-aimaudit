@@ -60,6 +60,12 @@
 }
 .rr-th.ct { color: var(--rr-ct); }
 .rr-th.t { color: var(--rr-t); }
+.rr-th-m {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-normal);
+  color: var(--text-secondary);
+}
 /* players: one table, sorted by nickname. Row = eye | name | weapon | armor | hp | money,
    and a second line with the grenades, the kit, the live speed and the gear value */
 .rr-pr1 {
@@ -87,7 +93,6 @@
 }
 .rr-putil { display: inline-flex; align-items: center; gap: 0.12rem; }
 .rr-psp { margin-left: auto; font-variant-numeric: tabular-nums; }
-.rr-psp.mv { color: var(--warning); font-weight: var(--font-weight-semibold); }
 .rr-pgear { font-variant-numeric: tabular-nums; opacity: 0.85; }
 .rr-eye {
   flex: none;
@@ -129,20 +134,6 @@
 .rr-php.mid { color: var(--warning); }
 .rr-php.low { color: var(--negative); }
 .rr-pm { justify-content: flex-end; color: var(--text-secondary); }
-.rr-eco {
-  position: sticky;
-  bottom: 0;
-  margin-top: 0.3rem;
-  padding: 0.3rem 0.2rem 0.05rem;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--surface-1);
-  font-size: 0.7rem;
-}
-.rr-ecor { display: flex; align-items: center; gap: 0.4rem; padding: 0.05rem 0; }
-.rr-ecor b { font-weight: var(--font-weight-semibold); }
-.rr-eal { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.rr-em { margin-left: auto; font-variant-numeric: tabular-nums; }
-.rr-eg { color: var(--text-secondary); font-variant-numeric: tabular-nums; min-width: 4.2rem; text-align: right; }
 .rr-prow.dead .rr-pname,
 .rr-prow.dead .rr-pr2,
 .rr-prow.dead .rr-pw,
@@ -334,10 +325,12 @@
 .rr-rd {
   flex: none;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 1px;
   min-width: 1.6rem;
-  height: 1.45rem;
+  height: 1.95rem;
   padding: 0 0.3rem;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -468,7 +461,6 @@
   font-weight: var(--font-weight-semibold);
   white-space: nowrap;
 }
-.rr-dv.mv { color: var(--warning); }
 .rr-dfs { color: var(--text-secondary); font-size: var(--font-size-xs); }
 .rr-dcv {
   display: block;
@@ -525,14 +517,6 @@
 .rr-legend span { display: inline-flex; align-items: center; gap: 0.25rem; }
 .rr-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex: none; }
 .rr-legline { width: 2px; height: 0.75rem; border-radius: 1px; display: inline-block; flex: none; }
-.rr-legring {
-  width: 0.65rem;
-  height: 0.65rem;
-  border-radius: 50%;
-  border: 1.5px dashed var(--text-secondary);
-  display: inline-block;
-  flex: none;
-}
 .rr-howto { color: var(--text-secondary); font-size: var(--font-size-xs); padding-top: 0.25rem; }
 
 /* ---------- round result banner: who won and how ------------------------------------ */
@@ -575,7 +559,14 @@
   line-height: 1.1rem;
   cursor: default;
 }
-.rr-rg { font-style: normal; font-size: 0.65rem; margin-left: 0.15rem; opacity: 0.9; }
+.rr-rgslot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 0.7rem;
+  line-height: 1;
+}
+.rr-rg { font-style: normal; font-size: 0.6rem; line-height: 1; opacity: 0.9; }
 
 /* ---------- speed menu: 0.1x .. 4x, hover or click ------------------------------------- */
 .rr-spd { position: relative; display: inline-flex; flex: none; }

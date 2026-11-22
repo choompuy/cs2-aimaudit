@@ -461,17 +461,23 @@ export default function (component) {
     for (const [n, w, why0] of d.rounds) {
       // the CURRENT round may carry no recorded reason: endWhy() reads it
       // off this round's bomb story instead of leaving a bare flag
-      const why = n === d.round && w ? endWhy(why0) : why0;
+      const why = w
+        ? (WHY_ICON[why0] || WHY_GLYPH[why0] ? why0 : (n === d.round ? endWhy(why0) : "elim"))
+        : why0;
       const b = el("button",
         "rr-rd" + (w === "CT" ? " wct" : w === "T" ? " wt" : "") + (n === d.round ? " cur" : ""));
       b.type = "button";
       b.appendChild(document.createTextNode(String(n)));
+      // the end-reason slot under the number: the icon, the glyph fallback,
+      // or an empty holder so undecided rounds keep the same chip height
+      const slot = el("span", "rr-rgslot");
       if (why && WHY_GLYPH[why]) {
-        const rg = WHY_ICON[why] && IC[WHY_ICON[why]]
-          ? iconEl(WHY_ICON[why], lab["why_" + why] || why, 10)
-          : el("i", "rr-rg", WHY_GLYPH[why]);
-        b.appendChild(rg);
+        slot.appendChild(
+          WHY_ICON[why] && IC[WHY_ICON[why]]
+            ? iconEl(WHY_ICON[why], lab["why_" + why] || why, 10)
+            : el("i", "rr-rg", WHY_GLYPH[why]));
       }
+      b.appendChild(slot);
       let tip = (lab.round || "R") + " " + n;
       if (w === "CT") tip += " \u00B7 " + (lab.won_ct || "");
       else if (w === "T") tip += " \u00B7 " + (lab.won_t || "");
@@ -549,8 +555,8 @@ export default function (component) {
   const EYE_ON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>';
   const EYE_OFF = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>';
   const lrows = [];
+  const sideHeads = {};  // side -> the count span of its group header
   let masterEye = null;
-  let ecoEl = null;
   function setEye(b, on, title) {
     b.innerHTML = on ? EYE_ON : EYE_OFF;  // static markup, no data inside
     b.title = title;
@@ -560,7 +566,7 @@ export default function (component) {
   function buildLeft() {
     left.replaceChildren();
     const head = el("div", "rr-lh");
-    head.appendChild(el("span", "rr-lt", (lab.players || "players") + " \u00B7 " + P.length));
+    head.appendChild(el("span", "rr-lt", lab.players || "players"));
     masterEye = el("button", "rr-eye");
     masterEye.type = "button";
     masterEye.addEventListener("click", () => {
@@ -575,9 +581,11 @@ export default function (component) {
       if (p.side !== lastSide) {
         // a group header per side; the players inside are sorted by nickname
         lastSide = p.side;
-        const cnt = P.filter((q) => q.side === p.side).length;
         const th2 = el("div", "rr-th " + sideCls(p.side));
-        th2.appendChild(el("span", null, (p.side === "CT" ? "CT" : p.side === "T" ? "T" : "?") + " \u00B7 " + cnt));
+        const cntEl = el("span", null, (p.side === "CT" ? "CT" : p.side === "T" ? "T" : "?") + " \u00B7 0");
+        const cashEl = el("span", "rr-th-m", "");
+        th2.append(cntEl, cashEl);
+        sideHeads[p.side] = { l: cntEl, m: cashEl };
         left.appendChild(th2);
       }
       const row = el("div", "rr-prow");
@@ -608,9 +616,6 @@ export default function (component) {
       lrows.push({ p: p, row: row, eye: eye, wc: wc, ac: ac, hc: hc, mc: mc, ind: ind,
         util: util, sp: sp, gear: gear, wk: null, ak: null, us: null, is: null });
     }
-    // economy of the two teams at the playhead
-    ecoEl = el("div", "rr-eco");
-    left.appendChild(ecoEl);
     applyHidden();
   }
   function applyHidden() {
@@ -625,12 +630,13 @@ export default function (component) {
     }
   }
   function updateLeft() {
-    const sums = { CT: { mo: 0, ev: 0, n: 0, al: 0 }, T: { mo: 0, ev: 0, n: 0, al: 0 } };
-    let hasEcon = false;
+    const sums = { CT: { mo: 0, n: 0, mon: false }, T: { mo: 0, n: 0, mon: false } };
+    const aliveBySide = {};
     for (const lr of lrows) {
       const p = lr.p;
       const s = state(p, t);
       const alive = s ? s.al : false;
+      aliveBySide[p.side] = (aliveBySide[p.side] || 0) + (alive ? 1 : 0);
       lr.row.classList.toggle("dead", !alive);
       const hp = s && s.hp != null ? s.hp : null;
       // weapon in hands: icon with the localized tooltip, plain text without icons
@@ -671,7 +677,6 @@ export default function (component) {
       }
       // money and the gear
       const mo = valAt(p.mo, t, null), ev = valAt(p.ev, t, null);
-      if (mo != null || ev != null || ar != null) hasEcon = true;
       lr.mc.textContent = mo == null ? "" : money(mo);
       lr.mc.title = mo == null ? "" : (lab.pt_money_t || "money") + " " + money(mo);
       lr.gear.textContent = ev == null ? "" : (lab.pt_gear || "gear") + " " + money(ev).slice(1);
@@ -706,30 +711,16 @@ export default function (component) {
       // live speed
       const v = alive ? speedAt(p, t) : null;
       lr.sp.textContent = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
-      lr.sp.classList.toggle("mv", v != null && THR != null && v > THR);
       const sm = sums[p.side];
-      if (sm) { sm.n += 1; if (alive) sm.al += 1; if (mo != null) sm.mo += mo; if (ev != null) sm.ev += ev; }
+      if (sm) { sm.n += 1; if (mo != null) { sm.mo += mo; sm.mon = true; } }
     }
-    // the two teams: money, value of the gear, players alive - only when the
-    // demo carried the economy at all (an old parser has no such columns)
-    if (ecoEl) {
-      ecoEl.replaceChildren();
-      if (hasEcon) {
-        for (const side of ["CT", "T"]) {
-          const sm = sums[side];
-          if (!sm.n) continue;
-          const row = el("div", "rr-ecor");
-          row.title = (side === "CT" ? (lab.won_ct_short || "CT") : (lab.won_t_short || "T"))
-            + " \u00B7 " + (lab.pt_money_t || "money") + " " + money(sm.mo)
-            + " \u00B7 " + (lab.pt_gear_t || "equipment") + " " + money(sm.ev);
-          const sideB = el("b", null, side);
-          sideB.style.color = side === "CT" ? "var(--rr-ct)" : side === "T" ? "var(--rr-t)" : "";
-          row.append(sideB, el("span", "rr-eal", sm.al + "/" + sm.n),
-            el("span", "rr-em", money(sm.mo)),
-            el("span", "rr-eg", (lab.pt_gear || "gear") + " " + money(sm.ev).slice(1)));
-          ecoEl.appendChild(row);
-        }
-      }
+    for (const side in sideHeads) {
+      const h = sideHeads[side];
+      const sm = sums[side];
+      const mon = sm && sm.mon;
+      h.l.textContent = (side === "CT" ? "CT" : side === "T" ? "T" : side) + " \u00B7 " + (aliveBySide[side] || 0);
+      h.m.textContent = mon ? money(sm.mo) : "";
+      h.m.title = mon ? (lab.pt_money_t || "money") + " " + money(sm.mo) : "";
     }
   }
   function applyPanel() {
@@ -890,7 +881,6 @@ export default function (component) {
       // live numbers at the playhead (from the telemetry of the duel)
       const sp = telAt(tel, who, "sp", t), tn = telAt(tel, who, "tn", t), er = telAt(tel, who, "er", t);
       c.live.sp.textContent = sp == null ? "\u2014" : sp + " " + (lab.u_s || "u/s");
-      c.live.sp.classList.toggle("mv", sp != null && THR != null && sp > THR);
       c.live.tn.textContent = tn == null ? "\u2014" : tn + "\u00B0/s";
       c.live.er.textContent = er == null ? "\u2014" : er + "\u00B0";
       if (!c.cx || !tel) continue;
@@ -1296,14 +1286,6 @@ export default function (component) {
           ctx.strokeStyle = rgba(C.flash, Math.min(0.9, 0.3 + s.fl / 4));
           ctx.lineWidth = 2.5; ctx.stroke();
         }
-        // moving faster than the stop threshold: a dashed ring (shots on the
-        // move are the inaccurate ones - this is the state the audit cares about)
-        const mv = THR != null ? speedAt(p, t) : null;
-        if (mv != null && mv > THR) {
-          ctx.beginPath(); ctx.arc(px, py, R + 3.5, 0, Math.PI * 2);
-          ctx.setLineDash([2.5, 2.5]); ctx.strokeStyle = col; ctx.lineWidth = 1.3; ctx.stroke();
-          ctx.setLineDash([]);
-        }
         // view direction: a short arrow
         const a = (s.yaw == null ? 0 : s.yaw) * Math.PI / 180;
         const dx = Math.cos(a), dy = -Math.sin(a), ox = -dy, oy = dx;
@@ -1467,10 +1449,6 @@ export default function (component) {
     mark("rr-legline", C.ct, lab.leg_ct || "CT kill"),
     mark("rr-legline", C.t, lab.leg_t || "T kill"),
   );
-  if (THR != null) {
-    const s = el("span"); s.append(el("i", "rr-legring"), " " + (lab.leg_move || "moving") + " > " + Math.round(THR) + " " + (lab.u_s || "u/s"));
-    leg.appendChild(s);
-  }
   box.appendChild(leg);
   if (lab.howto) box.appendChild(el("div", "rr-howto", lab.howto));
 

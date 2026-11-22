@@ -139,6 +139,31 @@ _INV_ALIASES = {
     "p2000": "hkp2000",
     "m4a1s": "m4a1_silencer",
     "mp5": "mp5sd",
+    # compacted CS2 display names (inventory gives "Desert Eagle", not
+    # "deagle"): the ones whose letters do not compact to the icon key
+    "deserteagle": "deagle",
+    "glock18": "glock",
+    "highexplosivegrenade": "hegrenade",
+    "r8revolver": "revolver",
+    "cz75auto": "cz75a",
+    "dualberettas": "elite",
+    "ppbizon": "bizon",
+    "sg553": "sg556",
+    "m4a4": "m4a1",
+    "karambit": "knife_karambit",
+    "m9bayonet": "knife_m9_bayonet",
+    "huntsmanknife": "knife_tactical",
+    "nomadknife": "knife_outdoor",
+    "shadowdaggers": "knife_push",
+    "paracordknife": "knife_cord",
+    "navajaknife": "knife_gypsy_jackknife",
+    "stilettoknife": "knife_stiletto",
+    "talonknife": "knife_widowmaker",
+    "bowieknife": "knife_survival_bowie",
+    "survivalknife": "knife_canis",
+    "classicknife": "knife_css",
+    "kukriknife": "knife",
+    "urusknife": "knife_ursus",
 }
 
 

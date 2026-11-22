@@ -289,6 +289,61 @@ WEAPON_ALIASES = {
     "planted_c4": "c4",
     "c4": "c4",
     "bumpmine": None,  # no silhouette exists: the text name stays
+    # ---------------------------------------------------------------
+    # CS2 DISPLAY names: parse_ticks' active_weapon_name / inventory give
+    # the item's display name ("AK-47", "USP-S", "Falchion Knife"), not the
+    # schema name the kill feed uses. Keys below are norm_weapon()'s form
+    # of those display names (lowercased, "weapon_" stripped).
+    # guns
+    "ak-47": "ak47",
+    "m4a4": "m4a1",
+    "m4a1-s": "m4a1_silencer",
+    "galil ar": "galilar",
+    "ssg 08": "ssg08",
+    "sg 553": "sg556",
+    "scar-20": "scar20",
+    "glock-18": "glock",
+    "usp-s": "usp_silencer",
+    "desert eagle": "deagle",
+    "dual berettas": "elite",
+    "tec-9": "tec9",
+    "five-seven": "fiveseven",
+    "cz75-auto": "cz75a",
+    "r8 revolver": "revolver",
+    "sawed-off": "sawedoff",
+    "mag-7": "mag7",
+    "mac-10": "mac10",
+    "mp5-sd": "mp5sd",
+    "ump-45": "ump45",
+    "pp-bizon": "bizon",
+    # grenades / equipment
+    "high explosive grenade": "hegrenade",
+    "smoke grenade": "smokegrenade",
+    "incendiary grenade": "incgrenade",
+    "decoy grenade": "decoy",
+    "c4 explosive": "c4",
+    "zeus x27": "taser",
+    # knives (display name -> the HUD's knife_* key; knife_kukri has no
+    # silhouette, so it takes the generic knife like an unknown one would)
+    "m9 bayonet": "knife_m9_bayonet",
+    "karambit": "knife_karambit",
+    "huntsman knife": "knife_tactical",
+    "nomad knife": "knife_outdoor",
+    "shadow daggers": "knife_push",
+    "paracord knife": "knife_cord",
+    "navaja knife": "knife_gypsy_jackknife",
+    "stiletto knife": "knife_stiletto",
+    "talon knife": "knife_widowmaker",
+    "bowie knife": "knife_survival_bowie",
+    "survival knife": "knife_canis",
+    "classic knife": "knife_css",
+    "kukri knife": "knife",
+    "gut knife": "knife_gut",
+    "flip knife": "knife_flip",
+    "falchion knife": "knife_falchion",
+    "butterfly knife": "knife_butterfly",
+    "ursus knife": "knife_ursus",
+    "skeleton knife": "knife_skeleton",
 }
 
 
@@ -302,7 +357,7 @@ def weapon_key(name) -> str | None:
         return None
     if icon(w):
         return w
-    if w.startswith("knife"):  # an exotic knife: at least the plain one
+    if w.startswith("knife") or w.endswith(" knife"):  # an exotic knife: at least the plain one
         return "knife" if icon("knife") else None
     return None
 

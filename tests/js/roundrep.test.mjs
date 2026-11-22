@@ -143,7 +143,8 @@ assert.ok(row0.querySelectorAll(".rr-putil .rr-ico").length >= 2, "grenades");
 assert.ok(!$(".rr-pth"), "no column header row");
 assert.ok(!$(".rr-left .rr-sdot"), "no team dots in the players table");
 assert.ok(!row0.querySelector(".rr-pnum"), "armor shows no number");
-assert.strictEqual($$(".rr-ecor").length, 2);
+assert.ok(!$(".rr-eco"), "no bottom economy block");
+assert.ok(heads.some((h) => /\$\d/.test(h)), "team money sits in the group headers: " + heads.join(" | "));
 assert.ok($$(".rr-prow .rr-pind .rr-ico").length >= 1, "the bomb carrier is marked");
 // every name is on hover only: the weapon icon carries its name in the title
 assert.ok(row0.querySelector(".rr-pw .rr-ico").title.length > 0);
@@ -238,13 +239,11 @@ for (const sp of $$(".rr-psp")) {
   const txt = sp.textContent.trim();
   if (txt) assert.ok(/^\d+ /.test(txt) && Number(txt.split(" ")[0]) % 5 === 0, "speed snaps to 5: " + txt);
 }
-// the moving threshold: the legend ring + the dashed line in the duel chart
-assert.ok(root.innerHTML.includes("rr-legring"), "the 'moving > N' legend is missing");
-assert.ok(/moving\s*>/.test(root.textContent));
+// the moving threshold lives only inside the duel panel's shot chart now
 click($$(".rr-card")[0]);
 assert.ok($$(".rr-legdash").length > 0, "the threshold line legend in the duel panel");
 click($(".rr-sbtn.exit"));
-ok("moving threshold: legend ring on the map legend, dashed line in the duel chart");
+ok("moving threshold: dashed line in the duel chart only");
 
 // the duel panel: live aim numbers of both duelists
 if (payload.duels.length && payload.duels[0].tel) {
