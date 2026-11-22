@@ -7,6 +7,7 @@ every check runs against fixtures built in-memory.
 Run from the repo root: python tests/test_sources.py
 """
 
+import datetime
 import io
 import json
 import os
@@ -165,7 +166,6 @@ def test_offline_gate():
         t = shttp.HttpTransport(sleeper=lambda s: None)
         for fn in (
             lambda: t.get_json("https://api.steampowered.com/x"),
-            lambda: t.post_json("https://api.steampowered.com/x", {}),
         ):
             try:
                 fn()
@@ -261,12 +261,8 @@ def test_json_retries():
             seen["auth"] = req.headers.get("Authorization")
             return FakeResponse(_json_body({}))
 
-        fake.add("POST", "https://api.steampowered.com/x", _capture)
-        t.post_json(
-            "https://api.steampowered.com/x",
-            {"knowncode": "x"},
-            headers={"Authorization": "Bearer KEY"},
-        )
+        fake.add("GET", "https://api.steampowered.com/x", _capture)
+        t.get_json("https://api.steampowered.com/x", headers={"Authorization": "Bearer KEY"})
         check(
             "UA + bearer header, no key in the URL",
             seen["ua"] == "cs2-aimaudit"
@@ -359,7 +355,7 @@ def test_store_files():
         rec = sm.MatchRecord(
             provider="steam",
             match_id="m1",
-            played_at=sm.datetime(2026, 1, 2, 3, 4, 5, tzinfo=sm.timezone.utc),
+            played_at=sm.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.timezone.utc),
             score=(13, 5),
             result="win",
         )
@@ -404,45 +400,15 @@ def test_no_sockets_on_import():
 
 # --------------------------------------------------------------- fakes
 class FakeTransport:
-    """Stands in for HttpTransport: routed JSON answers + scripted downloads."""
+    """Stands in for HttpTransport: scripted downloads, no JSON answers."""
 
     def __init__(self):
-        self.routes = {}
         self.hits = []
         self.downloads = []
 
-    def add(self, method, url, answer):
-        self.routes[(method, url)] = answer
-
-    def _json(self, method, url, body=None, headers=None):
-        self.hits.append((method, url, dict(headers or {})))
-        answer = self.routes.get((method, url))
-        if answer is None:
-            raise sm.NetworkError(f"no route for {method} {url}")
-        if callable(answer):
-            answer = answer(body)
-        if isinstance(answer, urllib.error.HTTPError):
-            raise self._translate(answer)
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-    @staticmethod
-    def _translate(e):
-        # the same status -> error mapping HttpTransport applies
-        if e.code in (401, 403):
-            return sm.AuthError(f"HTTP {e.code}")
-        if e.code == 404:
-            return sm.NotFoundError("HTTP 404")
-        if e.code == 429:
-            return sm.RateLimitError()
-        return sm.NetworkError(f"HTTP {e.code}")
-
     def get_json(self, url, headers=None):
-        return self._json("GET", url, headers=headers)
-
-    def post_json(self, url, body, headers=None):
-        return self._json("POST", url, body=body, headers=headers)
+        self.hits.append(("GET", url, dict(headers or {})))
+        raise sm.NetworkError(f"no route for GET {url}")
 
     def download(self, url, dest, *, headers=None, progress=None, cancel=None):
         self.downloads.append(url)
@@ -452,51 +418,6 @@ class FakeTransport:
         if progress:
             progress(len(payload), len(payload))
         return len(payload)
-
-
-PID = "11111111-2222-3333-4444-555555555555"
-OTHER = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-
-
-def _faceit_players():
-    return {"player_id": PID, "nickname": "Nick", "games": {"cs2": {"skill_level": 5}}}
-
-
-def _faceit_item(mid, started, my_faction, winner_team, s1, s2, mode="5v5"):
-    t1, t2 = "team-alpha", "team-bravo"
-    players1 = [{"player_id": PID if my_faction == 1 else OTHER}] * 2
-    players2 = [{"player_id": PID if my_faction == 2 else OTHER}] * 2
-    winner = None
-    if winner_team == 1:
-        winner = t1
-    elif winner_team == 2:
-        winner = t2
-    return {
-        "match_id": mid,
-        "game_id": "cs2",
-        "game_mode": mode,
-        "status": "finished",
-        "started_at": started,
-        "finished_at": started + 3600,
-        "faceit_url": f"https://www.faceit.com/en/cs2/match/{mid}",
-        "competition_name": "CS2 5v5 EU",
-        "region": "EU",
-        "results": {"score": {"faction1": s1, "faction2": s2}, "winner": winner},
-        "teams": {
-            "faction1": {"team_id": t1, "players": players1},
-            "faction2": {"team_id": t2, "players": players2},
-        },
-    }
-
-
-def _faceit_client(token="", nick="Nick", player_id=""):
-    from sources.faceit import FaceitClient
-
-    tr = FakeTransport()
-    cfg = sm.FaceitConfig(
-        nickname=nick, api_key="KEY", downloads_token=token, player_id=player_id
-    )
-    return FaceitClient(cfg, transport=tr), tr, cfg
 
 
 # ------------------------------------------------------------- steam tests
@@ -901,27 +822,6 @@ def test_steam_download():
         ssteam.HELPER_SHA256 = "eda6ce361215c4c0427332e55811ffd621755b264ae7df0f5385ef5916331141"
 
 
-def test_steam_webapi_sharecode():
-    print("== steam: web api next share code ==")
-    from sources import steam as ssteam
-
-    tr = FakeTransport()
-    url_base = "https://api.steampowered.com/ICSGOPlayers_730/GetNextMatchSharingCode/v1"
-    tr.add("GET", f"{url_base}?key=K&steamid=765&knowncode=CSGO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE",
-           {"result": {"nextcode": "CSGO-FFFFF-GGGGG-HHHHH-IIIII-JJJJJ"}})
-    got = ssteam.next_share_code(tr, "K", "765", "auth", "CSGO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE")
-    check("next code returned", got == "CSGO-FFFFF-GGGGG-HHHHH-IIIII-JJJJJ")
-    tr.add("GET", f"{url_base}?key=K&steamid=765&knowncode=CSGO-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ",
-           {"result": {}})
-    check("empty result -> None", ssteam.next_share_code(tr, "K", "765", "auth", "CSGO-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ") is None)
-    tr.add("GET", f"{url_base}?key=BAD&steamid=765&knowncode=x", _http_error(403))
-    try:
-        ssteam.next_share_code(tr, "BAD", "765", "auth", "x")
-        check("403 -> AuthError", False)
-    except sm.AuthError:
-        check("403 -> AuthError", True)
-
-
 # ------------------------------------------------------------- inbox tests
 def test_inbox():
     print("== inbox: replays folder ==")
@@ -1017,7 +917,6 @@ def main():
     test_steam_sharecode()
     test_steam_helper_install()
     test_steam_download()
-    test_steam_webapi_sharecode()
     test_inbox()
     test_no_sockets_in_app()
     print(f"\n{PASS} passed, {FAIL} failed")

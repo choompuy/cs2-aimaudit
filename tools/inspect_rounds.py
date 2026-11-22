@@ -67,10 +67,8 @@ def _weapons(df, seg_lo: int, seg_hi: int) -> str:
     return ", ".join(f"{w} x{n}" for w, n in counts.items())
 
 
-def inspect_demo(path: str, dfs: dict) -> None:
-    print(f"\n{'=' * 72}\n=== {Path(path).name}\n{'=' * 72}")
-
-    # --- unified timeline of the wanted events
+def _timeline(dfs: dict) -> None:
+    """The unified tick-sorted timeline of the wanted events."""
     rows = []
     for name in WANTED:
         df = dfs.get(name)
@@ -95,6 +93,9 @@ def inspect_demo(path: str, dfs: dict) -> None:
     if len(rows) > 80:
         print(f"  ... {len(rows) - 80} more")
 
+
+def _dump_tables(dfs: dict) -> None:
+    """One table per wanted event kind: key columns + the trp trajectory."""
     for name in WANTED:
         df = dfs.get(name)
         if df is None:
@@ -107,7 +108,9 @@ def inspect_demo(path: str, dfs: dict) -> None:
             print(f"  (columns: {', '.join(map(str, df.columns))})")
         print(f"  total_rounds_played trajectory: {_trajectory(df)}")
 
-    # --- first round segments: weapons in weapon_fire / player_death
+
+def _segment_report(dfs: dict) -> None:
+    """First-round segments: weapons in weapon_fire / player_death."""
     seg_events, seg_name = dfs.get("round_freeze_end"), "round_freeze_end"
     if seg_events is None or len(seg_events) == 0:
         seg_events, seg_name = dfs.get("round_start"), "round_start"
@@ -133,6 +136,13 @@ def inspect_demo(path: str, dfs: dict) -> None:
         print(f"\n  segment {i + 1}: ticks {lo}..{hi_disp}{trp}")
         print(f"    weapon_fire: {_weapons(fires, lo, hi_inf)}")
         print(f"    player_death: {_weapons(deaths, lo, hi_inf)}")
+
+
+def inspect_demo(path: str, dfs: dict) -> None:
+    print(f"\n{'=' * 72}\n=== {Path(path).name}\n{'=' * 72}")
+    _timeline(dfs)
+    _dump_tables(dfs)
+    _segment_report(dfs)
 
 
 def run(argv: list[str]) -> int:

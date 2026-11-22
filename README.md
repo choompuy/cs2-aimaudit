@@ -165,7 +165,11 @@ python tests/test_sources.py     # match import (Steam), no network
 python tests/test_icons.py       # icon sanitizer / aliases / fallbacks
 python tests/check_ui.py         # i18n / schema / layering guardrails
 python tests/smoke_app.py --fast # AppTest end-to-end (fake parser)
+cd tests/js && npm ci && cd ../.. && python tests/check_roundrep_js.py
 ```
+
+The JS line needs Node once (`npm ci` in `tests/js`); without it
+`check_roundrep_js.py` skips. CI runs both.
 
 - `core/` — parsing and all metrics (demoparser2), no UI code.
 - `sources/` — match import from Steam: the provider, the HTTP
@@ -174,7 +178,8 @@ python tests/smoke_app.py --fast # AppTest end-to-end (fake parser)
   the shell in `shell.py`, the filter panel in `filters_ui.py`.
 - `ui/tables.toml` — the table schema: formats, sorting, grading and bars
   for every grid, described as data.
-- `i18n.py` — English/Russian strings.
+- `i18n.py` + `i18n/en.toml` / `i18n/ru.toml` — UI strings, one flat file
+  per language; missing keys fall back to English.
 - `docs/ARCHITECTURE.md` — module map, dependency rules and how to add a
   metric, column, page or filter.
 - `docs/DEMOPARSER_NOTES.md` — notes on the demoparser2 API.

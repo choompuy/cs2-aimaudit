@@ -30,26 +30,22 @@ import json
 import os
 import re
 import sys
-import time
-import urllib.request
 import zipfile
 
-# the data folder lives next to the launcher (see store.py)
+# the data folder lives next to the launcher (see store/)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import store  # noqa: E402
+from tools import fetchutil  # noqa: E402
+from tools.fetchutil import FAILED_MARK  # noqa: F401 - tests read this
+
+# the seams tests monkeypatch: module-level names, shared code in fetchutil
+_get = fetchutil.get
+_write = fetchutil.write
 
 REPO = "pnxenopoulos/awpy-data"
 DEFAULT_TAG = "2000942"
 URL = "https://github.com/{repo}/releases/download/{tag}/{name}"
 SAFE_PNG = re.compile(r"^radars/[a-z0-9_]+\.png$")
-RETRY_AFTER_S = 24 * 3600  # after a failed automatic download, wait this long
-FAILED_MARK = ".fetch_failed"
-
-
-def _get(url: str, timeout: float = 60) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "cs2-aimaudit"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed https host
-        return resp.read()
 
 
 def present(dest: str) -> bool:
@@ -61,21 +57,7 @@ def present(dest: str) -> bool:
     return "map_data.json" in names and any(n.endswith(".png") for n in names)
 
 
-def _recently_failed(dest: str) -> bool:
-    try:
-        return time.time() - os.path.getmtime(os.path.join(dest, FAILED_MARK)) < RETRY_AFTER_S
-    except OSError:
-        return False
-
-
-def _write(path: str, data: bytes) -> None:
-    tmp = path + ".part"
-    with open(tmp, "wb") as fh:
-        fh.write(data)
-    os.replace(tmp, path)
-
-
-def download(dest: str, tag: str, timeout: float) -> int:
+def download_radar_set(dest: str, tag: str, timeout: float) -> int:
     """Download into `dest`; returns the number of images. Raises on any failure."""
     meta = _get(URL.format(repo=REPO, tag=tag, name="map_data.json"), timeout)
     json.loads(meta)  # fail early on an error page
@@ -112,32 +94,24 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if present(dest):
             return 0
-        if _recently_failed(dest):
+        if fetchutil.recently_failed(dest):
             print("  Radar images: the last download failed, not retrying yet.")
             print("  Retry any time with:  python tools\\fetch_radars.py")
             return 0
         print("  Downloading the radar images for the Map page (about 3 MB, once)...")
 
     try:
-        n = download(dest, args.tag, timeout=20 if auto else 60)
+        n = download_radar_set(dest, args.tag, timeout=20 if auto else 60)
     except Exception as e:  # noqa: BLE001 - one friendly message for any failure
         if not auto:
             print(f"download failed: {e}", file=sys.stderr)
             return 1
-        try:
-            os.makedirs(dest, exist_ok=True)
-            with open(os.path.join(dest, FAILED_MARK), "w", encoding="utf-8") as fh:
-                fh.write(str(e))
-        except OSError:
-            pass
+        fetchutil.mark_failed(dest, e)
         print(f"  Could not download the radars ({e}).")
         print("  The Map page still works on a plain grid. Retry later with:")
         print("      python tools\\fetch_radars.py")
         return 0
-    try:
-        os.remove(os.path.join(dest, FAILED_MARK))
-    except OSError:
-        pass
+    fetchutil.clear_failed(dest)
     print(f"  Radar images ready: {n} maps in {dest}")
     if os.path.abspath(dest) != os.path.abspath(store.radars_dir()):
         print(f"  set AIMAUDIT_RADAR_DIR={dest} before starting the app")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import pandas as pd
 
 from core.model import weapon_class
@@ -56,7 +56,7 @@ def halves_from_sides(sides: dict, n_rounds: int) -> list[tuple[int, int]]:
     if not rounds:
         return []
     bounds = []
-    for prev, cur in zip(rounds, rounds[1:]):
+    for prev, cur in zip(rounds, rounds[1:], strict=False):
         if cur != prev + 1:
             continue
         known = swapped = 0

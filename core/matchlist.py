@@ -114,6 +114,73 @@ def _score(v) -> tuple[int, int] | None:
     return None
 
 
+def _stats_of(stats_of, entry: dict | None):
+    """The cached per-match summary for a library entry (never parses
+    anything; None simply leaves the summary cells empty; a broken cache
+    file is no reason to die)."""
+    if entry is None or stats_of is None:
+        return None
+    try:
+        return stats_of(entry)
+    except Exception:  # noqa: BLE001 - a broken cache file is no reason to die
+        return None
+
+
+def _record_row(rec: MatchRecord, entry: dict | None, stats) -> MatchRow:
+    """A row for a cached provider record, merged with its library entry
+    (entry None -> nothing downloaded for it yet). Each cell's chain is one
+    fallback source per or: the record, the cached stats, the entry."""
+    em = _entry_match(entry or {})
+    en = entry or {}
+    st = stats or {}
+    return MatchRow(
+        key=f"{rec.provider}:{rec.match_id}",
+        demo_id=entry["id"] if entry is not None else None,
+        provider=rec.provider,
+        match_id=rec.match_id,
+        rec=rec,
+        entry=entry,
+        map_name=rec.map_name or en.get("map") or st.get("map"),
+        mode=rec.mode or em.get("mode"),
+        played_at=rec.played_at
+        or _iso(st.get("played_at"))
+        or (_entry_time(entry) if entry is not None else None),
+        score=rec.score or _score(st.get("score")) or _score(em.get("score")),
+        result=rec.result or st.get("result") or em.get("result"),
+        demo_state=(
+            DemoState.DOWNLOADED if entry is not None else rec.demo
+        ),
+        missing=bool(entry is not None and entry.get("status") == "missing"),
+        stats=stats,
+    )
+
+
+def _library_row(e: dict, stats) -> MatchRow:
+    """A row for a library entry no cached record claims: provider-
+    downloaded demos whose list entry fell out of the cache, and your own
+    files."""
+    m = _entry_match(e)
+    st = stats or {}
+    provider = str(m.get("provider")) if m.get("provider") else None
+    mid = str(m.get("match_id")) if m.get("match_id") else None
+    return MatchRow(
+        key=f"{provider}:{mid}" if provider and mid else f"lib:{e['id']}",
+        demo_id=e["id"],
+        provider=provider,
+        match_id=mid,
+        rec=None,
+        entry=e,
+        map_name=e.get("map") or st.get("map"),
+        mode=m.get("mode"),
+        played_at=_iso(m.get("played_at")) or _iso(st.get("played_at")) or _entry_time(e),
+        score=_score(m.get("score")) or _score(st.get("score")),
+        result=m.get("result") or st.get("result"),
+        demo_state=DemoState.DOWNLOADED,
+        missing=bool(e.get("status") == "missing"),
+        stats=stats,
+    )
+
+
 def build_rows(
     records: list[MatchRecord],
     lib: list[dict],
@@ -126,14 +193,6 @@ def build_rows(
     for a library entry (never parses anything; None simply leaves the
     summary cells empty). Newest first; undated rows at the end.
     """
-    def _stats(entry: dict | None):
-        if entry is None or stats_of is None:
-            return None
-        try:
-            return stats_of(entry)
-        except Exception:  # noqa: BLE001 - a broken cache file is no reason to die
-            return None
-
     # the library's provider-bound entries, by (provider, match_id)
     by_match: dict[tuple[str, str], dict] = {}
     for e in lib:
@@ -148,68 +207,15 @@ def build_rows(
     # 1) every cached provider record, merged with its library entry
     for rec in records:
         entry = by_match.get((rec.provider, rec.match_id))
-        stats = _stats(entry)
         if entry is not None:
             claimed.add(entry["id"])
-        rows.append(
-            MatchRow(
-                key=f"{rec.provider}:{rec.match_id}",
-                demo_id=entry["id"] if entry is not None else None,
-                provider=rec.provider,
-                match_id=rec.match_id,
-                rec=rec,
-                entry=entry,
-                map_name=rec.map_name
-                or ((entry or {}).get("map"))
-                or ((stats or {}).get("map")),
-                mode=rec.mode or _entry_match(entry or {}).get("mode"),
-                played_at=rec.played_at
-                or _iso((stats or {}).get("played_at"))
-                or (_entry_time(entry) if entry is not None else None),
-                score=rec.score
-                or _score((stats or {}).get("score"))
-                or _score(_entry_match(entry or {}).get("score")),
-                result=rec.result
-                or ((stats or {}).get("result"))
-                or _entry_match(entry or {}).get("result"),
-                demo_state=(
-                    DemoState.DOWNLOADED if entry is not None else rec.demo
-                ),
-                missing=bool(entry is not None and entry.get("status") == "missing"),
-                stats=stats,
-            )
-        )
+        rows.append(_record_row(rec, entry, _stats_of(stats_of, entry)))
 
-    # 2) the library entries no cached record claims: provider-downloaded
-    #    demos whose list entry fell out of the cache, and your own files
+    # 2) the library entries no cached record claims
     for e in lib:
         if e["id"] in claimed:
             continue
-        m = _entry_match(e)
-        stats = _stats(e)
-        provider = str(m.get("provider")) if m.get("provider") else None
-        mid = str(m.get("match_id")) if m.get("match_id") else None
-        rows.append(
-            MatchRow(
-                key=f"{provider}:{mid}" if provider and mid else f"lib:{e['id']}",
-                demo_id=e["id"],
-                provider=provider,
-                match_id=mid,
-                rec=None,
-                entry=e,
-                map_name=e.get("map") or ((stats or {}).get("map")),
-                mode=m.get("mode"),
-                played_at=_iso(m.get("played_at"))
-                or _iso((stats or {}).get("played_at"))
-                or _entry_time(e),
-                score=_score(m.get("score"))
-                or _score((stats or {}).get("score")),
-                result=m.get("result") or ((stats or {}).get("result")),
-                demo_state=DemoState.DOWNLOADED,
-                missing=bool(e.get("status") == "missing"),
-                stats=stats,
-            )
-        )
+        rows.append(_library_row(e, _stats_of(stats_of, e)))
 
     rows.sort(
         key=lambda r: r.played_at or datetime.min.replace(tzinfo=timezone.utc),

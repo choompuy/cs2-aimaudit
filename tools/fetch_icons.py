@@ -47,19 +47,20 @@ import re
 import shutil
 import subprocess
 import sys
-import time
-import urllib.request
 
-# the data folder / the sanitizer live with the app (see store.py)
+# the data folder / the sanitizer live with the app (see store/)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import store  # noqa: E402
+from tools import fetchutil  # noqa: E402
 from ui.icons import sanitize_svg, svg_size  # noqa: E402
+
+# the seams tests monkeypatch: module-level names, shared code in fetchutil
+_get = fetchutil.get
+_write = fetchutil.write
 
 REPO = "lexogrine/cs2-react-hud"
 COMMIT = "7874750c97fcecd8f72eb3fad382917e035ec651"
 URL = "https://raw.githubusercontent.com/{repo}/{commit}/src/assets/{folder}/{name}.svg"
-RETRY_AFTER_S = 24 * 3600  # after a failed automatic download, wait this long
-FAILED_MARK = ".fetch_failed"
 SAFE_KEY = re.compile(r"^[a-z0-9_]+$")  # keys double as file names
 TIMEOUT_AUTO, TIMEOUT_FULL = 12.0, 60.0
 
@@ -191,12 +192,6 @@ IMAGE_SHA = {
 }
 
 
-def _get(url: str, timeout: float) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "cs2-aimaudit"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed https host
-        return resp.read()
-
-
 def present(dest: str) -> bool:
     """The icons are installed: a manifest that covers every pinned key."""
     try:
@@ -208,20 +203,6 @@ def present(dest: str) -> bool:
         return False
     wanted = set(WEAPON_SHA) | set(IMAGE_SHA)
     return wanted <= set(m)
-
-
-def _recently_failed(dest: str) -> bool:
-    try:
-        return time.time() - os.path.getmtime(os.path.join(dest, FAILED_MARK)) < RETRY_AFTER_S
-    except OSError:
-        return False
-
-
-def _write(path: str, data: bytes) -> None:
-    tmp = path + ".part"
-    with open(tmp, "wb") as fh:
-        fh.write(data)
-    os.replace(tmp, path)
 
 
 def _read_manifest(dest: str) -> dict:
@@ -469,37 +450,24 @@ def download_mirror(dest: str, timeout: float) -> tuple[int, int]:
     return saved, skipped
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--dest", default=None, help="folder for the icons (default: data\\icons)")
-    ap.add_argument(
-        "--source",
-        choices=("mirror", "game", "auto"),
-        default="mirror",
-        help="mirror: the pinned HUD commit (default); game: decompile from an "
-        "installed CS2; auto: mirror first, game for what it could not deliver",
-    )
-    ap.add_argument("--cs2-dir", default=None, help="the CS2 folder (default: $AIMAUDIT_CS2_DIR or autodetect)")
-    ap.add_argument(
-        "--if-missing",
-        action="store_true",
-        help="launcher mode: do nothing when the icons are there, never fail",
-    )
-    args = ap.parse_args(argv)
-    dest = args.dest or os.environ.get("AIMAUDIT_ICON_DIR") or store.icons_dir()
-    auto = args.if_missing
+def _gate(dest: str) -> bool:
+    """Launcher mode pre-checks: True when the download should proceed."""
+    if os.environ.get("AIMAUDIT_NO_ICONS"):
+        return False
+    if present(dest):
+        return False
+    if fetchutil.recently_failed(dest):
+        print("  Icons: the last download failed, not retrying yet.")
+        print("  Retry any time with:  python tools\\fetch_icons.py")
+        return False
+    print("  Downloading the weapon icons for the UI (about 200 KB, once)...")
+    return True
 
-    if auto:
-        if os.environ.get("AIMAUDIT_NO_ICONS"):
-            return 0
-        if present(dest):
-            return 0
-        if _recently_failed(dest):
-            print("  Icons: the last download failed, not retrying yet.")
-            print("  Retry any time with:  python tools\\fetch_icons.py")
-            return 0
-        print("  Downloading the weapon icons for the UI (about 200 KB, once)...")
 
+def _acquire(args, dest: str, auto: bool) -> int:
+    """Download from the chosen source. On success the previous failure
+    mark is cleared; launcher mode turns any failure into a friendly
+    message + a mark (exit 0), manual runs report exit 1."""
     try:
         if args.source == "game":
             cs2 = find_cs2_dir(args.cs2_dir)
@@ -522,20 +490,40 @@ def main(argv: list[str] | None = None) -> int:
         if not auto:
             print(f"download failed: {e}", file=sys.stderr)
             return 1
-        try:
-            os.makedirs(dest, exist_ok=True)
-            with open(os.path.join(dest, FAILED_MARK), "w", encoding="utf-8") as fh:
-                fh.write(str(e))
-        except OSError:
-            pass
+        fetchutil.mark_failed(dest, e)
         print(f"  Could not download the icons ({e}).")
         print("  The UI shows weapon names as text instead. Retry later with:")
         print("      python tools\\fetch_icons.py")
         return 0
-    try:
-        os.remove(os.path.join(dest, FAILED_MARK))
-    except OSError:
-        pass
+    fetchutil.clear_failed(dest)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--dest", default=None, help="folder for the icons (default: data\\icons)")
+    ap.add_argument(
+        "--source",
+        choices=("mirror", "game", "auto"),
+        default="mirror",
+        help="mirror: the pinned HUD commit (default); game: decompile from an "
+        "installed CS2; auto: mirror first, game for what it could not deliver",
+    )
+    ap.add_argument("--cs2-dir", default=None, help="the CS2 folder (default: $AIMAUDIT_CS2_DIR or autodetect)")
+    ap.add_argument(
+        "--if-missing",
+        action="store_true",
+        help="launcher mode: do nothing when the icons are there, never fail",
+    )
+    args = ap.parse_args(argv)
+    dest = args.dest or os.environ.get("AIMAUDIT_ICON_DIR") or store.icons_dir()
+    auto = args.if_missing
+
+    if auto and not _gate(dest):
+        return 0
+    code = _acquire(args, dest, auto)
+    if code:
+        return code
     if os.path.abspath(dest) != os.path.abspath(store.icons_dir()) and not os.environ.get("AIMAUDIT_ICON_DIR"):
         print(f"  set AIMAUDIT_ICON_DIR={dest} before starting the app")
     return 0

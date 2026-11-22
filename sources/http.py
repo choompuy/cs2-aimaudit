@@ -14,6 +14,7 @@ Rules enforced here (see docs/ARCHITECTURE.md, "sources"):
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -63,27 +64,26 @@ def _scheme_ok(url: str, *, demo: bool) -> bool:
 
 
 class HttpTransport:
-    """Injectable transport; tests pass a fake with the same three methods."""
+    """Injectable transport; tests pass a fake with the same two methods."""
 
     def __init__(self, sleeper=time.sleep):
         self._sleep = sleeper
-        self.calls: list[tuple] = []
 
     # ------------------------------------------------------------- plumbing
-    def _open(self, url: str, *, data: bytes | None, headers: dict, timeout: float):
-        req = urllib.request.Request(url, data=data, headers=headers, method="GET" if data is None else "POST")
+    def _open(self, url: str, *, headers: dict, timeout: float):
+        req = urllib.request.Request(url, headers=headers, method="GET")
         return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310 - schemes checked above
 
-    def _once(self, url: str, *, data: bytes | None, headers: dict, timeout: float):
+    def _once(self, url: str, *, headers: dict, timeout: float):
         try:
-            with self._open(url, data=data, headers=headers, timeout=timeout) as resp:
+            with self._open(url, headers=headers, timeout=timeout) as resp:
                 return resp.status, resp.headers or {}, resp.read()
         except urllib.error.HTTPError as e:
-            body = b""
             try:
                 body = e.read(4096)
-            except Exception:  # noqa: BLE001 - the status is what matters
-                pass
+            except (OSError, ValueError, http.client.HTTPException):
+                # a half-written error body is fine: the status is what matters
+                body = b""
             return e.code, e.headers or {}, body
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise NetworkError(f"{type(e).__name__}: {e}") from e
@@ -104,18 +104,13 @@ class HttpTransport:
             return RateLimitError(retry_after=0.0)
         return NetworkError(detail or f"HTTP {status}")
 
-    def _request_json(self, method: str, url: str, *, body: dict | None, headers: dict):
+    def _request_json(self, url: str, *, headers: dict):
         _check_offline()
         _scheme_ok(url, demo=False)
         hdrs = {"User-Agent": USER_AGENT, **(headers or {})}
-        data = None
-        if body is not None:
-            data = json.dumps(body).encode()
-            hdrs.setdefault("Content-Type", "application/json")
         delay = 1.0
         for attempt in range(MAX_ATTEMPTS):
-            status, resp_headers, raw = self._once(url, data=data, headers=hdrs, timeout=TIMEOUT_JSON)
-            self.calls.append((method, url, status))
+            status, resp_headers, raw = self._once(url, headers=hdrs, timeout=TIMEOUT_JSON)
             if status == 429:
                 if attempt == MAX_ATTEMPTS - 1:
                     raise RateLimitError(retry_after=_retry_after(resp_headers))
@@ -138,10 +133,7 @@ class HttpTransport:
 
     # ----------------------------------------------------------------- API
     def get_json(self, url: str, headers: dict | None = None) -> dict:
-        return self._request_json("GET", url, body=None, headers=headers or {})
-
-    def post_json(self, url: str, body: dict, headers: dict | None = None) -> dict:
-        return self._request_json("POST", url, body=body, headers=headers or {})
+        return self._request_json(url, headers=headers or {})
 
     def download(
         self,
@@ -165,7 +157,7 @@ class HttpTransport:
         part = dest + ".part"
         done = 0
         try:
-            with self._open(url, data=None, headers=hdrs, timeout=TIMEOUT_DEMO) as resp:
+            with self._open(url, headers=hdrs, timeout=TIMEOUT_DEMO) as resp:
                 total_raw = resp.headers.get("Content-Length")
                 total = int(total_raw) if total_raw and total_raw.isdigit() else None
                 if total is not None and total > max_bytes:
@@ -188,17 +180,17 @@ class HttpTransport:
             os.replace(part, dest)
             return done
         except DownloadCancelled:
-            _remove(part)
+            _unlink(part)
             raise
         except (urllib.error.URLError, TimeoutError, OSError) as e:
-            _remove(part)
+            _unlink(part)
             raise NetworkError(f"{type(e).__name__}: {e}") from e
         except BaseException:
-            _remove(part)
+            _unlink(part)
             raise
 
 
-def _remove(path: str) -> None:
+def _unlink(path: str) -> None:
     try:
         os.remove(path)
     except OSError:

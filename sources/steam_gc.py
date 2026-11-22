@@ -163,26 +163,38 @@ class GcMatch:
         return self.roundstatsall[0] if self.roundstatsall else self.roundstats_legacy
 
 
+def _parse_reservation(value: bytes, rs: RoundStats) -> None:
+    """Roundstats field 2: MatchmakingGC2ServerReserve (account ids,
+    game type)."""
+    for f2, w2, v2 in _fields(value):
+        if f2 == 1:
+            _repeated_uint32(w2, v2, rs.account_ids)
+        elif f2 == 2 and w2 == _WT_VARINT:
+            rs.game_type = v2
+
+
+def _parse_team_scores(wt: int, value, rs: RoundStats) -> None:
+    """Roundstats field 12: team scores as a packed list or a single
+    varint."""
+    if wt == _WT_LEN:
+        rs.team_scores.extend(_signed32(v) for v in _packed_varints(value))
+    elif wt == _WT_VARINT:
+        rs.team_scores.append(_signed32(value))
+
+
 def _parse_roundstats(buf: bytes) -> RoundStats:
     rs = RoundStats()
     for fno, wt, value in _fields(buf):
         if fno == 1 and wt == _WT_VARINT:
             rs.reservationid = value
         elif fno == 2 and wt == _WT_LEN:  # MatchmakingGC2ServerReserve
-            for f2, w2, v2 in _fields(value):
-                if f2 == 1:
-                    _repeated_uint32(w2, v2, rs.account_ids)
-                elif f2 == 2 and w2 == _WT_VARINT:
-                    rs.game_type = v2
+            _parse_reservation(value, rs)
         elif fno == 3 and wt == _WT_LEN:
             rs.map = _str(value)
         elif fno == 11 and wt == _WT_VARINT:
             rs.match_result = _signed32(value)
         elif fno == 12:
-            if wt == _WT_LEN:
-                rs.team_scores.extend(_signed32(v) for v in _packed_varints(value))
-            elif wt == _WT_VARINT:
-                rs.team_scores.append(_signed32(value))
+            _parse_team_scores(wt, value, rs)
         elif fno == 15 and wt == _WT_VARINT:
             rs.match_duration = _signed32(value)
         elif fno == 27 and wt == _WT_VARINT:
@@ -242,10 +254,6 @@ def steamid64_to_account_id(steamid64: str | int) -> int | None:
     if sid <= 76561197960265728:
         return None
     return sid - 76561197960265728
-
-
-def account_id_to_steamid64(account_id: int) -> str:
-    return str(account_id + 76561197960265728)
 
 
 def my_group(account_ids: list[int], account_id: int) -> int | None:

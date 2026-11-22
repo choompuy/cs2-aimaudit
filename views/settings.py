@@ -6,9 +6,9 @@ Everything here moved from other places (the sidebar's analysis expander,
 the Matches page's accounts block and helper card, shell's library panel):
 the widget keys stayed the same (thr, mt_steamid, lib_clear, del_* ...) so
 the smoke scenarios keep working. The values live in session_state /
-accounts.json / library.json, never only in widget state - the sliders must
-survive a Settings -> Matches -> match trip (shell.preserve_analysis_settings
-re-assigns the keys on the pages where the widgets do not render).
+accounts.json / library.json, never only in widget state - the sliders
+carry persist_state="session" so they survive the Settings -> Matches ->
+match trip while rendering nowhere else.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import sources.http
 import sources.steam
 import store
 from sources import model as sm
+from views import _shared
 
 
 def render(ctx) -> None:
@@ -37,12 +38,18 @@ def render(ctx) -> None:
 
 def _analysis(t) -> None:
     """The advanced tuning sliders (moved from the sidebar unchanged:
-    same ranges, same help texts, same keys - so nothing is lost)."""
+    same ranges, same help texts, same keys - so nothing is lost).
+    persist_state="session" carries the values across page switches
+    (the widgets render nowhere else)."""
     with st.container(border=True):
         st.markdown(f"**{t('settings_box')}**")
-        st.slider(t("thr_label"), 0, 250, 40, help=t("thr_help"), key="thr")
         st.slider(
-            t("win_label"), 1.0, 6.0, 3.0, 0.5, help=t("win_help"), key="window_s"
+            t("thr_label"), 0, 250, 40, help=t("thr_help"), key="thr",
+            persist_state="session",
+        )
+        st.slider(
+            t("win_label"), 1.0, 6.0, 3.0, 0.5, help=t("win_help"), key="window_s",
+            persist_state="session",
         )
         st.slider(
             t("safe_dist_label"),
@@ -52,6 +59,7 @@ def _analysis(t) -> None:
             50,
             help=t("safe_dist_help"),
             key="safe_dist",
+            persist_state="session",
         )
         st.slider(
             t("strict_dist_label"),
@@ -61,6 +69,7 @@ def _analysis(t) -> None:
             100,
             help=t("strict_dist_help"),
             key="strict_dist",
+            persist_state="session",
         )
         st.button(
             t("reset_defaults"), on_click=_reset_analysis, key="btn_reset_set"
@@ -121,21 +130,8 @@ def _persist_accounts() -> dict:
     return accounts
 
 
-def _steam_cfg(accounts: dict) -> sm.SteamConfig:
-    return sm.SteamConfig(
-        steam_id64=accounts.get("steam_id64") or "",
-        replays_dir=accounts.get("replays_dir") or "",
-    )
-
-
-def _show_error(t, e) -> None:
-    if e is None:
-        return
-    key, kw = e
-    try:
-        st.error(t(key, **kw))
-    except (KeyError, ValueError, IndexError):
-        st.error(t(key))
+_steam_cfg = _shared.steam_cfg
+_show_error = _shared.show_error
 
 
 def _add_by_share_code(t) -> None:

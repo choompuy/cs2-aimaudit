@@ -2,6 +2,8 @@
 
 import streamlit as st
 
+import state
+
 from ui import icons
 from ui import schema
 
@@ -23,7 +25,7 @@ def render(ctx) -> None:
         st.caption(t("ov_scope_note"))
     _tcol, _ = st.columns([1, 2])
     with _tcol:
-        ov_full = st.toggle(t("all_columns"), key="ov_full")
+        ov_full = st.toggle(t("all_columns"), key="ov_full", persist_state="session")
     st.caption(t("ov_click_hint"))
 
     team_order = ["T", "CT"] + sorted(set(summary["team"]) - {"T", "CT"})
@@ -47,7 +49,7 @@ def render(ctx) -> None:
 
     ov_cells = {
         "player": [
-            ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"])
+            ("★ " if s == me else "") + str(p) for s, p in zip(ov["sid"], ov["player"], strict=True)
         ],
         "team": ov["team"].to_numpy(),
         "kdr": ov["kd_ratio"].to_numpy(),
@@ -75,7 +77,7 @@ def render(ctx) -> None:
     def _pick_player_row(i):
         """Grid row click -> select that player (callback, runs before widgets)."""
         if 0 <= i < len(ov_sids):
-            st.session_state["me"] = ov_sids[i]
+            state.set_me(ov_sids[i])
 
     schema.table(
         "overview",

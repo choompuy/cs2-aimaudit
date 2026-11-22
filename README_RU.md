@@ -165,7 +165,11 @@ python tests/test_sources.py     # импорт матчей (Steam), без с�
 python tests/test_icons.py       # санитайзер / алиасы / запасные варианты иконок
 python tests/check_ui.py         # проверки i18n / схемы таблиц / слоёв
 python tests/smoke_app.py --fast # сквозные AppTest-сценарии (фейковый парсер)
+cd tests/js && npm ci && cd ../.. && python tests/check_roundrep_js.py
 ```
+
+JS-строке нужен один раз Node (`npm ci` в `tests/js`); без него
+`check_roundrep_js.py` пропускается. CI запускает и то, и другое.
 
 - `core/` — парсинг и все метрики (demoparser2), без UI.
 - `sources/` — импорт матчей из Steam: провайдер, HTTP-транспорт,
@@ -174,7 +178,8 @@ python tests/smoke_app.py --fast # сквозные AppTest-сценарии (ф
   оболочка в `shell.py`, панель фильтров в `filters_ui.py`.
 - `ui/tables.toml` — схема таблиц: форматы, сортировка, раскраска и полосы
   всех гридов описаны данными.
-- `i18n.py` — строки русский/английский.
+- `i18n.py` + `i18n/en.toml` / `i18n/ru.toml` — строки интерфейса, по
+  одному плоскому файлу на язык; недостающие ключи берутся из английского.
 - `docs/ARCHITECTURE.md` — карта модулей, правила зависимостей и рецепты
   «как добавить метрику / колонку / страницу / фильтр».
 - `docs/DEMOPARSER_NOTES.md` — конспект по API demoparser2.

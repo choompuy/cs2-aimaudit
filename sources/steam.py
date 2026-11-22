@@ -198,6 +198,48 @@ def _steamid_from_stdout(stdout: str) -> str | None:
 
 
 # ---------------------------------------------------------------- provider
+def _guess_mode(first, players: list) -> str:
+    """Wingman (up to 4 players), Premier (halftime team switch) or
+    Competitive."""
+    if players and len(players) <= 4:
+        return "Wingman"
+    if first is not None and first.b_switched_teams:
+        return "Premier"
+    return "Competitive"
+
+
+def _result_score(last, accounts: list, my_account: int | None):
+    """(result, score) from the GC's last round; None where unknown."""
+    if last is None or my_account is None:
+        return None, None
+    grp = steam_gc.my_group(accounts, my_account)
+    if grp is None:
+        return None, None
+    winners = steam_gc.winners_group(last.match_result)
+    score = None
+    ts = last.team_scores or []
+    if len(ts) >= 2:
+        score = (ts[grp], ts[1 - grp])
+    if winners is None:
+        result = "tie" if last.match_result in (0, 3) else None
+    else:
+        result = "win" if grp == winners else "loss"
+    return result, score
+
+
+def _demo_state(played, demo_ref) -> DemoState:
+    """EXPIRED past the retention window, READY with a demo URL, else
+    UNKNOWN."""
+    age = None
+    if played is not None:
+        age = (datetime.now(timezone.utc) - played).total_seconds() / 86400.0
+    if age is not None and age > DEMO_KEEP_DAYS:
+        return DemoState.EXPIRED
+    if demo_ref:
+        return DemoState.READY
+    return DemoState.UNKNOWN
+
+
 class SteamProvider:
     def __init__(self, cfg: SteamConfig, *, transport, runner=default_runner):
         self.cfg = cfg
@@ -272,37 +314,10 @@ class SteamProvider:
         )
         accounts = (last.account_ids if last else []) or []
         players = [a for a in accounts if a]
-        mode = None
-        if players and len(players) <= 4:
-            mode = "Wingman"
-        elif first is not None and first.b_switched_teams:
-            mode = "Premier"
-        else:
-            mode = "Competitive"
-        result = None
-        score = None
-        if last is not None and my_account is not None:
-            grp = steam_gc.my_group(accounts, my_account)
-            winners = steam_gc.winners_group(last.match_result)
-            if grp is not None:
-                ts = last.team_scores or []
-                if len(ts) >= 2:
-                    score = (ts[grp], ts[1 - grp])
-                if winners is None:
-                    result = "tie" if last.match_result in (0, 3) else None
-                else:
-                    result = "win" if grp == winners else "loss"
+        mode = _guess_mode(first, players)
+        result, score = _result_score(last, accounts, my_account)
         demo_url = (last.map if last else "") or ""
         demo_ref = demo_url if demo_url.startswith("http") else None
-        age = None
-        if played is not None:
-            age = (datetime.now(timezone.utc) - played).total_seconds() / 86400.0
-        if age is not None and age > DEMO_KEEP_DAYS:
-            demo = DemoState.EXPIRED
-        elif demo_ref:
-            demo = DemoState.READY
-        else:
-            demo = DemoState.UNKNOWN
         map_name = m.game_map or None
         if not map_name and last is not None:
             map_name = _map_from_game_type(last.game_type, len(players))
@@ -320,7 +335,7 @@ class SteamProvider:
             mode=mode,
             score=score,
             result=result,
-            demo=demo,
+            demo=_demo_state(played, demo_ref),
             demo_ref=demo_ref,
             page_url=None,
             extra=extra,
@@ -348,33 +363,3 @@ class SteamProvider:
                 os.remove(dest)
             except OSError:
                 pass
-
-
-# ----------------------------------------------------- Web API (optional)
-def next_share_code(transport, api_key: str, steamid64: str, auth_code: str, known_code: str) -> str | None:
-    """
-    Steam Web API GetNextMatchSharingCode: the share code after `known_code`.
-
-    Returns None at the end of the history (HTTP 202). A bad known code raises
-    ShareCodeError; a bad auth code or an unavailable backend raises AuthError
-    without retry storms (the transport's retries are bounded to 3 attempts).
-
-    Deviation from the app's "keys never in URLs" rule, documented on purpose:
-    Valve's Web API has no header authentication - the key can only travel as
-    a query parameter. This optional helper is not reachable from the UI.
-    """
-    from sources.model import AuthError
-
-    url = (
-        "https://api.steampowered.com/ICSGOPlayers_730/GetNextMatchSharingCode/v1"
-        f"?key={api_key}&steamid={steamid64}"
-        f"&knowncode={known_code}"
-    )
-    try:
-        data = transport.get_json(url)
-    except ProviderError as e:
-        if isinstance(e, AuthError):
-            raise
-        raise ShareCodeError(str(e)) from e
-    code = ((data.get("result") or {}).get("nextcode")) or ""
-    return code or None

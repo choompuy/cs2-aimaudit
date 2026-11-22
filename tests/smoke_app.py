@@ -322,10 +322,17 @@ _demo_n = [0]
 
 
 def fresh_at(timeout=300, **session):
-    """A run of the real app.py with session_state pre-set."""
+    """A run of the real app.py with session_state pre-set; a `match` /
+    `match_tab` pair also lands in ?m= / ?tab= (the URL is the truth about
+    the open match, and the Matches page re-reads it every run)."""
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=timeout)
     for k, v in session.items():
         at.session_state[k] = v
+    if session.get("match"):
+        at.query_params["m"] = session["match"]
+        tab = session.get("match_tab") or "overview"
+        if tab != "overview":
+            at.query_params["tab"] = tab
     at.run()
     return at
 
@@ -404,15 +411,55 @@ def ss_get(at, key, default=None):
         return default
 
 
+def pick(at, kind, key, value):
+    """
+    Select `value` - the RAW option or its displayed label - in a
+    selectbox / segmented_control that may format its options through
+    format_func (translated labels, player names, language titles).
+    Single-select widgets only.
+
+    AppTest's .select() takes the raw option value: format_func(raw) must
+    be one of the displayed options, because the wire carries the label
+    and the app maps it back to the option. .select_index() cannot be
+    used with format_func widgets at all: it treats the already-formatted
+    label as a value and formats it a second time ('kind_Manual upload'
+    is not in list).
+
+    Label mode swaps the widget's format_func for str() through the
+    testing session state, so the label itself goes on the wire
+    unchanged; the app's own deserializer then maps it back to the raw
+    option. The following at.run() re-registers the real format_func.
+    """
+    w = ctl(at, kind, key)
+    try:
+        raw_ok = w.format_func(value) in w.options
+    except Exception:  # noqa: BLE001 - the value does not format: label mode
+        raw_ok = False
+    if raw_ok:
+        return w.select(value).run()
+    if value in w.options:
+        from streamlit.runtime.state.common import TESTING_KEY
+
+        at.session_state[TESTING_KEY][w.id] = str
+        return w.select(value).run()
+    raise ValueError(
+        f"pick {key!r}: {value!r} is neither a raw option nor a displayed"
+        f" label of the widget (options: {w.options})"
+    )
+
+
 def goto(at, page):
     """
     Switch the page: a match tab (overview / shooting / duels / map /
-    replay, plus the retired timeline) opens the current - or last - demo as
-    a match; a top-level id navigates the sidebar (matches means the LIST,
-    exactly like shell.go_page). Only the active page renders, so switch
-    before interacting with widgets that live on it.
+    replay, plus the retired timeline) opens the current - or last - demo
+    as a match (a list row click: ?m= plus the tab); a top-level id
+    navigates like a rail click (st.page_link: ?p= carries it and the
+    other params are cleared, so Matches means the LIST). Only the active
+    page renders, so switch before interacting with widgets that live on
+    it.
     """
     if page in ("overview", "shooting", "duels", "map", "replay", "timeline"):
+        tab = "duels" if page == "timeline" else page
         mid = ss_get(at, "match") or ss_get(at, "demo_id")
         if mid is None:
             mid = core.load_state().get("last_demo")
@@ -422,20 +469,27 @@ def goto(at, page):
                 mid = lib[0]["id"] if lib else None
         if mid is None:
             # nothing to open: stay on the matches list
-            at.session_state["page"] = "matches"
+            at.query_params["p"] = "matches"
+            at.query_params.pop("m", None)
+            at.query_params.pop("tab", None)
             try:
                 del at.session_state["match"]
             except KeyError:
                 pass
         else:
-            at.session_state["page"] = "matches"
             at.session_state["match"] = mid
             at.session_state["demo_id"] = mid
-            at.session_state["match_tab"] = "duels" if page == "timeline" else page
+            at.session_state["match_tab"] = tab
+            at.query_params["m"] = mid
+            at.query_params["tab"] = tab
     else:
-        at.session_state["page"] = page
+        # a rail click: the target page goes into ?p= (shell.load_nav_url
+        # consumes it), the rest of the params clear with the navigation
+        for k in ("m", "tab", "f"):
+            at.query_params.pop(k, None)
+        at.query_params["p"] = page
         if page == "matches":
-            # the sidebar item lands on the LIST, like shell.go_page
+            # the rail item means the LIST, like shell.go_page
             try:
                 del at.session_state["match"]
             except KeyError:
@@ -450,10 +504,10 @@ def open_match(at, did, name="open the match again"):
         at,
         name,
         lambda: (
-            at.session_state.__setitem__("page", "matches"),
             at.session_state.__setitem__("match", did),
             at.session_state.__setitem__("demo_id", did),
             at.session_state.__setitem__("demo_change", False),
+            at.query_params.__setitem__("m", did),
             at.run(),
         ),
     )
@@ -522,10 +576,10 @@ def _shots_shown(at):
     return None
 
 
-def open_filters(at):
-    """Expand the filter card (collapsed summary row is the default)."""
-    if widget(at, "button", "flt_edit") is not None:
-        act(at, "open the filter card", lambda: at.button(key="flt_edit").click().run())
+# the filter controls live inside the Edit popover, but Streamlit mounts
+# popover bodies on every run: the widgets are always reachable in
+# AppTest (no open step needed - the old open_filters collapsed-card
+# dance is gone with the card)
 
 
 # ---------------------------------------------------------------- scenarios
@@ -535,7 +589,6 @@ def scenario_one_round():
     at = open_demo(make_match([1]), "one_round.dem")
     check("runs without exception", not at.exception, err_of(at))
     check("no st.error on load", not at.error)
-    open_filters(at)
     check(
         "no round-range slider on a single round",
         widget(at, "slider", "flt_rounds") is None,
@@ -571,8 +624,7 @@ def scenario_one_round():
     )
     check(
         "2D replay: the filter panel is hidden (the replay is the whole round)",
-        widget(at, "segmented_control", "flt_preset") is None
-        and widget(at, "button", "flt_edit") is None,
+        widget(at, "segmented_control", "flt_preset") is None,
     )
     # the payload behind the canvas: the whole round, every player, with
     # HP / weapon / keys - checked straight against the fake demo so the
@@ -696,39 +748,41 @@ def scenario_round_replay():
 
 
 def scenario_nav():
-    """The sidebar rail: navigation, old page ids, the ?p&m&tab URL state."""
+    """The sidebar rail (st.page_link over st.navigation): navigation,
+    old page ids, the ?p&m&tab URL state."""
     print("== sidebar navigation ==")
     at = open_demo(make_match([1, 2]), "nav.dem")
     did = at.session_state["match"]
-    # the rail: one button per section; the keys stay stable (nav_<id>) -
-    # the active state is the button's type, not a different key
+    # the rail: one st.page_link per section (labels are localized; the
+    # four ids in order are enough to pin the rail itself)
+    _labels = [str(link.value).strip() for link in at.sidebar.page_link]
     check(
-        "nav: four sidebar items render",
-        widget(at, "button", "nav_dashboard") is not None
-        and widget(at, "button", "nav_matches") is not None
-        and widget(at, "button", "nav_settings") is not None
-        and widget(at, "button", "nav_guide") is not None,
+        "nav: four sidebar page_links render",
+        len(_labels) == 4 and all(_labels),
+        _labels,
     )
     check(
-        "nav: the match view syncs ?m (and no ?p on matches)",
+        "nav: the match view syncs ?m (and no ?p anywhere)",
         at.query_params.get("m") == did and not at.query_params.get("p"),
         dict(at.query_params),
     )
-    # the sidebar Matches item opens the LIST (an open match is left)
-    act(at, "nav: Matches opens the list", lambda: at.button(key="nav_matches").click().run())
+    # a rail click is a page_link navigation: the page switches and the
+    # query params clear, so the sidebar Matches item opens the LIST (an
+    # open match is left) - goto() applies exactly that
+    goto(at, "matches")
     check(
         "nav: the list is shown, the match is closed",
         ss_get(at, "page") == "matches" and ss_get(at, "match") is None,
     )
-    act(at, "nav: Settings", lambda: at.button(key="nav_settings").click().run())
+    goto(at, "settings")
     check(
         "nav: the settings page renders",
         ss_get(at, "page") == "settings" and not at.exception,
         err_of(at),
     )
-    act(at, "nav: Guide", lambda: at.button(key="nav_guide").click().run())
+    goto(at, "guide")
     check("nav: the guide page renders without a demo", ss_get(at, "page") == "guide" and not at.exception, err_of(at))
-    act(at, "nav: Dashboard", lambda: at.button(key="nav_dashboard").click().run())
+    goto(at, "dashboard")
     check(
         "nav: the dashboard stub renders with a way to Matches",
         ss_get(at, "page") == "dashboard" and widget(at, "button", "dash_go_matches") is not None,
@@ -801,8 +855,8 @@ def scenario_settings():
     )
     act(at, "settings: thr to 200", lambda: at.slider(key="thr").set_value(200).run())
     act(at, "settings: safe_dist to 1000", lambda: at.slider(key="safe_dist").set_value(1000).run())
-    # the acceptance of stage 2: the values survive Settings -> Matches -> a match
-    act(at, "settings: to the matches list", lambda: at.button(key="nav_matches").click().run())
+    # the values survive Settings -> Matches -> a match
+    goto(at, "matches")
     check("settings: on the list", ss_get(at, "page") == "matches" and not at.exception, err_of(at))
     check("settings: thr survived the trip to the list", ss_get(at, "thr") == 200, ss_get(at, "thr"))
     goto(at, "overview")
@@ -965,12 +1019,11 @@ def scenario_duel_strip():
 
 
 def scenario_roundtrip():
-    """The acceptance path of stage 4: Matches -> row -> tabs -> back,
+    """The path Matches -> row -> tabs -> back,
     and nothing is lost on the way."""
     print("== match view round trip ==")
     at = open_demo(make_match([1, 2, 13]), "roundtrip.dem")
     did = at.session_state["match"]
-    open_filters(at)
     act(at, "roundtrip: first-half preset", lambda: ctl(at, "segmented_control", "flt_preset").select("first").run())
     check("roundtrip: preset set", ss_get(at, "flt_preset") == "first", ss_get(at, "flt_preset"))
     act(at, "roundtrip: to the duels tab", lambda: ctl(at, "segmented_control", "match_tab").select("duels").run())
@@ -1015,7 +1068,6 @@ def scenario_two_rounds():
     print("== two-round demo (presets, custom slider, filters) ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "two_rounds.dem")
     check("runs without exception", not at.exception, err_of(at))
-    open_filters(at)
     check(
         "no slider while preset=All (slider lives in Custom)",
         widget(at, "slider", "flt_rounds") is None,
@@ -1084,7 +1136,6 @@ def scenario_long25():
         make_match([1, 13, 25], weapons=("ak47", "awp", "deagle")), "long25.dem"
     )
     check("runs without exception", not at.exception, err_of(at))
-    open_filters(at)
     check(
         "all six presets offered",
         n_presets(at) == (6, "all"),
@@ -1104,33 +1155,24 @@ def scenario_long25():
 
 
 def scenario_filter_panel():
-    """Persistent panel: distance bands, reset, page scope, links."""
-    print("== filter panel (persistent, distance, reset, links) ==")
+    """Popover panel: distance bands, reset, page scope, links."""
+    print("== filter panel (popover, distance, reset, links) ==")
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel.dem")
     check("runs without exception", not at.exception, err_of(at))
-    # collapsed by default: the controls sit behind the one-line summary
-    check(
-        "collapsed: no preset control rendered",
-        widget(at, "segmented_control", "flt_preset") is None,
-    )
+    # the controls live behind the Edit popover, and Streamlit mounts a
+    # popover body on every run: they are reachable without opening it
     base = _shots_shown(at)
     check("summary line shows the shot count", bool(base), str(base))
-    check(
-        "collapsed: Edit button offered",
-        widget(at, "button", "flt_edit") is not None,
-    )
-    check(
-        "collapsed: no Reset without active filters",
-        widget(at, "button", "flt_reset_sum") is None,
-    )
-    open_filters(at)
     for k in ("flt_side", "flt_preset", "flt_dist"):
         check(
-            f"{k} segmented control visible",
+            f"{k} segmented control visible (behind the popover)",
             widget(at, "segmented_control", k) is not None,
         )
-    check("class pills visible", widget(at, "pills", "flt_classes") is not None)
-    check("done button offered", widget(at, "button", "flt_done") is not None)
+    check("class pills visible (behind the popover)", widget(at, "pills", "flt_classes") is not None)
+    check(
+        "no Reset without active filters",
+        widget(at, "button", "flt_reset") is None,
+    )
     act(
         at,
         "weapon filter awp",
@@ -1154,31 +1196,39 @@ def scenario_filter_panel():
     check(
         "reset restores the full view", _shots_shown(at) == base, str(_shots_shown(at))
     )
-    # collapsing the card keeps every selection (widget states survive
-    # only because the app re-assigns the keys while it is hidden)
+    # a closed popover keeps every selection (its widgets stay mounted)
     act(
         at,
         "weapon filter awp again",
         lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
     )
-    act(at, "collapse the filter card", lambda: at.button(key="flt_done").click().run())
+    act(
+        at,
+        "plain rerun with the popover closed",
+        lambda: at.button(key="mt_back").click().run(),
+    )
+    open_match(at, at.session_state["demo_id"], "back into the match")
     check(
-        "collapsed summary names the filter",
+        "closed popover kept the weapon filter",
+        ss_get(at, "flt_weapons") == ["awp"],
+        ss_get(at, "flt_weapons"),
+    )
+    check(
+        "summary names the filter",
         any("awp" in str(c.value) for c in at.caption),
     )
     check(
-        "collapsed: Reset offered while filters are active",
-        widget(at, "button", "flt_reset_sum") is not None,
+        "Reset offered while filters are active",
+        widget(at, "button", "flt_reset") is not None,
     )
     act(
         at,
         "reset from the summary row",
-        lambda: at.button(key="flt_reset_sum").click().run(),
+        lambda: at.button(key="flt_reset").click().run(),
     )
     check(
         "summary-row reset cleared the weapon filter", ss_get(at, "flt_weapons") == []
     )
-    open_filters(at)
     check("reset cleared the distance band", ss_get(at, "flt_dist") == "all")
     check("reset cleared the weapon filter", ss_get(at, "flt_weapons") == [])
     # Result is a duels-page control; its value must survive page hops
@@ -1251,7 +1301,6 @@ def scenario_filter_panel():
     )
     # new link round-trip: filter -> URL -> fresh app
     at3 = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel3.dem")
-    open_filters(at3)
     act(
         at3,
         "distance band mid (for the link)",
@@ -1359,11 +1408,11 @@ def _plain_demo(dirname, fname):
 
 
 def scenario_links():
-    """Choose file / add folder LINK demos (no copy); missing file; locate; remove."""
+    """Choose file LINK demos (no copy); missing file; locate; remove."""
     print("== linked demos ==")
     import nativedialog
 
-    real_files, real_folder = nativedialog.pick_files, nativedialog.pick_folder
+    real_files = nativedialog.pick_files
     try:
         at = open_demo(make_match([1, 2]), "links_base.dem")
         check("links: base demo opens", not at.exception, err_of(at))
@@ -1471,7 +1520,7 @@ def scenario_links():
             [str(w.value)[:60] for w in at.warning],
         )
     finally:
-        nativedialog.pick_files, nativedialog.pick_folder = real_files, real_folder
+        nativedialog.pick_files = real_files
 
 
 class _empty_library:
@@ -1597,7 +1646,6 @@ def scenario_matrix():
                     f"strict_dist={sdist}",
                     lambda v=sdist: at.session_state.__setitem__("strict_dist", v) or at.run(),
                 )
-            open_filters(at)
             presets = _PRESETS_BY_COUNT.get(n_presets(at)[0], ())
             for p in presets:
                 act(
@@ -1981,7 +2029,6 @@ def scenario_impact():
         )
 
     # round filter: first half preset -> 12 opening rows
-    open_filters(at)
     act(
         at,
         "round preset first half",
@@ -2083,7 +2130,6 @@ def run_real(path):
             f"player {sid}",
             lambda s=sid: at.selectbox(key="me").select(s).run(),
         )
-    open_filters(at)
     presets = _PRESETS_BY_COUNT.get(n_presets(at)[0], ())
     for p in presets:
         act(
@@ -2485,6 +2531,159 @@ def scenario_matches():
             sources.inbox.replays_records = _orig_replays
 
 
+def scenario_pick():
+    """pick(): format_func widgets accept the raw option AND the label.
+
+    Regression for the harness helper: AppTest's select_index() is
+    unusable on format_func widgets (double formatting), which used to
+    make whole widget groups unreachable for tests (mflt_kind,
+    mflt_period, lang). pick() must select by raw value and by label,
+    in EN and in RU, on selectbox and segmented_control alike.
+    """
+    print("== pick helper (format_func selects) ==")
+    at = open_demo(make_match([1, 2]), "pick.dem", me=S1)
+    goto(at, "matches")
+
+    # selectbox with translated labels (mflt_kind: all/matchmaking/premier/...)
+    act(at, "pick mflt_kind by raw value", lambda: pick(at, "selectbox", "mflt_kind", "manual"))
+    check("pick: selectbox raw value landed", ss_get(at, "mflt_kind") == "manual", ss_get(at, "mflt_kind"))
+    act(at, "pick mflt_kind by label", lambda: pick(at, "selectbox", "mflt_kind", "Manual upload"))
+    check("pick: selectbox label landed", ss_get(at, "mflt_kind") == "manual", ss_get(at, "mflt_kind"))
+
+    # segmented_control with translated labels (mflt_period: 7/30/all)
+    act(at, "pick mflt_period by raw value", lambda: pick(at, "segmented_control", "mflt_period", "30"))
+    check("pick: segmented raw value landed", ss_get(at, "mflt_period") == "30", ss_get(at, "mflt_period"))
+    act(at, "pick mflt_period by label", lambda: pick(at, "segmented_control", "mflt_period", "7 days"))
+    check("pick: segmented label landed", ss_get(at, "mflt_period") == "7", ss_get(at, "mflt_period"))
+
+    # the language selectbox formats its options through i18n.LANGS
+    act(at, "pick lang by label", lambda: pick(at, "selectbox", "lang", "Русский"))
+    check("pick: lang label landed", ss_get(at, "lang") == "ru", ss_get(at, "lang"))
+
+    # ... and after the switch the SAME widgets show Russian labels
+    act(at, "pick mflt_kind by RU label", lambda: pick(at, "selectbox", "mflt_kind", "Ручная загрузка"))
+    check("pick: RU selectbox label landed", ss_get(at, "mflt_kind") == "manual", ss_get(at, "mflt_kind"))
+    act(at, "pick mflt_period by RU label", lambda: pick(at, "segmented_control", "mflt_period", "7 дней"))
+    check("pick: RU segmented label landed", ss_get(at, "mflt_period") == "7", ss_get(at, "mflt_period"))
+
+    # a value that is neither an option nor a label must raise, not click
+    # something random
+    try:
+        pick(at, "selectbox", "mflt_kind", "no such choice")
+        check("pick: unknown value raises", False, "no exception")
+    except ValueError:
+        check("pick: unknown value raises", True)
+
+    # back to English for the scenarios that follow
+    act(at, "lang back to EN", lambda: pick(at, "selectbox", "lang", "en"))
+
+
+def scenario_list_filter_keep():
+    """The Matches-list filters must survive leaving the list.
+
+    Regression for the state-loss bug: mflt_* are keyed widgets that
+    render only on the list, and Streamlit drops the widget state of
+    anything a run does not render - so a trip to Settings (or into a
+    match and back) used to reset every filter to "all" and silently
+    strip ?fkind/?fp from the shareable URL. persist_state="session"
+    keeps the values alive.
+    """
+    print("== list filters survive leaving the list ==")
+    at = open_demo(make_match([1, 2]), "mfltkeep.dem", me=S1)
+    goto(at, "matches")
+
+    act(at, "filter the list to manual uploads", lambda: pick(at, "selectbox", "mflt_kind", "manual"))
+    act(at, "filter the list to 30 days", lambda: pick(at, "segmented_control", "mflt_period", "30"))
+    check("mflt set on the list", ss_get(at, "mflt_kind") == "manual" and ss_get(at, "mflt_period") == "30",
+          (ss_get(at, "mflt_kind"), ss_get(at, "mflt_period")))
+    check("filter is shareable (?fkind in URL)", at.query_params.get("fkind") == "manual",
+          dict(at.query_params))
+
+    # leave to Settings and come back: the widgets do not render there
+    goto(at, "settings")
+    check("mflt_kind alive on Settings", ss_get(at, "mflt_kind") == "manual", ss_get(at, "mflt_kind"))
+    goto(at, "matches")
+    check("mflt_kind survives Settings round trip", ss_get(at, "mflt_kind") == "manual", ss_get(at, "mflt_kind"))
+    check("mflt_period survives Settings round trip", ss_get(at, "mflt_period") == "30", ss_get(at, "mflt_period"))
+    check("URL keeps ?fkind after the round trip", at.query_params.get("fkind") == "manual",
+          dict(at.query_params))
+
+    # into the match and back: the list does not render in the match view
+    goto(at, "overview")
+    check("mflt_kind alive inside the match", ss_get(at, "mflt_kind") == "manual", ss_get(at, "mflt_kind"))
+    goto(at, "matches")
+    check("mflt_kind survives match round trip", ss_get(at, "mflt_kind") == "manual", ss_get(at, "mflt_kind"))
+    check("URL keeps ?fkind after the match round trip", at.query_params.get("fkind") == "manual",
+          dict(at.query_params))
+
+    # the Reset button still clears everything (also through persist)
+    act(at, "reset the list filters", lambda: at.button(key="mflt_reset").click().run())
+    check("mflt_reset clears the kind", ss_get(at, "mflt_kind") == "all", ss_get(at, "mflt_kind"))
+    check("mflt_reset clears the period", ss_get(at, "mflt_period") == "all", ss_get(at, "mflt_period"))
+    check("mflt_reset drops ?fkind from the URL", "fkind" not in dict(at.query_params),
+          dict(at.query_params))
+
+
+def scenario_tab_state_keep():
+    """Tab-scoped toggles must survive switching match tabs.
+
+    Regression for the state-loss bug: the "all columns / all metrics"
+    toggles and the Map controls render only on their own tab, so every
+    tab switch used to reset them (ov_full, sh_all, du_full, map_show,
+    map_lines). persist_state="session" keeps the values alive.
+    """
+    print("== tab widgets survive tab switches ==")
+    demo = make_match([1, 2])
+    de = demo["events"]["player_death"]
+    for who, base in (("attacker", 0.0), ("user", 300.0)):
+        for ax, k in (("X", 100.0), ("Y", 50.0), ("Z", 0.0)):
+            de[f"{who}_{ax}"] = [base + k * (i + 1) for i in range(len(de))]
+    at = open_demo(demo, "tabkeep.dem", me=S1)
+
+    # set every tab's widget on its own tab
+    goto(at, "overview")
+    act(at, "overview: all columns on", lambda: at.toggle(key="ov_full").set_value(True).run())
+    goto(at, "shooting")
+    act(at, "shooting: all metrics on", lambda: at.toggle(key="sh_all").set_value(True).run())
+    goto(at, "duels")
+    act(at, "duels: all columns on", lambda: at.toggle(key="du_full").set_value(True).run())
+    goto(at, "map")
+    act(at, "map: deaths only", lambda: pick(at, "segmented_control", "map_show", "deaths"))
+    act(at, "map: lines off", lambda: at.toggle(key="map_lines").set_value(False).run())
+
+    # walk all tabs and demand every value is still there
+    goto(at, "overview")
+    check("ov_full survives the tab walk", ss_get(at, "ov_full") is True, ss_get(at, "ov_full"))
+    check("ov_full toggle renders ON", bool(at.toggle(key="ov_full").value), None)
+    goto(at, "shooting")
+    check("sh_all survives the tab walk", ss_get(at, "sh_all") is True, ss_get(at, "sh_all"))
+    goto(at, "duels")
+    check("du_full survives the tab walk", ss_get(at, "du_full") is True, ss_get(at, "du_full"))
+    goto(at, "map")
+    check("map_show survives the tab walk", ss_get(at, "map_show") == "deaths", ss_get(at, "map_show"))
+    check("map_lines survives the tab walk", ss_get(at, "map_lines") is False, ss_get(at, "map_lines"))
+
+    # leaving the whole match view (the list) must not lose them either
+    goto(at, "matches")
+    check("ov_full alive on the list", ss_get(at, "ov_full") is True, ss_get(at, "ov_full"))
+    goto(at, "overview")
+    check("ov_full survives the list round trip", ss_get(at, "ov_full") is True, ss_get(at, "ov_full"))
+
+    # a map tab that renders NO map widgets (a demo without kill
+    # positions) must keep the stored values for the way back - the
+    # second demo opens in the SAME session (a list row click)
+    did2 = register_demo(make_match([2, 3]), "tabkeep_nopos.dem")
+    at.session_state["match"] = did2
+    at.session_state["demo_id"] = did2
+    goto(at, "map")
+    check("map without positions shows the hint", any("demoparser2" in str(i.value) for i in at.info),
+          [str(i.value)[:40] for i in at.info])
+    check("map_show kept while its widget cannot render", ss_get(at, "map_show") == "deaths",
+          ss_get(at, "map_show"))
+    goto(at, "overview")
+    check("ov_full kept across a demo switch", ss_get(at, "ov_full") is True, ss_get(at, "ov_full"))
+
+
 def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if arg and arg not in ("--all", "--fast"):
@@ -2519,6 +2718,9 @@ def main():
         scenario_map()
         scenario_matchstats()
         scenario_matches()
+        scenario_pick()
+        scenario_list_filter_keep()
+        scenario_tab_state_keep()
         if arg == "--all":
             scenario_matrix()
     print(f"\n{PASS} passed, {FAIL} failed")

@@ -56,6 +56,16 @@ ICON_FIXTURE = {
     "noscope": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle fill="white" cx="12" cy="12" r="7"/></svg>',
     "smoke_kill": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M4 16a6 6 0 0 1 12-6 5 5 0 0 1 4 5z"/></svg>',
     "flashed_kill": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M12 4l8 14H4z"/></svg>',
+    # the economy row: armor states, the utility grenades, the bomb, the kit
+    "armor_full": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="4" y="4" width="16" height="16"/></svg>',
+    "armor_half": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="4" y="4" width="8" height="16"/></svg>',
+    "armor_half_helmet": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="4" y="4" width="8" height="16"/><circle fill="white" cx="18" cy="6" r="3"/></svg>',
+    "armor_helmet": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="4" y="4" width="16" height="16"/><circle fill="white" cx="18" cy="6" r="3"/></svg>',
+    "armor_none": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="4" y="4" width="16" height="16" opacity="0.3"/></svg>',
+    "flashbang": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle fill="white" cx="12" cy="12" r="8"/></svg>',
+    "smokegrenade": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="6" y="6" width="12" height="12"/></svg>',
+    "c4": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="4" y="4" width="16" height="16"/></svg>',
+    "blind": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M12 3l7 12H5z"/></svg>',
 }
 
 
@@ -108,6 +118,14 @@ def build_payload() -> dict:
                 "is_alive": alive,
                 "health": hp,
                 "active_weapon_name": "weapon_ak47",
+                "armor_value": np.where(grid < 1900, 100, 40),
+                "has_helmet": k % 2 == 0,
+                "has_defuser": k == 2,
+                "is_defusing": False,
+                "balance": np.where(grid < 1300, 3000 + 100 * k, 200 + 100 * k),
+                "current_equip_value": 4750,
+                "inventory": [["knife", "AK-47", "Flashbang", "Smoke Grenade"]
+                              + (["C4 Explosive"] if k == 3 else [])] * len(grid),
                 **keys,
             }
         )
@@ -146,6 +164,7 @@ def build_payload() -> dict:
         duels=core.round_duels(duel_rows, (t0, t1), tr),
         rounds=[{"n": i, "win": ["CT", "T", ""][i % 3], "why": ["defuse", "bomb", ""][i % 3]}
                 for i in range(1, 25)],
+        thr=34.0,
         weapon_info=ui_icons.weapon_info,
         icon_of=lambda key: (
             (lambda ic: [ic["uri"], ic["w"], ic["h"]] if ic else None)(ui_icons.icon(key))

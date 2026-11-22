@@ -23,7 +23,8 @@ from __future__ import annotations
 import math
 from typing import Any, Callable, Mapping, Sequence
 
-import streamlit as st
+
+from ui import component
 
 
 def _int_or_none(v: Any) -> int | None:
@@ -84,13 +85,6 @@ def strip_payload(
     }
 
 
-def _renderer():
-    # registered on every run: the registry lives in the Streamlit
-    # runtime (AppTest and server restarts start with an empty one), and
-    # re-registering an identical definition is cheap and idempotent
-    return st.components.v2.component("aimaudit_strip", css=_CSS, js=_JS)
-
-
 def duel_strip(
     items: Sequence[Mapping[str, Any]],
     selected: int | None,
@@ -102,17 +96,10 @@ def duel_strip(
 ) -> None:
     """Render the duel strip; a chip click / hotkey calls on_select(i)."""
     payload = strip_payload(items, selected, round_label=round_label, labels=labels)
-    kwargs: dict = {}
-    if on_select is not None:
-
-        def _cb() -> None:
-            state = st.session_state.get(key)
-            idx = state.get("sel") if hasattr(state, "get") else None
-            if idx is not None:
-                on_select(int(idx))
-
-        kwargs["on_sel_change"] = _cb
-    _renderer()(key=key, data=payload, **kwargs)
+    component.render(
+        "aimaudit_strip", _CSS, _JS, key=key, data=payload,
+        trigger="sel", handler=on_select,
+    )
 
 
 _CSS = """

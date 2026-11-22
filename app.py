@@ -2,11 +2,12 @@
 CS2-AimAudit — local CS2 demo analysis. Run: streamlit run app.py
 
 The entry point only: page config, theme, the run context and the page
-dispatcher. Navigation is two-level: the sidebar (shell.sidebar) switches
-the top-level page, a match is opened from the Matches list and the old
-analysis pages are its tabs. The shell (loading / context row / match
-header) is shell.py, the filter bar is filters_ui.py, the pages live in
-views/, the cached core calls and the shared Ctx in context.py.
+dispatcher. Navigation is native (shell.navigation registers the pages
+through st.navigation; the sidebar rail is st.page_link): a match is
+opened from the Matches list and the old analysis pages are its tabs.
+The shell (loading / context row / match header) is shell.py, the filter
+bar is filters_ui.py, the pages live in views/, the cached core calls
+and the shared Ctx in context.py.
 """
 
 import functools
@@ -18,6 +19,7 @@ import streamlit as st
 import context
 import filters_ui
 import shell
+import state
 import store
 import theme
 import ui.format
@@ -49,44 +51,49 @@ def _app_version() -> str:
             cwd=os.path.dirname(os.path.abspath(__file__)),
         )
         return out.stdout.strip() or "dev"
-    except Exception:  # noqa: BLE001 - no git / no repo: footer still renders
+    except (OSError, subprocess.SubprocessError):
+        # no git on PATH / not a repo / the call timed out: footer still renders
         return "dev"
 
 
-def main() -> None:
-    """One run: URL state -> nav migration -> sidebar -> the active page."""
-    filters_ui.load_url_state()
-    shell.load_nav_url()
-    shell.migrate_nav()
-    ctx = context.Ctx()
-    shell.sidebar(ctx)
-    # the fmt helpers (ui/format.py) read the run's translator and names
-    ui.format.configure(ctx.t, ctx.name_of)
+# --------------------------------------------------------- the page bodies
+# app.py owns the dispatch (it may import views; shell must not, so the
+# import graph stays one-way). shell.navigation wraps each body in the
+# st.Page that records the running page in the registry key.
+def _page_dashboard(ctx) -> None:
+    views.dashboard.render(ctx)
 
-    page = st.session_state["page"]
-    if page == "matches" and st.session_state.get("match"):
-        if store.get_demo(st.session_state["match"]) is None:
+
+def _page_settings(ctx) -> None:
+    views.settings.render(ctx)
+
+
+def _page_guide(ctx) -> None:
+    views.extras.guide(ctx)
+
+
+def _page_matches(ctx) -> None:
+    """The Matches page: the open match's view, or the list (?m decides)."""
+    shell.apply_match_url()
+    if state.has_match():
+        if store.get_demo(state.get_match()) is None:
             # the match's demo left the library (deleted in Settings or by
             # hand): show the list instead of blowing up
-            shell.leave_match()
+            state.clear_match()
         else:
             _match(ctx)
-            shell.sync_nav_url()
-            _footer(ctx.t)
             return
     # the pages without a demo must open on an empty library; their filter
     # widget states are re-assigned so nothing is lost on the way back
-    filters_ui.preserve_filters()
-    if page == "matches":
-        views.matches.render(ctx)
-    elif page == "settings":
-        views.settings.render(ctx)
-    elif page == "dashboard":
-        views.dashboard.render(ctx)
-    else:
-        views.extras.guide(ctx)
-    shell.sync_nav_url()
-    _footer(ctx.t)
+    views.matches.render(ctx)
+
+
+_PAGE_FNS = {
+    "dashboard": _page_dashboard,
+    "matches": _page_matches,
+    "settings": _page_settings,
+    "guide": _page_guide,
+}
 
 
 def _match(ctx) -> None:
@@ -111,9 +118,23 @@ def _match(ctx) -> None:
     if tab == "replay":
         views.replay.render(ctx)
     # a Duels row click asks for the duel window: it is a modal over the page
-    if tab == "duels" and st.session_state.pop("du_open", False):
+    if tab == "duels" and state.pop_du_open():
         views.replay.open_duel_dialog(ctx)
     views.extras.debug(ctx)
+
+
+def main() -> None:
+    """One run: URL state -> the pages -> the active page -> the URL sync."""
+    filters_ui.load_url_state()
+    ctx = context.Ctx()
+    pg = shell.navigation(ctx, _PAGE_FNS)
+    shell.load_nav_url()
+    shell.migrate_nav()
+    # the fmt helpers (ui/format.py) read the run's translator and names
+    ui.format.configure(ctx.t, ctx.name_of)
+    pg.run()
+    shell.sync_nav_url()
+    _footer(ctx.t)
 
 
 def _footer(t) -> None:

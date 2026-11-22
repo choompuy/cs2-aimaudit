@@ -14,9 +14,7 @@ import base64
 from functools import lru_cache
 
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 import core
 
@@ -43,6 +41,120 @@ def _positions(pts, who: str, radar: dict | None):
         return x, y, z
     px, py = core.world_to_radar(x, y, radar)
     return px, radar["size"] - py, z
+
+
+class _MapCtx:
+    """The per-call context the map trace builders share."""
+
+    __slots__ = (
+        "pts", "mx", "my", "ox", "oy", "my_on", "opp_on", "opp_known",
+        "colors", "labels", "lines",
+    )
+
+    def __init__(self, pts, mx, my, ox, oy, my_on, opp_on, opp_known, colors, labels, lines):
+        self.pts = pts
+        self.mx, self.my, self.ox, self.oy = mx, my, ox, oy
+        self.my_on, self.opp_on, self.opp_known = my_on, opp_on, opp_known
+        self.colors, self.labels, self.lines = colors, labels, lines
+
+
+def _link_traces(fig: go.Figure, ctx: _MapCtx, sel, result: str) -> None:
+    """The killer->victim connecting lines (both markers on this level)."""
+    if not ctx.lines:
+        return
+    both = sel & ctx.my_on & ctx.opp_on & ctx.opp_known
+    lx: list = []
+    ly: list = []
+    for i in np.nonzero(both)[0]:
+        lx += [float(ctx.mx[i]), float(ctx.ox[i]), None]
+        ly += [float(ctx.my[i]), float(ctx.oy[i]), None]
+    if lx:
+        fig.add_trace(
+            go.Scatter(
+                x=lx,
+                y=ly,
+                mode="lines",
+                line=dict(color=ctx.colors[result], width=1.5),
+                opacity=0.55,
+                hoverinfo="skip",
+                showlegend=False,
+                legendgroup=result,
+            )
+        )
+
+
+def _opp_markers(fig: go.Figure, ctx: _MapCtx, sel, result: str, opp_label: str) -> None:
+    """The opponent markers (diamonds): where the duel happened."""
+    idx = np.nonzero(sel & ctx.opp_known & ctx.opp_on)[0]
+    if not len(idx):
+        return
+    fig.add_trace(
+        go.Scatter(
+            x=ctx.ox[idx],
+            y=ctx.oy[idx],
+            mode="markers",
+            name=ctx.labels.get(opp_label, opp_label),
+            legendgroup=result,
+            marker=dict(
+                symbol="diamond-open", size=11, color=ctx.colors[result], line=dict(width=2)
+            ),
+            text=ctx.pts["hover"].to_numpy()[idx],
+            hovertemplate="%{text}<extra></extra>",
+        )
+    )
+
+
+def _my_markers(fig: go.Figure, ctx: _MapCtx, sel, result: str, my_label: str) -> None:
+    """The player's own markers (circles with an outline)."""
+    idx = np.nonzero(sel & ctx.my_on)[0]
+    if not len(idx):
+        return
+    fig.add_trace(
+        go.Scatter(
+            x=ctx.mx[idx],
+            y=ctx.my[idx],
+            mode="markers",
+            name=ctx.labels.get(my_label, my_label),
+            legendgroup=result,
+            marker=dict(
+                symbol="circle",
+                size=13,
+                color=ctx.colors[result],
+                line=dict(width=1.5, color=ctx.colors["outline"]),
+            ),
+            text=ctx.pts["hover"].to_numpy()[idx],
+            hovertemplate="%{text}<extra></extra>",
+        )
+    )
+
+
+def _radar_background(fig: go.Figure, radar: dict, lower: bool) -> None:
+    """The radar image under the traces + the square locked axes."""
+    size = float(radar["size"])
+    path = radar["lower_png"] if lower else radar["png"]
+    fig.add_layout_image(
+        dict(
+            source=radar_uri(path),
+            xref="x",
+            yref="y",
+            x=0,
+            y=size,
+            sizex=size,
+            sizey=size,
+            xanchor="left",
+            yanchor="top",
+            sizing="stretch",
+            layer="below",
+        )
+    )
+    fig.update_xaxes(range=[0, size], visible=False, constrain="domain")
+    fig.update_yaxes(
+        range=[0, size],
+        visible=False,
+        scaleanchor="x",
+        scaleratio=1,
+        constrain="domain",
+    )
 
 
 def build_figure(
@@ -82,6 +194,9 @@ def build_figure(
         my_on = np.ones(len(pts), dtype=bool)
         opp_on = np.ones(len(pts), dtype=bool)
     opp_known = ~(np.isnan(ox) | np.isnan(oy))
+    ctx = _MapCtx(
+        pts, mx, my, ox, oy, my_on, opp_on, opp_known, colors, labels, lines
+    )
 
     spec = (
         ("kill", "my_kill", "victim", show in ("both", "kills")),
@@ -91,92 +206,13 @@ def build_figure(
         if not wanted:
             continue
         sel = (pts["result"] == result).to_numpy()
-        colour = colors[result]
-        if lines:
-            both = sel & my_on & opp_on & opp_known
-            lx: list = []
-            ly: list = []
-            for i in np.nonzero(both)[0]:
-                lx += [float(mx[i]), float(ox[i]), None]
-                ly += [float(my[i]), float(oy[i]), None]
-            if lx:
-                fig.add_trace(
-                    go.Scatter(
-                        x=lx,
-                        y=ly,
-                        mode="lines",
-                        line=dict(color=colour, width=1.5),
-                        opacity=0.55,
-                        hoverinfo="skip",
-                        showlegend=False,
-                        legendgroup=result,
-                    )
-                )
-        idx = np.nonzero(sel & opp_known & opp_on)[0]
-        if len(idx):
-            fig.add_trace(
-                go.Scatter(
-                    x=ox[idx],
-                    y=oy[idx],
-                    mode="markers",
-                    name=labels.get(opp_label, opp_label),
-                    legendgroup=result,
-                    marker=dict(
-                        symbol="diamond-open", size=11, color=colour, line=dict(width=2)
-                    ),
-                    text=pts["hover"].to_numpy()[idx],
-                    hovertemplate="%{text}<extra></extra>",
-                )
-            )
-        idx = np.nonzero(sel & my_on)[0]
-        if len(idx):
-            fig.add_trace(
-                go.Scatter(
-                    x=mx[idx],
-                    y=my[idx],
-                    mode="markers",
-                    name=labels.get(my_label, my_label),
-                    legendgroup=result,
-                    marker=dict(
-                        symbol="circle",
-                        size=13,
-                        color=colour,
-                        line=dict(width=1.5, color=colors["outline"]),
-                    ),
-                    text=pts["hover"].to_numpy()[idx],
-                    hovertemplate="%{text}<extra></extra>",
-                )
-            )
+        _link_traces(fig, ctx, sel, result)
+        _opp_markers(fig, ctx, sel, result, opp_label)
+        _my_markers(fig, ctx, sel, result, my_label)
 
     if radar is not None:
-        size = float(radar["size"])
-        path = radar["lower_png"] if lower else radar["png"]
-        fig.add_layout_image(
-            dict(
-                source=radar_uri(path),
-                xref="x",
-                yref="y",
-                x=0,
-                y=size,
-                sizex=size,
-                sizey=size,
-                xanchor="left",
-                yanchor="top",
-                sizing="stretch",
-                layer="below",
-            )
-        )
-        fig.update_xaxes(range=[0, size], visible=False, constrain="domain")
-        fig.update_yaxes(
-            range=[0, size],
-            visible=False,
-            scaleanchor="x",
-            scaleratio=1,
-            constrain="domain",
-        )
+        _radar_background(fig, radar, lower)
     else:
         fig.update_xaxes(title_text="X")
         fig.update_yaxes(title_text="Y", scaleanchor="x", scaleratio=1)
     return fig
-
-

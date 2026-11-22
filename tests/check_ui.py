@@ -90,6 +90,38 @@ bad(
     f"en-only={diff_en} ru-only={diff_ru}",
 )
 
+# ---- 2b. no dead i18n keys: every defined key must be reachable from the
+# app's own code - either its exact literal appears there (t("key"),
+# _show_error tuples, key lists, exception constructors in core/sources)
+# or the code builds it at runtime under a dynamic prefix (t(f"col_..") ,
+# t('chk_' + ..)). A key only tests use is dead by definition.
+APP_CODE = [p for p in APP_SOURCES if p.name != "i18n.py"]
+for _d in ("core", "sources"):
+    APP_CODE += sorted((ROOT / _d).glob("*.py"))
+if (ROOT / "store").is_dir():
+    APP_CODE += sorted((ROOT / "store").glob("*.py"))
+for _f in ("store.py", "mapview.py", "nativedialog.py"):
+    if (ROOT / _f).is_file():
+        APP_CODE.append(ROOT / _f)
+_code = "\n".join(p.read_text(encoding="utf-8") for p in APP_CODE)
+_lits = set(re.findall(r'"([a-z_0-9]{3,})"', _code))
+_lits |= set(re.findall(r"'([a-z_0-9]{3,})'", _code))
+# prefixes the code builds i18n keys with at runtime; every entry must cite
+# the construction site, because this list is what keeps those keys alive
+DYN_PREFIXES = set(re.findall(r'\bt\(f"([a-z_0-9]+_)', _code))  # t(f"nav_{pid}")
+DYN_PREFIXES |= set(re.findall(r"\bt\(f'([a-z_0-9]+_)", _code))
+DYN_PREFIXES |= set(re.findall(r'\bt\(["\']([a-z_0-9]+_)["\']\s*\+', _code))  # t('chk_' + id)
+DYN_PREFIXES |= {
+    "col_",     # ui/schema.py: t(m.get("label", f"col_{col_id}"))
+    "weapon_",  # ui/icons.py: t(k) over (f"weapon_{key}", f"weapon_{w}")
+}
+dead = sorted(
+    k for k in i18n.STR["en"]
+    if k not in _lits and k not in used
+    and not any(k.startswith(p) for p in DYN_PREFIXES)
+)
+bad("no dead i18n keys (exact literal or dynamic prefix)", not dead, dead)
+
 # ---- 3. .format() placeholders match between en and ru
 ph = lambda s: sorted(re.findall(r"\{([a-z_0-9]+)[:}]", s))
 for k in i18n.STR["en"]:
@@ -126,22 +158,6 @@ for lang in ("en", "ru"):
     t("tl_first", speed="1", err="1")
     t("err_path_missing", path="x")
     t("chk_sides", n=1, pct=1.0)
-    t("flt_n", shots=1, duels=1)
-    t("flt_n_all", shots=1, duels=1)
-    t("rank_part", name="x", pos=1, n=2)
-    t("rank_line", parts="x")
-    t(
-        "ci_line",
-        acc="a",
-        n_shots=1,
-        hs="h",
-        n_hits=1,
-        first="f",
-        n_duels=1,
-        hw="w",
-        n_hw=1,
-    )
-    t("small_sample", shots=10, duels=5)
 bad("t() smoke formatting", True)
 
 # ---- 6. columns produced by core vs consumed by app
@@ -329,8 +345,8 @@ for _var, _why in (
     )
 
 # No module may pick a folder outside the app folder by itself: temp dirs,
-# the profile, %APPDATA%. store.py is the one place that knows locations
-# (its documented read-only fallback); everything else asks store.
+# the profile, %APPDATA%. the store package is the one place that knows
+# locations (its documented read-only fallback); everything else asks store.
 _OUTSIDE = re.compile(
     r"gettempdir|mkdtemp|TemporaryDirectory|NamedTemporaryFile|"
     r"expanduser\(\s*[\"']~|Path\.home|LOCALAPPDATA|APPDATA|USERPROFILE"
@@ -338,7 +354,7 @@ _OUTSIDE = re.compile(
 _outside_hits = []
 for _py in sorted(ROOT.rglob("*.py")):
     _rel = _py.relative_to(ROOT).as_posix()
-    if _rel.startswith(("tests/", ".venv/", "data/")) or _rel == "store.py":
+    if _rel.startswith(("tests/", ".venv/", "data/", "store/")) or _rel == "store.py":
         continue
     for _i, _line in enumerate(_py.read_text(encoding="utf-8").splitlines(), 1):
         if _line.lstrip().startswith("#"):
@@ -346,7 +362,7 @@ for _py in sorted(ROOT.rglob("*.py")):
         if _OUTSIDE.search(_line):
             _outside_hits.append(f"{_rel}:{_i}: {_line.strip()[:70]}")
 bad(
-    "no module writes outside the app folder on its own (only store.py knows locations)",
+    "no module writes outside the app folder on its own (only the store package knows locations)",
     not _outside_hits,
     _outside_hits[:4],
 )
@@ -723,6 +739,7 @@ for _needle in (
     "views/dashboard.py",
     "core/matchlist.py",
     "core/matchstats.py",
+    "state.py",
     "go_match",
     "match_tab",
     "How to add a navigation item",
@@ -746,6 +763,7 @@ def _local_modules() -> dict[str, Path]:
         (ROOT.glob("theme/*.py"), "theme"),
         (ROOT.glob("views/*.py"), "views"),
         (ROOT.glob("sources/*.py"), "sources"),
+        (ROOT.glob("store/*.py"), "store"),
     ):
         for path in pattern:
             name = path.stem
