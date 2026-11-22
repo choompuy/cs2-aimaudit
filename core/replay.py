@@ -367,6 +367,19 @@ def _round_events(demo: Demo, lo: int, hi: int):
     return out_shots, out_kills, out_hits
 
 
+# What the replay shows besides position / health: the economy of every
+# player (armor, helmet, defuse kit, money, gear value, inventory, defusing).
+ECONOMY_PROPS = [
+    "armor_value",
+    "has_helmet",
+    "has_defuser",
+    "balance",
+    "current_equip_value",
+    "inventory",
+    "is_defusing",
+]
+
+
 def round_replay_data(
     demo: Demo,
     round_no: int,
@@ -391,7 +404,10 @@ def round_replay_data(
      "hits": [(tick, attacker, victim)],
      "info": how the round ended (Demo.round_info[round])}
     (hits cover EVERY pair of the round - the replay shows the whole
-    round, teammate trades included).
+    round, teammate trades included). The frames also carry the economy
+    when the parser has it: armor_value, has_helmet, has_defuser,
+    balance (money), current_equip_value, inventory, is_defusing
+    (ECONOMY_PROPS).
     """
     windows = getattr(demo, "round_windows", None) or {}
     round_no = int(round_no)

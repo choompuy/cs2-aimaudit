@@ -12,9 +12,11 @@ Layout (everything client-side, like the in-game spectator HUD):
   round_end event, with the bomb plant / defuse as markers on the timeline;
 - LEFT: the players of both teams in ONE list sorted by nickname, so every
   player keeps his place from round to round (sides swap at halftime, the
-  colour dot follows them). The weapon in hands, the HP, the live speed, and
-  an eye button that hides a player from the map (the choice survives round
-  switches);
+  colour dot follows them). A row per player: the weapon in hands, the
+  armor, the HP and the money; a second line with the grenades and the
+  defuse kit, the live speed and the gear value; the team economy at the
+  bottom. An eye button hides a player from the map (the choice survives
+  round switches);
 - CENTER: the radar canvas (wheel = zoom, LMB drag = pan, double click or
   the button = reset): a small team-coloured dot per player (CT / T), a
   view-direction arrow, the name, an HP bar and the weapon; a dashed ring
@@ -507,6 +509,7 @@ def round_payload(
         "rounds": rd,
         "out": out,
         "bomb": bomb,
+        "thr": None if thr is None else float(thr),
         "sel": sel_i,
         "at": at_t,
         "radar": rp,

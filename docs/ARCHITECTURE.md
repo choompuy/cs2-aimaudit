@@ -20,7 +20,7 @@ written here, so the doc and the guardrails stay honest.
 | `views/overview.py`               |        77 | Overview page (one grid for both teams).                                                                                                     |
 | `views/shooting.py`               |       575 | Shooting page: metric tiles, Top-3 issues (`st.badge` severities), charts, the weapons grid.                                                 |
 | `views/duels.py`                  |       198 | Duels page: the duels grid, the by-zone table, the openings table.                                                                           |
-| `views/replay.py`                 |       518 | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart); feeds the round's icons into `round_payload`.             |
+| `views/replay.py`                 |       523 | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart); feeds the round's icons into `round_payload`.             |
 | `views/map.py`                    |       104 | Map page (`@st.fragment`, radar plot).                                                                                                       |
 | `views/extras.py`                 |        80 | Guide page and the debug expander rendered under every match tab.                                                                            |
 | `core/matchlist.py`               |       201 | The unified match list: provider records + library entries + summaries merged into `MatchRow`s (no Streamlit, no parsing).                   |

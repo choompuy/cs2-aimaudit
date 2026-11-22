@@ -162,6 +162,7 @@ from core.summary import (
 )
 
 from core.replay import (
+    ECONOMY_PROPS,
     KILL_POINT_COLS,
     RADAR_SIZE,
     _png_size,

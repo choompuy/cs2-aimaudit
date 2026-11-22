@@ -44,9 +44,23 @@ export default function (component) {
   // kill-feed style, delivered in d.icons for exactly this round
   const WHY_ICON = { bomb: "bomb_explode", defuse: "defuse", elim: "skull", time: "hourglass" };
   const BOMB_ICON = { plant: "bomb", defuse: "defuse", boom: "bomb_explode" };
+  // how the round ended, as a reason key: the demo's own when it maps to an
+  // icon, else read it off the bomb story (explosion / defuse) or the wipe -
+  // never a bare flag where the fight or the bomb already says what happened
+  const endWhy = (why) => {
+    if (WHY_ICON[why]) return why;
+    const bs = d.bomb || [];
+    for (let i = bs.length - 1; i >= 0; i--) {
+      if (bs[i][1] === "boom") return "bomb";
+      if (bs[i][1] === "defuse") return "defuse";
+    }
+    return "elim";
+  };
   const IC = d.icons || {};
   const WLAB = d.wlab || {};
   const wl = (w) => (w ? (WLAB[w] || w) : "");
+  const THR = typeof d.thr === "number" ? d.thr : null;
+  const GRENADES = ["hegrenade", "flashbang", "smokegrenade", "molotov", "incgrenade", "decoy"];
 
   // an icon in the DOM: the SVG is never inlined - only its data URI, as
   // the alpha MASK of a colour box (fill inside the file never matters:
@@ -122,6 +136,22 @@ export default function (component) {
   const sideCls = (side) => (side === "CT" ? "ct" : side === "T" ? "t" : "");
   const visible = (p) => !!p && !S.hidden[p.sid];
   const spdTxt = (s) => s + "x";
+  const money = (v) => "$" + Math.round(v).toLocaleString("en-US").replace(/,/g, "\u2009");
+
+  // ---------- slowly changing state of a player: [[tick, ...value]] runs ----------------------
+  function runAt(runs, tick) {
+    if (!runs || !runs.length) return null;
+    let r = runs[0];
+    for (const x of runs) { if (x[0] <= tick) r = x; else break; }
+    return r;
+  }
+  const valAt = (runs, tick, dflt) => { const r = runAt(runs, tick); return r ? r[1] : dflt; };
+  function armorKey(a, h) {
+    if (h) return a > 50 ? "armor_helmet" : "armor_half_helmet";
+    if (a <= 0) return "armor_none";
+    return a > 50 ? "armor_full" : "armor_half";
+  }
+  const countKeys = (keys) => { const c = {}; for (const k of keys) c[k] = (c[k] || 0) + 1; return c; };
 
   // ---------- round result: who won and HOW -----------------------------------------------
   function buildOutcome() {
@@ -132,13 +162,12 @@ export default function (component) {
     head.appendChild(el("span", "rr-badge", (lab.round || "R") + " " + d.round));
     if (o.win) {
       head.appendChild(el("b", "rr-owin", o.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")));
-      if (o.why) {
-        const w = el("span", "rr-why");
-        const wg = whyIco(o.why, lab["why_" + o.why] || o.why);
-        if (wg) w.appendChild(wg);
-        w.appendChild(document.createTextNode(" " + (lab["why_" + o.why] || o.why)));
-        head.appendChild(w);
-      }
+      const ewhy = endWhy(o.why);
+      const w = el("span", "rr-why");
+      const wg = whyIco(ewhy, lab["why_" + ewhy] || ewhy);
+      if (wg) w.appendChild(wg);
+      w.appendChild(document.createTextNode(" " + (lab["why_" + ewhy] || ewhy)));
+      head.appendChild(w);
     } else {
       head.appendChild(el("span", "rr-owin dim", lab.out_unknown || ""));
     }
@@ -359,9 +388,10 @@ export default function (component) {
     addBm(b[0], BOMB_GLYPH[b[1]], (lab["b_" + b[1]] || b[1]) + " " + fmtT((b[0] - d.t0) / d.tr) + who, BOMB_ICON[b[1]]);
   }
   if (d.out && d.out.end != null && d.out.win) {
-    addBm(d.out.end, WHY_GLYPH[d.out.why] || "\u2691",
-      (d.out.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")) + (d.out.why ? " \u00B7 " + (lab["why_" + d.out.why] || "") : ""),
-      WHY_ICON[d.out.why]);
+    const ewhy = endWhy(d.out.why);
+    addBm(d.out.end, WHY_GLYPH[d.out.why] || WHY_GLYPH[ewhy] || "\u2691",
+      (d.out.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")) + " \u00B7 " + (lab["why_" + ewhy] || ewhy),
+      WHY_ICON[ewhy]);
   }
   const track = el("div", "rr-track");
   track.tabIndex = 0;
@@ -428,7 +458,10 @@ export default function (component) {
   function buildRounds() {
     roundsEl.replaceChildren();
     if (lab.rounds) roundsEl.setAttribute("aria-label", lab.rounds);
-    for (const [n, w, why] of d.rounds) {
+    for (const [n, w, why0] of d.rounds) {
+      // the CURRENT round may carry no recorded reason: endWhy() reads it
+      // off this round's bomb story instead of leaving a bare flag
+      const why = n === d.round && w ? endWhy(why0) : why0;
       const b = el("button",
         "rr-rd" + (w === "CT" ? " wct" : w === "T" ? " wt" : "") + (n === d.round ? " cur" : ""));
       b.type = "button";
@@ -517,6 +550,7 @@ export default function (component) {
   const EYE_OFF = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>';
   const lrows = [];
   let masterEye = null;
+  let ecoEl = null;
   function setEye(b, on, title) {
     b.innerHTML = on ? EYE_ON : EYE_OFF;  // static markup, no data inside
     b.title = title;
@@ -542,37 +576,41 @@ export default function (component) {
         // a group header per side; the players inside are sorted by nickname
         lastSide = p.side;
         const cnt = P.filter((q) => q.side === p.side).length;
-        const th = el("div", "rr-th " + sideCls(p.side));
-        th.appendChild(el("i", "rr-sdot " + sideCls(p.side)));
-        th.appendChild(el("span", null, (p.side === "CT" ? "CT" : p.side === "T" ? "T" : "?") + " \u00B7 " + cnt));
-        left.appendChild(th);
+        const th2 = el("div", "rr-th " + sideCls(p.side));
+        th2.appendChild(el("span", null, (p.side === "CT" ? "CT" : p.side === "T" ? "T" : "?") + " \u00B7 " + cnt));
+        left.appendChild(th2);
       }
       const row = el("div", "rr-prow");
+      const r1 = el("div", "rr-pr1");
       const eye = el("button", "rr-eye");
       eye.type = "button";
       eye.addEventListener("click", () => {
         if (S.hidden[p.sid]) delete S.hidden[p.sid]; else S.hidden[p.sid] = true;
         applyHidden(); draw();
       });
-      const dot = el("i", "rr-sdot " + sideCls(p.side));
-      const body = el("div", "rr-pbody");
+      const nameCell = el("span", "rr-pn");
       const nm = el("span", "rr-pname", p.name);
       nm.title = p.name;
-      const sub = el("span", "rr-psub");
-      // the weapon of the moment: the silhouette (tooltip = name), text
-      // only when the icon set is missing
-      const wp = el("span", "rr-pw");
-      const wpIco = el("span", "rr-pwi");
-      const wpTxt = el("span", "rr-pwt");
-      wp.append(wpIco, wpTxt);
+      const ind = el("span", "rr-pind");
+      nameCell.append(nm, ind);
+      const wc = el("span", "rr-pc rr-pw");
+      const ac = el("span", "rr-pc rr-pa");
+      const hc = el("span", "rr-pc rr-php", "");
+      const mc = el("span", "rr-pc rr-pm", "");
+      r1.append(eye, nameCell, wc, ac, hc, mc);
+      const r2 = el("div", "rr-pr2");
+      const util = el("span", "rr-putil");
       const sp = el("span", "rr-psp", "");
-      sub.append(wp, sp);
-      body.append(nm, sub);
-      const hp = el("span", "rr-php", "");
-      row.append(eye, dot, body, hp);
+      const gear = el("span", "rr-pgear", "");
+      r2.append(util, sp, gear);
+      row.append(r1, r2);
       left.appendChild(row);
-      lrows.push({ p: p, row: row, eye: eye, wp: wp, wpIco: wpIco, wpTxt: wpTxt, sp: sp, hp: hp });
+      lrows.push({ p: p, row: row, eye: eye, wc: wc, ac: ac, hc: hc, mc: mc, ind: ind,
+        util: util, sp: sp, gear: gear, wk: null, ak: null, us: null, is: null });
     }
+    // economy of the two teams at the playhead
+    ecoEl = el("div", "rr-eco");
+    left.appendChild(ecoEl);
     applyHidden();
   }
   function applyHidden() {
@@ -587,33 +625,111 @@ export default function (component) {
     }
   }
   function updateLeft() {
+    const sums = { CT: { mo: 0, ev: 0, n: 0, al: 0 }, T: { mo: 0, ev: 0, n: 0, al: 0 } };
+    let hasEcon = false;
     for (const lr of lrows) {
-      const s = state(lr.p, t);
+      const p = lr.p;
+      const s = state(p, t);
       const alive = s ? s.al : false;
       lr.row.classList.toggle("dead", !alive);
       const hp = s && s.hp != null ? s.hp : null;
+      // weapon in hands: icon with the localized tooltip, plain text without icons
+      const w = alive ? weaponAt(p, t) : "";
+      if (lr.wk !== w) {
+        lr.wk = w; lr.wc.replaceChildren();
+        if (w) {
+          const wIco = iconEl(w, wl(w), 11);
+          if (wIco) lr.wc.appendChild(wIco);
+          else lr.wc.appendChild(el("span", "rr-wtxt", wl(w) || w));
+        }
+        lr.wc.title = w ? wl(w) : "";
+      }
+      // armor (+ helmet): the silhouette only - no number, and nothing at
+      // zero armor (an empty armor_none icon just adds noise)
+      const ar = runAt(p.ar, t);
+      const armor = ar ? ar[1] : 0, helm = ar ? ar[2] : 0;
+      const ak = ar && alive && armor > 0 ? armorKey(armor, helm) + ":" + armor : "";
+      if (lr.ak !== ak) {
+        lr.ak = ak; lr.ac.replaceChildren();
+        if (ak) {
+          const title = (lab.pt_armor || "armor") + " " + armor + (helm ? " + " + (lab.pt_helmet || "helmet") : "");
+          const aIco = iconEl(armorKey(armor, helm), title, 13);
+          lr.ac.title = title;
+          if (aIco) lr.ac.appendChild(aIco);
+        }
+      }
+      // hp
       if (!alive) {
         // the skull icon when there is one, the crossed text otherwise
         const sk = iconEl("skull", lab.dead || "dead", 13);
-        lr.hp.replaceChildren(sk || document.createTextNode("\u2715"));
-        lr.hp.className = "rr-php";
+        lr.hc.replaceChildren(sk || document.createTextNode("✕"));
+        lr.hc.className = "rr-pc rr-php dead";
       } else {
-        lr.hp.textContent = hp == null ? "" : String(hp);
-        lr.hp.className = "rr-php" + (hp != null && hp > 0 ? (hp < 30 ? " low" : hp < 70 ? " mid" : "") : "");
+        lr.hc.textContent = hp == null ? "" : String(hp);
+        lr.hc.className = "rr-pc rr-php" + (hp != null && hp > 0 ? (hp < 30 ? " low" : hp < 70 ? " mid" : "") : "");
+        lr.hc.title = (lab.pt_hp || "hp") + " " + (hp == null ? "" : hp);
       }
-      // weapon: icon with the localized tooltip, plain text without icons
-      const w = alive ? weaponAt(lr.p, t) : "";
-      const wIco = w ? iconEl(w, wl(w), 11) : null;
-      if (wIco) {
-        lr.wpIco.replaceChildren(wIco);
-        lr.wpTxt.textContent = "";
-      } else {
-        lr.wpIco.replaceChildren();
-        lr.wpTxt.textContent = w || "";
+      // money and the gear
+      const mo = valAt(p.mo, t, null), ev = valAt(p.ev, t, null);
+      if (mo != null || ev != null || ar != null) hasEcon = true;
+      lr.mc.textContent = mo == null ? "" : money(mo);
+      lr.mc.title = mo == null ? "" : (lab.pt_money_t || "money") + " " + money(mo);
+      lr.gear.textContent = ev == null ? "" : (lab.pt_gear || "gear") + " " + money(ev).slice(1);
+      lr.gear.title = ev == null ? "" : (lab.pt_gear_t || "value of the equipment") + " " + money(ev);
+      // utility: grenades, the kit, the bomb; status next to the name
+      const inv = alive ? ((runAt(p.inv, t) || [0, []])[1]) : [];
+      const kit = alive && valAt(p.kit, t, 0) === 1;
+      const defusing = alive && valAt(p.dg, t, 0) === 1;
+      const us = inv.filter((k) => GRENADES.indexOf(k) >= 0).sort().join(",") + "|" + (kit ? "k" : "");
+      if (lr.us !== us) {
+        lr.us = us; lr.util.replaceChildren();
+        const cnt = countKeys(inv);
+        for (const g of GRENADES) {
+          for (let n = 0; n < (cnt[g] || 0); n++) {
+            const gIco = iconEl(g, wl(g), 13);
+            if (gIco) lr.util.appendChild(gIco);
+            else lr.util.append(el("span", "rr-wtxt", wl(g) || g));
+          }
+        }
+        if (kit) {
+          const kIco = iconEl("defuse", lab.pt_kit || "defuse kit", 13);
+          if (kIco) lr.util.appendChild(kIco);
+        }
       }
-      lr.wp.title = w ? wl(w) : "";
-      const v = alive ? speedAt(lr.p, t) : null;
+      const is = (inv.indexOf("c4") >= 0 ? "c" : "") + (defusing ? "d" : "") + (s && s.fl > 0.2 ? "b" : "");
+      if (lr.is !== is) {
+        lr.is = is; lr.ind.replaceChildren();
+        if (is.indexOf("c") >= 0) { const ic = iconEl("c4", lab.pt_bomb || "carries the bomb", 12, C.warn); if (ic) lr.ind.appendChild(ic); }
+        if (is.indexOf("d") >= 0) { const ic = iconEl("defuse", lab.pt_defusing || "defusing", 12, C.acc); if (ic) lr.ind.appendChild(ic); }
+        if (is.indexOf("b") >= 0) { const ic = iconEl("blind", lab.pt_blind || "flashed", 12); if (ic) lr.ind.appendChild(ic); }
+      }
+      // live speed
+      const v = alive ? speedAt(p, t) : null;
       lr.sp.textContent = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
+      lr.sp.classList.toggle("mv", v != null && THR != null && v > THR);
+      const sm = sums[p.side];
+      if (sm) { sm.n += 1; if (alive) sm.al += 1; if (mo != null) sm.mo += mo; if (ev != null) sm.ev += ev; }
+    }
+    // the two teams: money, value of the gear, players alive - only when the
+    // demo carried the economy at all (an old parser has no such columns)
+    if (ecoEl) {
+      ecoEl.replaceChildren();
+      if (hasEcon) {
+        for (const side of ["CT", "T"]) {
+          const sm = sums[side];
+          if (!sm.n) continue;
+          const row = el("div", "rr-ecor");
+          row.title = (side === "CT" ? (lab.won_ct_short || "CT") : (lab.won_t_short || "T"))
+            + " \u00B7 " + (lab.pt_money_t || "money") + " " + money(sm.mo)
+            + " \u00B7 " + (lab.pt_gear_t || "equipment") + " " + money(sm.ev);
+          const sideB = el("b", null, side);
+          sideB.style.color = side === "CT" ? "var(--rr-ct)" : side === "T" ? "var(--rr-t)" : "";
+          row.append(sideB, el("span", "rr-eal", sm.al + "/" + sm.n),
+            el("span", "rr-em", money(sm.mo)),
+            el("span", "rr-eg", (lab.pt_gear || "gear") + " " + money(sm.ev).slice(1)));
+          ecoEl.appendChild(row);
+        }
+      }
     }
   }
   function applyPanel() {
@@ -662,7 +778,7 @@ export default function (component) {
       { who: "v", pi: z.vi, name: z.vn, role: lab.role_victim || "victim", sp: z.vsp, er: z.ver, sh: z.vsh, ft: z.vft },
     ];
     // one speed scale for both charts, so the two duelists are comparable
-    let vmax = 250;
+    let vmax = Math.max(250, THR != null ? THR * 3 : 0);
     if (tel) for (const w of ["k", "v"]) for (const v of tel[w].sp) if (v != null && v > vmax) vmax = v;
     vmax = Math.ceil(vmax / 50) * 50;
     const head = el("div", "rr-dph");
@@ -708,7 +824,7 @@ export default function (component) {
       // what the duels table measured at THIS player's first shot
       const fb = [];
       if (sd.ft != null) fb.push((lab.tel_first || "first shot") + " " + fmtT((sd.ft - d.t0) / d.tr));
-      if (sd.sp != null) fb.push(sd.sp + " " + (lab.u_s || "u/s"));
+      if (sd.sp != null) fb.push(sd.sp + " " + (lab.u_s || "u/s") + (THR != null ? " (" + (sd.sp > THR ? (lab.tel_moving || "moving") : (lab.tel_standing || "standing")) + ")" : ""));
       if (sd.er != null) fb.push(sd.er + "\u00B0");
       if (sd.sh != null) fb.push((lab.tel_shots || "shots") + ": " + sd.sh);
       if (fb.length) col.appendChild(el("div", "rr-dfs", fb.join(" \u00B7 ")));
@@ -745,6 +861,7 @@ export default function (component) {
       lg.append(mk("rr-legline", C.acc, lab.tel_leg_speed || "speed"),
         mk("rr-legline", C.warn, lab.tel_leg_err || "aim error"));
       lg.append(mk("rr-legline", C.text, lab.tel_leg_shot || "shot"));
+      if (THR != null) lg.append(mk("rr-legdash", C.text2, (lab.tel_leg_thr || "moving threshold") + " " + Math.round(THR)));
       duelWrap.appendChild(lg);
     }
     duelWrap.classList.remove("hid");
@@ -773,6 +890,7 @@ export default function (component) {
       // live numbers at the playhead (from the telemetry of the duel)
       const sp = telAt(tel, who, "sp", t), tn = telAt(tel, who, "tn", t), er = telAt(tel, who, "er", t);
       c.live.sp.textContent = sp == null ? "\u2014" : sp + " " + (lab.u_s || "u/s");
+      c.live.sp.classList.toggle("mv", sp != null && THR != null && sp > THR);
       c.live.tn.textContent = tn == null ? "\u2014" : tn + "\u00B0/s";
       c.live.er.textContent = er == null ? "\u2014" : er + "\u00B0";
       if (!c.cx || !tel) continue;
@@ -796,6 +914,12 @@ export default function (component) {
       };
       line(tel[who].er, yEr, C.warn);
       line(tel[who].sp, ySp, C.acc);
+      // the moving threshold: shots above it are the moving shots
+      if (THR != null && THR <= c.vmax) {
+        cx.setLineDash([4, 3]); cx.strokeStyle = rgba(C.text2, 0.8); cx.lineWidth = 1;
+        cx.beginPath(); cx.moveTo(0, ySp(THR)); cx.lineTo(W2, ySp(THR)); cx.stroke();
+        cx.setLineDash([]);
+      }
       // this player's shots (ticks along the bottom), the first shot taller
       if (c.p) {
         const pi = P.indexOf(c.p);
@@ -1172,6 +1296,14 @@ export default function (component) {
           ctx.strokeStyle = rgba(C.flash, Math.min(0.9, 0.3 + s.fl / 4));
           ctx.lineWidth = 2.5; ctx.stroke();
         }
+        // moving faster than the stop threshold: a dashed ring (shots on the
+        // move are the inaccurate ones - this is the state the audit cares about)
+        const mv = THR != null ? speedAt(p, t) : null;
+        if (mv != null && mv > THR) {
+          ctx.beginPath(); ctx.arc(px, py, R + 3.5, 0, Math.PI * 2);
+          ctx.setLineDash([2.5, 2.5]); ctx.strokeStyle = col; ctx.lineWidth = 1.3; ctx.stroke();
+          ctx.setLineDash([]);
+        }
         // view direction: a short arrow
         const a = (s.yaw == null ? 0 : s.yaw) * Math.PI / 180;
         const dx = Math.cos(a), dy = -Math.sin(a), ox = -dy, oy = dx;
@@ -1224,6 +1356,16 @@ export default function (component) {
           ctx.font = "9px " + FF; ctx.fillStyle = C.text2;
           halo(w, px, py + R + 14);
         }
+        // small status marks right of the dot: the bomb, the defuse kit while
+        // defusing, the flash
+        const inv = (runAt(p.inv, t) || [0, []])[1];
+        let sx = px + R + 4;
+        const mark = (key, color, hh) => {
+          if (drawIcon(key, sx, py, color || C.text, hh || 9)) sx += 11;
+        };
+        if (inv.indexOf("c4") >= 0) mark("c4", C.warn);
+        if (valAt(p.dg, t, 0) === 1) mark("defuse", C.acc);
+        if (s.fl > 0.2) mark("blind", C.text);
         plates.push({ x: px, y: plateY, w: plateW, h: plateH, p: p, w: w, hp: s.hp, al: true });
       } else {
         ctx.strokeStyle = C.dead || C.text2; ctx.lineWidth = 2;
@@ -1325,6 +1467,10 @@ export default function (component) {
     mark("rr-legline", C.ct, lab.leg_ct || "CT kill"),
     mark("rr-legline", C.t, lab.leg_t || "T kill"),
   );
+  if (THR != null) {
+    const s = el("span"); s.append(el("i", "rr-legring"), " " + (lab.leg_move || "moving") + " > " + Math.round(THR) + " " + (lab.u_s || "u/s"));
+    leg.appendChild(s);
+  }
   box.appendChild(leg);
   if (lab.howto) box.appendChild(el("div", "rr-howto", lab.howto));
 

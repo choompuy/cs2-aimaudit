@@ -544,6 +544,7 @@ def _replay_fragment(ctx) -> None:
             {"n": n, "win": o["winner"], "why": o["reason"]}
             for n, o in sorted(outcomes.items())
         ],
+        thr=ctx.thr,
         sel=sel,
         weapon_info=ui_icons.weapon_info,
         icon_of=_icon_of,
