@@ -6,31 +6,46 @@
 .rr { font-family: inherit; color: var(--text-primary); }
 .rr button { font-family: inherit; }
 
-.rr-grid {
-  display: grid;
-  /* the players table needs ~290px for its six columns (eye | name | weapon |
-     armor | hp | money); narrower and the row grid overflows into a scrollbar */
-  grid-template-columns: minmax(290px, 21rem) minmax(280px, 1fr) minmax(170px, 220px);
-  gap: 0.6rem;
-  align-items: start;
-}
-.rr-grid.nolf { grid-template-columns: minmax(280px, 1fr) minmax(170px, 220px); }
-.rr-grid.nolf .rr-left { display: none; }
-.rr.narrow .rr-grid,
-.rr.narrow .rr-grid.nolf { grid-template-columns: minmax(0, 1fr); }
-.rr.narrow .rr-left { max-height: 12rem; }
-.rr.narrow .rr-right { max-height: 14rem; }
+/* the radar is the whole stage: the player and duel panels float OVER the
+   canvas (transparent chrome - the cards keep their own surface) and each
+   can be hidden from the transport buttons */
+.rr-grid { display: block; }
+.rr-grid.nolf .rr-left, .rr-grid.nord .rr-right { display: none; }
 
-/* ---------- side panels (players / duels) ------------------------------ */
+/* ---------- side panels (players / duels): overlays on the map ---------- */
 .rr-left, .rr-right {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--surface-1);
+  position: absolute;
+  top: 0;
+  bottom: 0;
   padding: 0 0.3rem 0.35rem;
-  max-height: 36rem;
   overflow-y: auto;
   scrollbar-width: thin;
+  z-index: 6;
 }
+.rr-left { left: 0; width: min(300px, 45%); }
+.rr-right { right: 0; width: min(280px, 40%); }
+/* the slim edge tabs that bring a collapsed panel back */
+.rr-tab {
+  display: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 7;
+  width: 1.15rem;
+  height: 3.2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0 0.35rem 0.35rem 0;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.rr-tab-l { left: 0; }
+.rr-tab-r { right: 0; border-radius: 0.35rem 0 0 0.35rem; }
+.rr-tab:hover { color: var(--text-primary); }
+.rr-grid.nolf .rr-tab-l { display: block; }
+.rr-grid.nord .rr-tab-r { display: block; }
 .rr-lh, .rr-rh {
   position: sticky;
   top: 0;
@@ -39,7 +54,7 @@
   align-items: center;
   gap: 0.3rem;
   padding: 0.35rem 0.15rem 0.25rem;
-  background: var(--surface-1);
+  background: transparent;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
@@ -66,41 +81,37 @@
   font-weight: var(--font-weight-normal);
   color: var(--text-secondary);
 }
-/* players: one table, sorted by nickname. Row = eye | name | weapon | armor | hp | money,
-   and a second line with the grenades, the kit, the live speed and the gear value */
-.rr-pr1 {
-  display: grid;
-  grid-template-columns: 1.5rem minmax(0, 1fr) 3.1rem 2.7rem 1.7rem 3rem;
-  align-items: center;
-  column-gap: 0.25rem;
-}
+/* players: a compact spectator-style card per player, no photo, three lines:
+     [eye] name + status ........ weapon  HP
+           kills deaths ......... utility  kit  bomb
+           money speed .......... armor
+   A hover gets the accent outline of the duel cards. A dead player's card
+   is dimmed and the HP becomes the skull. The K/D and speed numbers keep a
+   fixed width so they do not shift the cell while they change. */
 .rr-prow {
-  padding: 0.1rem 0.15rem 0.15rem;
-  border-radius: var(--radius-md);
-  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 55%, transparent);
-}
-.rr-prow:hover { background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
-.rr-pr2 {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  min-height: 0.95rem;
-  padding-left: 1.75rem;
-  color: var(--text-secondary);
-  font-size: 0.68rem;
-  white-space: nowrap;
+  gap: 0.25rem;
+  margin: 0.12rem 0;
+  padding: 0.18rem 0.4rem 0.18rem 0.15rem;
   overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
 }
-.rr-putil { display: inline-flex; align-items: center; gap: 0.12rem; }
-.rr-psp { margin-left: auto; font-variant-numeric: tabular-nums; }
-.rr-pgear { font-variant-numeric: tabular-nums; opacity: 0.85; }
+.rr-prow.ct { --rr-fill: color-mix(in srgb, var(--rr-ct) 30%, transparent); }
+.rr-prow.t { --rr-fill: color-mix(in srgb, var(--rr-t) 30%, transparent); }
+.rr-prow:hover { outline: 1px solid var(--accent); }
+.rr-pbar { position: absolute; inset: 0; pointer-events: none; }
+.rr-pbar i { display: block; height: 100%; width: 0; background: var(--rr-fill, color-mix(in srgb, var(--text-secondary) 25%, transparent)); }
+.rr-prow > :not(.rr-pbar) { position: relative; }
 .rr-eye {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.4rem;
+  height: 1.4rem;
   padding: 0;
   border: 0;
   border-radius: var(--radius-md);
@@ -110,37 +121,67 @@
 }
 .rr-eye:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .rr-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.rr-pn { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
+.rr-pl { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0; line-height: 1.2; }
+.rr-pl1, .rr-pl2, .rr-pl3 { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; min-width: 0; }
+.rr-pl-l { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
+.rr-pl-r { display: flex; align-items: center; justify-content: flex-end; gap: 0.3rem; flex: none; }
+.rr-pn { display: flex; align-items: center; gap: 0.3rem; min-width: 0; flex: 0 1 auto; }
 .rr-pname {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 .rr-pind { display: inline-flex; align-items: center; gap: 0.15rem; color: var(--text-secondary); flex: none; }
-.rr-pc {
+.rr-pkd {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.15rem;
-  min-width: 0;
-  font-variant-numeric: tabular-nums;
+  gap: 0.45rem;
+  flex: none;
   font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.rr-pk { display: inline-flex; align-items: center; gap: 0.15rem; }
+.rr-pk b { display: inline-block; min-width: 2ch; text-align: right; font-weight: var(--font-weight-semibold); }
+.rr-pki { display: inline-flex; width: 0.85rem; height: 0.85rem; color: var(--text-secondary); }
+.rr-pki svg { width: 100%; height: 100%; }
+.rr-pm, .rr-psp {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rr-pl2 .rr-pl-l, .rr-pl3 .rr-pl-l { gap: 0.4rem; overflow: hidden; }
+.rr-pm { color: var(--text-primary); font-weight: var(--font-weight-semibold); min-width: 6.5ch; }
+.rr-psp { display: inline-flex; align-items: baseline; color: var(--text-secondary); }
+.rr-pspv { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
+.rr-pw { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 1.9rem; min-height: 0.9rem; }
+.rr-php {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 3ch;
+  font-size: 1.05rem;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
-.rr-pc.rr-pw { justify-content: flex-start; }
-.rr-php { font-weight: var(--font-weight-semibold); color: var(--positive); }
-.rr-php.mid { color: var(--warning); }
-.rr-php.low { color: var(--negative); }
-.rr-pm { justify-content: flex-end; color: var(--text-secondary); }
-.rr-prow.dead .rr-pname,
-.rr-prow.dead .rr-pr2,
+.rr-php.dead { color: var(--text-secondary); }
+.rr-php.dead .rr-ico { --icol: var(--text-secondary); }
+.rr-pdead { display: inline-flex; width: 1rem; height: 1rem; color: var(--text-secondary); }
+.rr-pdead svg { width: 100%; height: 100%; }
+.rr-putil { display: inline-flex; align-items: center; gap: 0.1rem; color: var(--text-secondary); min-height: 0.85rem; }
+.rr-pa { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 0.95rem; min-height: 0.85rem; color: var(--text-secondary); }
+.rr-pbm { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 1.1rem; min-height: 0.85rem; color: var(--text-secondary); }
+.rr-prow.dead { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+.rr-prow.dead .rr-pl > * > .rr-pl-l,
 .rr-prow.dead .rr-pw,
-.rr-prow.dead .rr-pa { opacity: 0.4; }
-.rr-prow.dead .rr-pm { opacity: 0.8; }
+.rr-prow.dead .rr-putil { opacity: 0.45; }
 .rr-prow.off .rr-pname { text-decoration: line-through; opacity: 0.5; }
-.rr-prow.off .rr-pr2, .rr-prow.off .rr-pc { opacity: 0.3; }
+.rr-prow.off .rr-pl { opacity: 0.35; }
+.rr-prow.off .rr-pbar { opacity: 0.4; }
 
 /* ---------- center: radar + controls + timeline + rounds ---------------- */
 .rr-main { min-width: 0; }
@@ -153,34 +194,8 @@
 }
 .rr canvas { display: block; width: 100%; cursor: grab; }
 .rr-wrap.dragging canvas { cursor: grabbing; }
-.rr-feed {
-  position: absolute;
-  top: 0.4rem; right: 0.4rem;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.15rem;
-  max-width: 55%;
-  pointer-events: none;
-}
-.rr-fe {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.08rem 0.45rem;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-2) 85%, transparent);
-  border: 1px solid var(--border-subtle);
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
-  overflow: hidden;
-}
-.rr-fe b { font-weight: var(--font-weight-semibold); overflow: hidden; text-overflow: ellipsis; }
-.rr-fe .rr-w { color: var(--text-secondary); display: inline-flex; align-items: center; }
-.rr-fe .rr-hs { color: var(--text-secondary); }
-
 /*
- * A kill-feed icon: the SVG data URI is the alpha MASK of a box painted
+ * An icon in the DOM: the SVG data URI is the alpha MASK of a box painted
  * with --icol (default: the text colour). The file's own fill never
  * matters - grenades / the bomb / the defuse kit carry no white fill and
  * would stay black if we relied on it.

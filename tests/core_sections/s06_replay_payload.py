@@ -390,6 +390,30 @@ check(
     and _rrd["hits"] == [(505, S1, S3)],
     (_rrd["shots"], _rrd["kills"], _rrd["hits"]),
 )
+# the match's kills / deaths before a round: enemy kills only (no suicide, no team kill)
+from types import SimpleNamespace as _NS  # noqa: E402
+from core.replay import _kd_before  # noqa: E402
+
+_kdd = _NS(
+    deaths=pd.DataFrame(
+        {
+            "tick": [10, 20, 30, 40, 50, 900],
+            "attacker_steamid": ["a", "a", "b", "a", "0", "a"],
+            "user_steamid": ["b", "c", "b", "d", "a", "b"],
+        }
+    ),
+    teams={"a": "X", "b": "Y", "c": "X", "d": "Y"},
+)
+check(
+    "_kd_before: enemy kills / all deaths before the round; suicide, team kill, world, later rounds out",
+    _kd_before(_kdd, 100) == {"b": [0, 2], "a": [2, 1], "c": [0, 1], "d": [0, 1]},
+    _kd_before(_kdd, 100),
+)
+check("_kd_before: nothing before the first tick", _kd_before(_kdd, 5) == {})
+check(
+    "round_replay_data: carries the match kills / deaths before the round (kd0)",
+    isinstance(_rrd.get("kd0"), dict),
+)
 _rr_small = core.round_replay_data(_rrdemo, 1, max_samples=50)
 check(
     "round_replay_data: grid is downsampled to <= max_samples",
@@ -446,11 +470,12 @@ check(
     and len(core.round_duels(_dframe, (2000, 3000), 64)) == 1,
 )
 check(
-    "round_duels: the segment starts at the FIRST shot of either duelist (-0.75 s), ends 1.5 s after the kill",
-    _rdu[0]["a"] == 500 - 48 and _rdu[0]["b"] == 510 + 96
+    "round_duels: the segment starts at the FIRST shot of either duelist (-0.75 s), ends 1 s after the kill",
+    _rdu[0]["a"] == 500 - 48 and _rdu[0]["b"] == 510 + 64
     and _rdu[1]["a"] == 690 - 48  # only the victim shot: his first shot counts
+    and _rdu[1]["b"] == 700 + 64
     and _rdu[2]["a"] == 815 - 48
-    and _rdu[2]["b"] == 830,  # clamped into the round
+    and _rdu[2]["b"] == 830,  # 820 + 64 clamps into the round
     [(z["a"], z["b"]) for z in _rdu],
 )
 check(
@@ -607,7 +632,7 @@ check(
     {k: _dz[k] for k in ("a", "b", "tk", "ki", "vi", "kn", "vn", "w", "hs", "dur", "first", "kft", "vft")}
     == {
         "a": 452,
-        "b": 606,
+        "b": 574,
         "tk": 510,
         "ki": _pi[S1],
         "vi": _pi[S3],

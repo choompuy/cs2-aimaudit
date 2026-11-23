@@ -10,19 +10,27 @@ Layout (everything client-side, like the in-game spectator HUD):
 - the ROUND RESULT above the map: who won and HOW (bomb exploded, bomb
   defused, everybody eliminated, time ran out) from the demo's own
   round_end event, with the bomb plant / defuse as markers on the timeline;
-- LEFT: the players of both teams in ONE list sorted by nickname, so every
-  player keeps his place from round to round (sides swap at halftime, the
-  colour dot follows them). A row per player: the weapon in hands, the
-  armor, the HP and the money; a second line with the grenades and the
-  defuse kit, the live speed and the gear value; the team economy at the
-  bottom. An eye button hides a player from the map (the choice survives
-  round switches);
+- the MAP is the whole stage: the player and duel panels float OVER the
+  canvas with a transparent chrome (each hides from a transport button);
+- LEFT overlay: the players of both teams in ONE list sorted by nickname
+  inside a team, so every player keeps his place from round to round (sides
+  swap at halftime, the team colour follows them). A spectator-style card
+  per player, no photo, three lines: the nickname and the weapon in hands
+  with the armor and the HP number; the match kills / deaths (live: the
+  round's own kills and the death are added at the moment they happen) and
+  the grenades / defuse kit; the money and the live speed. The HP is the
+  card's BACKGROUND: the team colour fills it from the left up to hp%. A
+  dead player's card is dimmed and the HP turns into the skull. The team
+  economy sits in the team header. An eye button hides a player from the
+  map (the choice survives round switches); each panel's header carries a
+  collapse button;
 - CENTER: the radar canvas (wheel = zoom, LMB drag = pan, double click or
   the button = reset): a small team-coloured dot per player (CT / T), a
   view-direction arrow, the name, an HP bar and the weapon; a dashed ring
-  marks a player moving faster than the stop threshold; dead players become
-  grey crosses, flashed ones get a white halo; shots are fading tracers,
-  hits stars, kills crosses + a kill feed on the side;
+  marks a player moving faster than the stop threshold; the living stack
+  in the left table's order and the dead lie under them in death order,
+  grey skulls included; flashed ones get a white halo; shots are fading
+  tracers and hits stars;
 - the TIMELINE under the map: kill marks coloured by the KILLER'S side, the
   bomb events, the selected duel's segment highlighted, a draggable
   playhead. While a duel is selected the playhead is LOCKED to its segment;
@@ -30,7 +38,7 @@ Layout (everything client-side, like the in-game spectator HUD):
   crosshair turn rate and the angle to the enemy's head live at the
   playhead, a small chart of those over the whole duel with the shots, the
   numbers measured at the first shot, and the keys they held;
-- RIGHT: one card per duel of the round - EVERY duel of every player, not
+- RIGHT overlay: one card per duel of the round - EVERY duel of every player, not
   only one player's: future duels are semi-transparent, past ones solid, the
   selected one gets the outline; a click locks the timeline to its segment;
 - BELOW the timeline: the rounds of the whole match, coloured by the winning
@@ -57,6 +65,9 @@ the numbers measured at the first shots. ``rounds`` is the whole match
 core.ROUND_REASONS); ``bombs`` are [(tick, kind, sid)] of the round
 (default: ``data["info"]["bomb"]``); ``at`` is the tick to start at;
 ``sel`` preselects a duel (locks the timeline).
+
+``data["kd0"]`` ({sid: [kills, deaths]} of the match before the round, from
+core.replay.round_replay_data) becomes each player's ``kd``.
 
 Players come out grouped by side (CT first, then T) and sorted by
 nickname inside a side, so a player keeps his place in his team's list;
@@ -292,10 +303,12 @@ def _player_frames(
         if not len(wx) or np.isnan(wx).all():
             continue
         side = side_of(sid)
+        kd = (data.get("kd0") or {}).get(sid) or (0, 0)
         p: dict = {
             "sid": sid,
             "name": name_of(sid),
             "side": side if side in ("CT", "T") else "?",
+            "kd": [int(kd[0]), int(kd[1])],  # match kills / deaths before the round
             "x": _ri(wx),
             "y": _ri(wy),
             "yaw": _ri(_ffilled(g, "yaw")),

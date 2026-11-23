@@ -442,7 +442,7 @@ _RR_LABEL_KEYS = (
     "players_hide", "players_show", "duels", "no_duels",
     "locked", "rounds", "round", "won_ct", "won_t", "leg_ct", "leg_t",
     "view_reset", "round_prev", "round_next", "eye_hide", "eye_show",
-    "eye_all", "eye_none", "u_s", "out_unknown",
+    "eye_all", "eye_none", "u_s", "out_unknown", "duels_hide", "duels_show",
     "out_inferred", "why_bomb", "why_defuse", "why_elim", "why_time",
     "why_surrender", "why_hostage", "why_draw", "why_other",
     "b_plant", "b_defuse", "b_boom", "duel_panel", "first_killer",
@@ -452,7 +452,8 @@ _RR_LABEL_KEYS = (
     # economy table + movement cues (8e00c08)
     "leg_move", "tel_moving", "tel_standing", "tel_leg_thr",
     "pt_player", "pt_weapon", "pt_armor", "pt_hp", "pt_money", "pt_helmet",
-    "pt_money_t", "pt_gear", "pt_gear_t", "pt_kit", "pt_bomb", "pt_defusing", "pt_blind",
+    "pt_money_t", "pt_kit", "pt_bomb", "pt_defusing", "pt_blind",
+    "pt_kills", "pt_deaths",
 )
 
 
@@ -462,7 +463,7 @@ def _replay_labels(t, data: dict) -> dict:
         **{k: t(f"rr_{k}") for k in _RR_LABEL_KEYS},
         "exit": t("rr_exit_duel"),
         "hs": t("col_hs"),
-        # the kill-modifier tooltips on the duel cards / the kill feed
+        # the kill-modifier tooltips on the duel cards
         "wallbang": t("icon_wallbang"),
         "noscope": t("icon_noscope"),
         "smoke_kill": t("icon_smoke_kill"),

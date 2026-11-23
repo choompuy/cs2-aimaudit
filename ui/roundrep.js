@@ -14,6 +14,7 @@ export default function (component) {
   if (typeof S.cleanup === "function") { try { S.cleanup(); } catch (e) { /* ignore */ } }
   S.hidden = S.hidden || {};
   if (S.panel == null) S.panel = true;
+  if (S.dpanel == null) S.dpanel = true;
   if (!S.speed) S.speed = 1;
   S.view = S.view || [];
 
@@ -106,13 +107,25 @@ export default function (component) {
   const left = el("div", "rr-left");
   const main = el("div", "rr-main");
   const right = el("div", "rr-right");
-  grid.append(left, main, right);
+  grid.append(main);
   box.appendChild(grid);
   const outEl = el("div", "rr-out");
   const wrap = el("div", "rr-wrap");
   const cvs = document.createElement("canvas");
-  const feed = el("div", "rr-feed");
-  wrap.append(cvs, feed);
+  // the player / duel panels float OVER the map: transparent chrome, the
+  // cards keep their own surface
+  wrap.append(cvs, left, right);
+  // slim edge tabs bring a hidden panel back (the transport buttons do too)
+  const ptab = el("button", "rr-tab rr-tab-l", "\u203A");
+  const dtab = el("button", "rr-tab rr-tab-r", "\u2039");
+  ptab.type = "button"; dtab.type = "button";
+  ptab.title = lab.players_show || "show";
+  dtab.title = lab.duels_show || "show";
+  ptab.setAttribute("aria-label", ptab.title);
+  dtab.setAttribute("aria-label", dtab.title);
+  ptab.addEventListener("click", () => { S.panel = true; applyPanel(); layout(); draw(); });
+  dtab.addEventListener("click", () => { S.dpanel = true; applyPanel(); draw(); });
+  wrap.append(ptab, dtab);
   const ctl = el("div", "rr-ctl");
   const tl = el("div", "rr-tl");
   const roundsEl = el("div", "rr-rounds");
@@ -332,6 +345,9 @@ export default function (component) {
   const plBtn = btn("", lab.players || "players", lab.players_hide || "hide", () => {
     S.panel = !S.panel; applyPanel(); layout(); draw();
   });
+  const dpBtn = btn("", lab.duels || "duels", lab.duels_hide || "hide", () => {
+    S.dpanel = !S.dpanel; applyPanel(); draw();
+  });
   const resetBtn = btn("", "\u21BB", lab.view_reset || "reset view", () => resetView());
   const timeLab = el("span", "rr-time");
   const lockChip = el("span", "rr-lock", lab.locked || "");
@@ -341,7 +357,7 @@ export default function (component) {
     spdWrap,
     el("i", "rr-sep"), dPrev, dNext, exitBtn,
     el("i", "rr-sep"), rPrev, rNext,
-    el("i", "rr-sep"), plBtn, resetBtn,
+    el("i", "rr-sep"), plBtn, dpBtn, resetBtn,
     timeLab, lockChip,
   );
 
@@ -497,8 +513,17 @@ export default function (component) {
   const cardEls = [];
   function buildCards() {
     right.replaceChildren();
-    right.appendChild(el("div", "rr-rh",
+    const rh = el("div", "rr-rh");
+    rh.appendChild(el("span", "rr-lt",
       (lab.duels || "duels") + (d.duels.length ? " \u00B7 " + d.duels.length : "")));
+    // the panel's own collapse button (the transport toggle brings it back)
+    const colR = el("button", "rr-eye rr-col", "\u2013");
+    colR.type = "button";
+    colR.title = lab.duels_hide || "hide";
+    colR.setAttribute("aria-label", colR.title);
+    colR.addEventListener("click", () => { S.dpanel = false; applyPanel(); draw(); });
+    rh.appendChild(colR);
+    right.appendChild(rh);
     if (!d.duels.length) {
       right.appendChild(el("div", "rr-noduels", lab.no_duels || ""));
       return;
@@ -554,6 +579,11 @@ export default function (component) {
   // data inside, so the innerHTML here is safe by construction
   const EYE_ON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>';
   const EYE_OFF = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>';
+  // Lucide again (ISC): the kills / deaths marks of the card, static markup
+  const SVG_O = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+  const ICO_KILLS = SVG_O + '<circle cx="12" cy="12" r="9"/><path d="M22 12h-4M6 12H2M12 6V2M12 22v-4"/></svg>';
+  const ICO_SKULL = SVG_O + '<path d="m12.5 17-.5-1-.5 1h1z"/><path d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="12" r="1"/></svg>';
+  const svgSpan = (markup, cls) => { const i = el("span", cls); i.innerHTML = markup; return i; };
   const lrows = [];
   const sideHeads = {};  // side -> the count span of its group header
   let masterEye = null;
@@ -563,8 +593,19 @@ export default function (component) {
     b.setAttribute("aria-label", title);
     b.setAttribute("aria-pressed", on ? "true" : "false");
   }
+  // one count of the K/D line: [mark] number; iconKey swaps the drawn mark
+  // for the icon set's silhouette (the deaths skull is the game's own)
+  function kdCell(markup, cls, title, iconKey) {
+    const w = el("span", "rr-pk " + cls);
+    w.title = title;
+    const n = el("b", null, "0");
+    const ic = iconKey ? iconEl(iconKey, title, 13) : null;
+    w.append(ic || svgSpan(markup, "rr-pki"), n);
+    return { w: w, n: n };
+  }
   function buildLeft() {
     left.replaceChildren();
+    lrows.length = 0;
     const head = el("div", "rr-lh");
     head.appendChild(el("span", "rr-lt", lab.players || "players"));
     masterEye = el("button", "rr-eye");
@@ -575,9 +616,16 @@ export default function (component) {
       applyHidden(); draw();
     });
     head.appendChild(masterEye);
+    // the panel's own collapse button (the transport toggle brings it back)
+    const colL = el("button", "rr-eye rr-col", "\u2013");
+    colL.type = "button";
+    colL.title = lab.players_hide || "hide";
+    colL.setAttribute("aria-label", colL.title);
+    colL.addEventListener("click", () => { S.panel = false; applyPanel(); layout(); draw(); });
+    head.appendChild(colL);
     left.appendChild(head);
     let lastSide = null;
-    for (const p of P) {
+    P.forEach((p, pi) => {
       if (p.side !== lastSide) {
         // a group header per side; the players inside are sorted by nickname
         lastSide = p.side;
@@ -588,8 +636,11 @@ export default function (component) {
         sideHeads[p.side] = { l: cntEl, m: cashEl };
         left.appendChild(th2);
       }
-      const row = el("div", "rr-prow");
-      const r1 = el("div", "rr-pr1");
+      // a spectator-style card, no photo, three lines:
+      //   eye | name + status .......... weapon armor HP
+      //       | kills deaths ............ utility kit bomb
+      //       | money speed
+      const row = el("div", "rr-prow " + sideCls(p.side));
       const eye = el("button", "rr-eye");
       eye.type = "button";
       eye.addEventListener("click", () => {
@@ -601,21 +652,45 @@ export default function (component) {
       nm.title = p.name;
       const ind = el("span", "rr-pind");
       nameCell.append(nm, ind);
-      const wc = el("span", "rr-pc rr-pw");
-      const ac = el("span", "rr-pc rr-pa");
-      const hc = el("span", "rr-pc rr-php", "");
-      const mc = el("span", "rr-pc rr-pm", "");
-      r1.append(eye, nameCell, wc, ac, hc, mc);
-      const r2 = el("div", "rr-pr2");
+      const kdLine = el("span", "rr-pkd");
+      const kk = kdCell(ICO_KILLS, "rr-pkk", lab.pt_kills || "Kills");
+      const dk = kdCell(ICO_SKULL, "rr-pdk", lab.pt_deaths || "Deaths", "skull");
+      kdLine.append(kk.w, dk.w);
+      const wc = el("span", "rr-pw");
+      const ac = el("span", "rr-pa");
+      const hc = el("span", "rr-php", "");
+      const l1 = el("div", "rr-pl1");
+      l1.append(el("span", "rr-pl-l", null), el("span", "rr-pl-r"));
+      l1.firstChild.append(nameCell);
+      // armor sits right before the HP number
+      l1.lastChild.append(wc, ac, hc);
       const util = el("span", "rr-putil");
-      const sp = el("span", "rr-psp", "");
-      const gear = el("span", "rr-pgear", "");
-      r2.append(util, sp, gear);
-      row.append(r1, r2);
+      const bc = el("span", "rr-pbm", "");
+      const l2 = el("div", "rr-pl2");
+      l2.append(el("span", "rr-pl-l", null), el("span", "rr-pl-r"));
+      l2.firstChild.append(kdLine);
+      // utility, then the kit and the bomb on the same spot at the right end
+      l2.lastChild.append(util, bc);
+      const mc = el("span", "rr-pm", "");
+      const sp = el("span", "rr-psp");
+      const spv = el("b", "rr-pspv", "");
+      sp.append(spv);
+      const l3 = el("div", "rr-pl3");
+      l3.append(el("span", "rr-pl-l", null), el("span", "rr-pl-r"));
+      l3.firstChild.append(mc, sp);
+      const lines = el("div", "rr-pl");
+      lines.append(l1, l2, l3);
+      // the HP as the card's background: the team colour fills the card from the left
+      // up to hp% (a soft tint, the text stays readable)
+      const bar = el("span", "rr-pbar");
+      const barf = el("i");
+      bar.appendChild(barf);
+      row.append(bar, eye, lines);
       left.appendChild(row);
-      lrows.push({ p: p, row: row, eye: eye, wc: wc, ac: ac, hc: hc, mc: mc, ind: ind,
-        util: util, sp: sp, gear: gear, wk: null, ak: null, us: null, is: null });
-    }
+      lrows.push({ p: p, pi: pi, row: row, eye: eye, wc: wc, ac: ac, hc: hc, mc: mc, ind: ind,
+        util: util, spv: spv, bc: bc, kn: kk.n, dn: dk.n, bar: bar, barf: barf,
+        wk: null, ak: null, us: null, is: null, hk: null, kv: -1, dv: -1 });
+    });
     applyHidden();
   }
   function applyHidden() {
@@ -632,19 +707,31 @@ export default function (component) {
   function updateLeft() {
     const sums = { CT: { mo: 0, n: 0, mon: false }, T: { mo: 0, n: 0, mon: false } };
     const aliveBySide = {};
+    // match kills / deaths LIVE: what was before the round + the round's own
+    // events up to the playhead (an enemy kill counts, a team kill / suicide not)
+    const kdLive = P.map((p) => [(p.kd || [0, 0])[0], (p.kd || [0, 0])[1]]);
+    for (const k of d.kills) {
+      if (k[0] > t) continue;
+      const ki = k[1], vi = k[2];
+      if (vi >= 0 && kdLive[vi]) kdLive[vi][1] += 1;
+      if (ki >= 0 && vi >= 0 && ki !== vi && kdLive[ki] && P[ki].side !== P[vi].side) kdLive[ki][0] += 1;
+    }
     for (const lr of lrows) {
       const p = lr.p;
       const s = state(p, t);
       const alive = s ? s.al : false;
       aliveBySide[p.side] = (aliveBySide[p.side] || 0) + (alive ? 1 : 0);
       lr.row.classList.toggle("dead", !alive);
+      const kd = kdLive[lr.pi];
+      if (lr.kv !== kd[0]) { lr.kv = kd[0]; lr.kn.textContent = String(kd[0]); }
+      if (lr.dv !== kd[1]) { lr.dv = kd[1]; lr.dn.textContent = String(kd[1]); }
       const hp = s && s.hp != null ? s.hp : null;
       // weapon in hands: icon with the localized tooltip, plain text without icons
       const w = alive ? weaponAt(p, t) : "";
       if (lr.wk !== w) {
         lr.wk = w; lr.wc.replaceChildren();
         if (w) {
-          const wIco = iconEl(w, wl(w), 11);
+          const wIco = iconEl(w, wl(w), 16);
           if (wIco) lr.wc.appendChild(wIco);
           else lr.wc.appendChild(el("span", "rr-wtxt", wl(w) || w));
         }
@@ -656,32 +743,36 @@ export default function (component) {
       const armor = ar ? ar[1] : 0, helm = ar ? ar[2] : 0;
       const ak = ar && alive && armor > 0 ? armorKey(armor, helm) + ":" + armor : "";
       if (lr.ak !== ak) {
-        lr.ak = ak; lr.ac.replaceChildren();
+        lr.ak = ak; lr.ac.replaceChildren(); lr.ac.title = "";
         if (ak) {
           const title = (lab.pt_armor || "armor") + " " + armor + (helm ? " + " + (lab.pt_helmet || "helmet") : "");
-          const aIco = iconEl(armorKey(armor, helm), title, 13);
+          const aIco = iconEl(armorKey(armor, helm), title, 15);
           lr.ac.title = title;
           if (aIco) lr.ac.appendChild(aIco);
         }
       }
-      // hp
+      // hp: the big number; a dead player gets the skull instead
       if (!alive) {
-        // the skull icon when there is one, the crossed text otherwise
-        const sk = iconEl("skull", lab.dead || "dead", 13);
-        lr.hc.replaceChildren(sk || document.createTextNode("✕"));
-        lr.hc.className = "rr-pc rr-php dead";
+        if (lr.hk !== "dead") {
+          lr.hk = "dead";
+          // the skull of the icon set; the drawn one when the set is not installed
+          lr.hc.replaceChildren(iconEl("skull", lab.dead || "dead", 16) || svgSpan(ICO_SKULL, "rr-pdead"));
+          lr.hc.title = lab.dead || "dead";
+        }
+        lr.hc.className = "rr-php dead";
+        lr.barf.style.width = "0%";
       } else {
+        lr.hk = "hp";
         lr.hc.textContent = hp == null ? "" : String(hp);
-        lr.hc.className = "rr-pc rr-php" + (hp != null && hp > 0 ? (hp < 30 ? " low" : hp < 70 ? " mid" : "") : "");
+        lr.hc.className = "rr-php";
         lr.hc.title = (lab.pt_hp || "hp") + " " + (hp == null ? "" : hp);
+        lr.barf.style.width = (hp == null ? 0 : Math.max(0, Math.min(100, hp))) + "%";
       }
-      // money and the gear
-      const mo = valAt(p.mo, t, null), ev = valAt(p.ev, t, null);
+      // money (the gear value is not shown on the card)
+      const mo = valAt(p.mo, t, null);
       lr.mc.textContent = mo == null ? "" : money(mo);
       lr.mc.title = mo == null ? "" : (lab.pt_money_t || "money") + " " + money(mo);
-      lr.gear.textContent = ev == null ? "" : (lab.pt_gear || "gear") + " " + money(ev).slice(1);
-      lr.gear.title = ev == null ? "" : (lab.pt_gear_t || "value of the equipment") + " " + money(ev);
-      // utility: grenades, the kit, the bomb; status next to the name
+      // utility: grenades and the kit; status by the name, the bomb by the kit
       const inv = alive ? ((runAt(p.inv, t) || [0, []])[1]) : [];
       const kit = alive && valAt(p.kit, t, 0) === 1;
       const defusing = alive && valAt(p.dg, t, 0) === 1;
@@ -691,26 +782,28 @@ export default function (component) {
         const cnt = countKeys(inv);
         for (const g of GRENADES) {
           for (let n = 0; n < (cnt[g] || 0); n++) {
-            const gIco = iconEl(g, wl(g), 13);
+            const gIco = iconEl(g, wl(g), 15);
             if (gIco) lr.util.appendChild(gIco);
             else lr.util.append(el("span", "rr-wtxt", wl(g) || g));
           }
         }
         if (kit) {
-          const kIco = iconEl("defuse", lab.pt_kit || "defuse kit", 13);
+          const kIco = iconEl("defuse", lab.pt_kit || "defuse kit", 15);
           if (kIco) lr.util.appendChild(kIco);
         }
       }
       const is = (inv.indexOf("c4") >= 0 ? "c" : "") + (defusing ? "d" : "") + (s && s.fl > 0.2 ? "b" : "");
       if (lr.is !== is) {
-        lr.is = is; lr.ind.replaceChildren();
-        if (is.indexOf("c") >= 0) { const ic = iconEl("c4", lab.pt_bomb || "carries the bomb", 12, C.warn); if (ic) lr.ind.appendChild(ic); }
-        if (is.indexOf("d") >= 0) { const ic = iconEl("defuse", lab.pt_defusing || "defusing", 12, C.acc); if (ic) lr.ind.appendChild(ic); }
-        if (is.indexOf("b") >= 0) { const ic = iconEl("blind", lab.pt_blind || "flashed", 12); if (ic) lr.ind.appendChild(ic); }
+        lr.is = is; lr.ind.replaceChildren(); lr.bc.replaceChildren();
+        // the bomb sits right of the kit in the utility row; defusing /
+        // flashed stay by the name
+        if (is.indexOf("c") >= 0) { const ic = iconEl("c4", lab.pt_bomb || "carries the bomb", 14, C.warn); if (ic) lr.bc.appendChild(ic); }
+        if (is.indexOf("d") >= 0) { const ic = iconEl("defuse", lab.pt_defusing || "defusing", 14, C.acc); if (ic) lr.ind.appendChild(ic); }
+        if (is.indexOf("b") >= 0) { const ic = iconEl("blind", lab.pt_blind || "flashed", 14); if (ic) lr.ind.appendChild(ic); }
       }
-      // live speed
+      // live speed: just the digits and the unit, no label
       const v = alive ? speedAt(p, t) : null;
-      lr.sp.textContent = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
+      lr.spv.textContent = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
       const sm = sums[p.side];
       if (sm) { sm.n += 1; if (mo != null) { sm.mo += mo; sm.mon = true; } }
     }
@@ -725,9 +818,13 @@ export default function (component) {
   }
   function applyPanel() {
     grid.classList.toggle("nolf", !S.panel);
+    grid.classList.toggle("nord", !S.dpanel);
     plBtn.classList.toggle("on", !!S.panel);
+    dpBtn.classList.toggle("on", !!S.dpanel);
     plBtn.title = S.panel ? (lab.players_hide || "hide") : (lab.players_show || "show");
     plBtn.setAttribute("aria-label", plBtn.title);
+    dpBtn.title = S.dpanel ? (lab.duels_hide || "hide") : (lab.duels_show || "show");
+    dpBtn.setAttribute("aria-label", dpBtn.title);
   }
 
   // ---------- key panels (one per player; moved into the duel panel) ----------------------------------
@@ -1051,7 +1148,9 @@ export default function (component) {
   tip.hidden = true;
   wrap.appendChild(tip);
   const plateAt = (mx, my) => {
-    for (const b of plates) {
+    // alive players were pushed last: they win the hit-test on an overlap
+    for (let i = plates.length - 1; i >= 0; i--) {
+      const b = plates[i];
       if (Math.abs(mx - b.x) <= b.w / 2 + 2 && my >= b.y - 13 && my <= b.y + b.h + 2) return b;
     }
     return null;
@@ -1274,26 +1373,37 @@ export default function (component) {
     ctx.textAlign = "center";
     plates = [];
     const z = duelAt(sel);
-    for (const p of P) {
-      if (!visible(p)) continue;
+    const ord = [];
+    P.forEach((p, pi) => {
+      if (!visible(p)) return;
       const s = state(p, t);
-      if (!s || s.x == null || s.y == null) continue;
-      const q = toPx(s.lvl, s.x, s.y), px = q[0], py = q[1];
-      const col = sideCol(p.side);
-      if (s.al) {
+      if (!s || s.x == null || s.y == null) return;
+      ord.push({ p: p, pi: pi, s: s });
+    });
+    // z-order on the map: the dead sink to the bottom (the earlier the death,
+    // the lower they lie); the living keep the LEFT TABLE's order - the top
+    // row of the list paints last, on top
+    ord.sort((A, B) => {
+      const ad = !A.s.al, bd = !B.s.al;
+      if (ad !== bd) return ad ? -1 : 1;
+      if (ad) return deathTick[A.pi] - deathTick[B.pi];
+      return B.pi - A.pi;
+    });
+    for (const it of ord) {
+      const p = it.p, s = it.s;
+      {
+        const q = toPx(s.lvl, s.x, s.y), px = q[0], py = q[1];
+        const col = sideCol(p.side);
+        if (s.al) {
         if (s.fl > 0.2) {
           ctx.beginPath(); ctx.arc(px, py, R + 3, 0, Math.PI * 2);
           ctx.strokeStyle = rgba(C.flash, Math.min(0.9, 0.3 + s.fl / 4));
           ctx.lineWidth = 2.5; ctx.stroke();
         }
-        // view direction: a short arrow
+        // view direction: only the arrowhead, close to the dot (no shaft)
         const a = (s.yaw == null ? 0 : s.yaw) * Math.PI / 180;
         const dx = Math.cos(a), dy = -Math.sin(a), ox = -dy, oy = dx;
-        ctx.strokeStyle = col; ctx.lineWidth = 1.8;
-        ctx.beginPath();
-        ctx.moveTo(px + dx * R, py + dy * R); ctx.lineTo(px + dx * (R + 6), py + dy * (R + 6));
-        ctx.stroke();
-        const hx = px + dx * (R + 9), hy = py + dy * (R + 9);
+        const hx = px + dx * (R + 4), hy = py + dy * (R + 4);
         ctx.fillStyle = col;
         ctx.beginPath();
         ctx.moveTo(hx, hy);
@@ -1302,7 +1412,6 @@ export default function (component) {
         ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2);
         ctx.fillStyle = col; ctx.fill();
-        ctx.lineWidth = 1; ctx.strokeStyle = rgba(C.bg, 0.9); ctx.stroke();
         // the two duelists of the selected duel get an accent ring
         if (z && (P[z.ki] === p || P[z.vi] === p)) {
           ctx.beginPath(); ctx.arc(px, py, R + 6.5, 0, Math.PI * 2);
@@ -1318,6 +1427,7 @@ export default function (component) {
           ctx.fillStyle = hpCol(s.hp);
           ctx.fillRect(bx, by, bw * Math.min(1, s.hp / 100), 3);
         }
+        const inv = (runAt(p.inv, t) || [0, []])[1];
         const w = weaponAt(p, t);
         ctx.font = "600 10px " + FF;
         const nmW = ctx.measureText(p.name).width;
@@ -1334,30 +1444,44 @@ export default function (component) {
         // the weapon icon above the plate (fallback: the old text under
         // the dot, so a missing icon set changes nothing semantically)
         const ICO_H = 11;  // ~10-12 px, like the spectator HUD
-        if (w && !drawIcon(w, px, plateY - ICO_H / 2 - 1, col, ICO_H)) {
+        const wy = plateY - ICO_H / 2 - 1;
+        // the bomb rides RIGHT of the weapon icon on the same row; without a
+        // weapon icon it falls back to the status marks by the dot
+        let c4x = 0;
+        if (w && IC[w]) {
+          const wm = IC[w], ar = wm[1] && wm[2] ? wm[1] / wm[2] : 1;
+          c4x = px + ICO_H * ar / 2 + 5;
+        }
+        if (w && !drawIcon(w, px, wy, col, ICO_H)) {
           ctx.font = "9px " + FF; ctx.fillStyle = C.text2;
           halo(w, px, py + R + 14);
         }
-        // small status marks right of the dot: the bomb, the defuse kit while
-        // defusing, the flash
-        const inv = (runAt(p.inv, t) || [0, []])[1];
+        if (c4x && inv.indexOf("c4") >= 0) drawIcon("c4", c4x, wy, C.warn, 9);
+        // small status marks right of the dot: the defuse kit while
+        // defusing, the flash (the bomb is by the weapon when there is one)
         let sx = px + R + 4;
         const mark = (key, color, hh) => {
           if (drawIcon(key, sx, py, color || C.text, hh || 9)) sx += 11;
         };
-        if (inv.indexOf("c4") >= 0) mark("c4", C.warn);
+        if (inv.indexOf("c4") >= 0 && !c4x) mark("c4", C.warn);
         if (valAt(p.dg, t, 0) === 1) mark("defuse", C.acc);
         if (s.fl > 0.2) mark("blind", C.text);
         plates.push({ x: px, y: plateY, w: plateW, h: plateH, p: p, w: w, hp: s.hp, al: true });
       } else {
-        ctx.strokeStyle = C.dead || C.text2; ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(px - R * 0.8, py - R * 0.8); ctx.lineTo(px + R * 0.8, py + R * 0.8);
-        ctx.moveTo(px + R * 0.8, py - R * 0.8); ctx.lineTo(px - R * 0.8, py + R * 0.8);
-        ctx.stroke();
-        ctx.font = "600 10px " + FF; ctx.fillStyle = C.dead || C.text2;
+        // grey skull (the icon set's silhouette, tinted like the weapons);
+        // the old cross stays as the no-icon fallback
+        const dc = C.text2 || C.dead;
+        if (!drawIcon("skull", px, py, dc, Math.round(R * 2.1))) {
+          ctx.strokeStyle = dc; ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(px - R * 0.8, py - R * 0.8); ctx.lineTo(px + R * 0.8, py + R * 0.8);
+          ctx.moveTo(px + R * 0.8, py - R * 0.8); ctx.lineTo(px - R * 0.8, py + R * 0.8);
+          ctx.stroke();
+        }
+        ctx.font = "600 10px " + FF; ctx.fillStyle = dc;
         halo(p.name, px, py - R - 5);
         plates.push({ x: px, y: py - R - 15, w: plateWFor(p), h: PLATE_H, p: p, w: "", hp: s.hp, al: false });
+      }
       }
     }
   }
@@ -1365,6 +1489,14 @@ export default function (component) {
   // (the canvas has no DOM title: the hit-test draws its own floating tip)
   let plates = [];
   const PLATE_H = 14;
+  // the first tick each player dies (Infinity = alive the whole round,
+  // -Infinity = dead from the start): the stacking order of the corpses
+  const deathTick = P.map((p) => {
+    const al = p.al;
+    if (!al || !al.length) return Infinity;
+    for (let i = 1; i < al.length; i++) if (al[i - 1] && !al[i]) return d.t0 + i * d.step;
+    return al[0] ? Infinity : -Infinity;
+  });
   function plateWFor(p) {
     ctx.font = "600 10px " + FF;
     return ctx.measureText(p.name).width + 10;
@@ -1404,36 +1536,6 @@ export default function (component) {
     ctx.globalAlpha = 1;
   }
 
-  function drawFeed() {
-    feed.replaceChildren();
-    for (const k of d.kills.filter((x) => x[0] <= t).slice(-5).reverse()) {
-      const a = k[1] >= 0 ? P[k[1]] : null, v = k[2] >= 0 ? P[k[2]] : null;
-      const row = el("div", "rr-fe");
-      const an = el("b", null, a ? a.name : "?");
-      const vn = el("b", null, v ? v.name : "?");
-      an.style.color = a ? sideCol(a.side) : "";
-      vn.style.color = v ? sideCol(v.side) : "";
-      row.append(an);
-      // the weapon (icon first, the raw name when there is none) and the
-      // headshot badge after it; every icon carries the name as its title
-      const wMid = el("span", "rr-w");
-      const wIco = iconEl(k[3], wl(k[3]), 10);
-      if (wIco) wMid.appendChild(wIco);
-      else if (k[3]) wMid.appendChild(document.createTextNode("[" + k[3] + "]"));
-      row.appendChild(wMid);
-      if (k[4]) {
-        const hsIco = iconEl("headshot", lab.hs || "HS", 10);
-        if (hsIco) row.appendChild(hsIco);
-        else row.appendChild(el("span", "rr-hs", "\u25CE"));
-      }
-      row.appendChild(vn);
-      row.title = (a ? a.name : "?") + " > " + (v ? v.name : "?")
-        + (k[3] ? " \u00B7 " + wl(k[3]) : "") + (k[4] ? " \u00B7 " + (lab.hs || "HS") : "");
-      row.setAttribute("aria-label", row.title);
-      feed.appendChild(row);
-    }
-  }
-
   // ---------- legend + howto ------------------------------------------------------------------------------------------------
   const leg = el("div", "rr-legend");
   const mark = (cls, col, text) => {
@@ -1441,9 +1543,11 @@ export default function (component) {
     i.style.background = col; s.append(i, " " + text);
     return s;
   };
+  const deadLeg = el("span");
+  deadLeg.append(iconEl("skull", lab.dead || "dead", 10) || document.createTextNode("\u2715 "), document.createTextNode(" " + (lab.dead || "dead")));
   leg.append(
     mark("rr-dot", C.ct, "CT"), mark("rr-dot", C.t, "T"),
-    el("span", null, "\u2715 " + (lab.dead || "dead")),
+    deadLeg,
     el("span", null, "\u2014 " + (lab.shot || "shot")),
     el("span", null, "\u2726 " + (lab.hit || "hit")),
     mark("rr-legline", C.ct, lab.leg_ct || "CT kill"),
@@ -1493,7 +1597,6 @@ export default function (component) {
     drawTracers();
     drawPlayers();
     drawImpacts();
-    drawFeed();
     drawDuelPanel();
     updateLeft();
     cardEls.forEach((c, i) => c.classList.toggle("up", !!(d.duels[i] && d.duels[i].b > t)));

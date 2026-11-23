@@ -136,6 +136,8 @@ def build_payload() -> dict:
         "kills": [(t0 + 4 * 330, sids[0], sids[1], "ak47", True),
                   (t0 + 4 * 480, sids[5], sids[6], "awp", False)],
         "hits": [(t0 + 4 * 325, sids[0], sids[1])],
+        # the match's kills / deaths before this round (the player cards add the live ones)
+        "kd0": {sids[0]: [7, 12], sids[1]: [3, 4], sids[5]: [0, 0], sids[6]: [10, 9]},
     }
     duel_rows = pd.DataFrame(
         [

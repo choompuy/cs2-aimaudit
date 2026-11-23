@@ -67,6 +67,32 @@ assert.ok(/^HP+HP+$/.test(order), order);
 assert.strictEqual($$(".rr-team").length, 0);
 ok("players split into CT / T, sorted by nickname inside a team (" + rows.length + ")");
 
+// the player card: kills / deaths of the MATCH (before the round + live), money, HP, no photo
+const card = (name) => $$(".rr-prow").find((r) => r.querySelector(".rr-pname").textContent === name);
+const kdOf = (name) => [Number(card(name).querySelector(".rr-pkk b").textContent), Number(card(name).querySelector(".rr-pdk b").textContent)];
+const pByName = (name) => payload.players.find((p) => p.name === name);
+assert.strictEqual($$(".rr-prow img, .rr-prow canvas").length, 0);
+assert.strictEqual($$(".rr-prow .rr-pbar").length, rows.length);
+assert.ok(card("zeta").querySelector(".rr-pm").textContent.startsWith("$"));
+assert.deepStrictEqual(kdOf("zeta"), pByName("zeta").kd);
+assert.deepStrictEqual(kdOf("zeta"), [7, 12]);
+// the HP is the card background: the fill is as wide as the HP, empty for the dead
+const fillOf = (name) => card(name).querySelector(".rr-pbar i").style.width;
+assert.strictEqual(fillOf("Charlie"), "100%");
+seekFrac(0.99);
+await new Promise((r) => setTimeout(r, 60));
+assert.deepStrictEqual(kdOf("zeta"), [8, 12]);      // killed Alpha in the round
+assert.deepStrictEqual(kdOf("Alpha"), [3, 5]);      // ... and Alpha died
+assert.deepStrictEqual(kdOf("foxtrot"), [10, 10]);  // died to Echo
+assert.deepStrictEqual(kdOf("Echo"), [1, 0]);
+assert.strictEqual(fillOf("Alpha"), "0%");
+assert.ok(card("Alpha").classList.contains("dead") && card("Alpha").querySelector(".rr-php.dead"));
+assert.ok(!card("Charlie").classList.contains("dead") && /^\d+$/.test(card("Charlie").querySelector(".rr-php").textContent));
+seekFrac(0);
+await new Promise((r) => setTimeout(r, 60));
+assert.deepStrictEqual(kdOf("zeta"), [7, 12]);
+ok("player cards: kills / deaths of the match, live; a dead player's HP is the skull");
+
 // every duel of the round has a card
 assert.strictEqual($$(".rr-card").length, payload.duels.length);
 ok("a card for every duel of the round (" + payload.duels.length + ")");
@@ -145,10 +171,34 @@ assert.ok(!$(".rr-left .rr-sdot"), "no team dots in the players table");
 assert.ok(!row0.querySelector(".rr-pnum"), "armor shows no number");
 assert.ok(!$(".rr-eco"), "no bottom economy block");
 assert.ok(heads.some((h) => /\$\d/.test(h)), "team money sits in the group headers: " + heads.join(" | "));
-assert.ok($$(".rr-prow .rr-pind .rr-ico").length >= 1, "the bomb carrier is marked");
+assert.ok($$(".rr-prow .rr-pbm .rr-ico").length >= 1, "the bomb carrier is marked in the utility row");
 // every name is on hover only: the weapon icon carries its name in the title
 assert.ok(row0.querySelector(".rr-pw .rr-ico").title.length > 0);
 ok("players table: weapon, armor, hp, money, grenades, bomb carrier; economy of both teams");
+
+// the panels collapse from their own headers (and come back via the transport)
+{
+  const grid = $(".rr-grid");
+  assert.ok($(".rr-lh .rr-col") && $(".rr-rh .rr-col"), "collapse buttons in both panel headers");
+  click($(".rr-lh .rr-col"));
+  assert.ok(grid.classList.contains("nolf"), "left panel hidden");
+  click($(".rr-rh .rr-col"));
+  assert.ok(grid.classList.contains("nord"), "right panel hidden");
+  // the slim edge tabs bring a collapsed panel back
+  assert.ok($(".rr-tab-l") && $(".rr-tab-r"), "edge tabs exist");
+  click($(".rr-tab-l"));
+  assert.ok(!grid.classList.contains("nolf") && grid.classList.contains("nord"), "left tab restores only its panel");
+  click($(".rr-tab-r"));
+  assert.ok(!grid.classList.contains("nord"), "right tab restores its panel");
+  // the transport toggles hide / show the panels too
+  const toggles = $$(".rr-sbtn").filter((b) => /players|duels/i.test(b.textContent));
+  assert.strictEqual(toggles.length, 2, "a transport toggle per panel");
+  toggles.forEach(click);
+  assert.ok(grid.classList.contains("nolf") && grid.classList.contains("nord"), "transport hides both");
+  toggles.forEach(click);
+  assert.ok(!grid.classList.contains("nolf") && !grid.classList.contains("nord"), "panels restored");
+  ok("panel headers collapse the overlays; the transport toggles bring them back");
+}
 
 // the speed menu inside a shadow root (how Streamlit hosts a component): a press on a menu
 // item must not be taken for an outside press, and a click on the button after a hover keeps it open
@@ -234,9 +284,9 @@ key("[");
 assert.strictEqual(root.__rr.speed, 0.1);
 ok("arrows step one sample, Shift one second, [ ] change the speed");
 
-// the speed shown in the list does not flicker: it snaps to 5 u/s
+// the speed value does not flicker: it snaps to 5 u/s (no label, just digits + unit)
 for (const sp of $$(".rr-psp")) {
-  const txt = sp.textContent.trim();
+  const txt = (sp.querySelector(".rr-pspv") || sp).textContent.trim();
   if (txt) assert.ok(/^\d+ /.test(txt) && Number(txt.split(" ")[0]) % 5 === 0, "speed snaps to 5: " + txt);
 }
 // the moving threshold lives only inside the duel panel's shot chart now
@@ -270,16 +320,8 @@ ok("playback runs in the browser (no Streamlit trigger)");
 
 // ---------- the icons (payload.icons rides along from the fixture set) ----
 if (Object.keys(payload.icons || {}).length) {
-  // the feed lists only the kills that already happened: jump near the end
-  seekFrac(0.95);
-  // the kill feed: weapon icon per kill + the headshot mark on kill 1
-  const feedIcons = $$(".rr-fe .rr-ico");
-  assert.strictEqual(feedIcons.length, 3, "feed icons: " + feedIcons.length);  // ak47+hs, awp
-  const ar = feedIcons[0].style.getPropertyValue("--ar");
-  assert.ok(Math.abs(parseFloat(ar) - 100 / 32) < 0.01, "aspect ratio var: " + ar);
-  assert.ok(feedIcons[0].style.getPropertyValue("--ico").startsWith("url("));
-  assert.strictEqual(feedIcons[0].getAttribute("role"), "img");
-  ok("kill feed: weapon + headshot icons, aspect-ratio var, role=img");
+  // there is no kill feed anymore
+  assert.strictEqual($$(".rr-fe").length, 0, "kill feed removed");
 
   // duel cards: weapon + headshot + the kill modifiers of duel 1
   const metas = $$(".rr-card .rr-cmeta");
@@ -294,7 +336,10 @@ if (Object.keys(payload.icons || {}).length) {
   const dead = $$(".rr-prow.dead");
   assert.ok(dead.length > 0);
   assert.ok(dead[0].querySelector(".rr-php .rr-ico"), "dead player hp cell: " + dead[0].innerHTML);
-  ok("player list: live weapon icons; the dead player gets the skull icon");
+  // the K/D deaths mark is the icon set's own skull, not a drawn cross
+  const dk = $(".rr-prow .rr-pdk");
+  assert.ok(dk && dk.querySelector(".rr-ico"), "deaths cell uses the game skull icon");
+  ok("player list: live weapon icons; the dead get the skull, K/D uses the game skull");
 
   // the outcome banner, the round chips and the timeline markers
   assert.ok($(".rr-out .rr-why .rr-ico"), "outcome why icon missing");
@@ -318,8 +363,6 @@ if (Object.keys(payload.icons || {}).length) {
   await new Promise((r) => setTimeout(r, 120));
   seekFrac(0.95);
   assert.strictEqual($$(".rr-ico").length, 0);
-  const feedTxt = $$(".rr-fe").map((n) => n.textContent).join(" ");
-  assert.ok(feedTxt.includes("ak47") && feedTxt.includes("awp"), "feed text: " + feedTxt);
   assert.ok($$(".rr-pw").some((n) => n.textContent.trim() === "ak47"));
   ok("without the icon set everything falls back to text (no .rr-ico at all)");
 }

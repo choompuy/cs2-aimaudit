@@ -386,6 +386,27 @@ def _round_events(demo: Demo, lo: int, hi: int):
     return out_shots, out_kills, out_hits
 
 
+def _kd_before(demo: Demo, lo: int) -> dict[str, list[int]]:
+    """Kills / deaths of every player in the match BEFORE tick ``lo`` (the
+    start of the replayed round): {sid: [kills, deaths]}. A kill is an
+    enemy kill - suicides, world deaths and team kills do not count (the
+    replay panel adds the round's own kills on top, by the same rule)."""
+    out: dict[str, list[int]] = {}
+    deaths = getattr(demo, "deaths", None)
+    if deaths is None or deaths.empty or "tick" not in deaths.columns:
+        return out
+    teams = getattr(demo, "teams", None) or {}
+    d = deaths[deaths["tick"] < int(lo)]
+    for r in d.itertuples():
+        a = str(getattr(r, "attacker_steamid", "") or "")
+        v = str(getattr(r, "user_steamid", "") or "")
+        if v:
+            out.setdefault(v, [0, 0])[1] += 1
+        if a and v and a != v and a in teams and teams.get(a) != teams.get(v):
+            out.setdefault(a, [0, 0])[0] += 1
+    return out
+
+
 def round_replay_data(
     demo: Demo,
     round_no: int,
@@ -408,6 +429,7 @@ def round_replay_data(
      "keys": [available key names], "shots": [(tick, sid, weapon)],
      "kills": [(tick, attacker, victim, weapon, hs)],
      "hits": [(tick, attacker, victim)],
+     "kd0": {sid: [kills, deaths]} of the match before the round,
      "info": how the round ended (Demo.round_info[round])}
     (hits cover EVERY pair of the round - the replay shows the whole
     round, teammate trades included). The frames also carry the economy
@@ -438,6 +460,7 @@ def round_replay_data(
         "shots": out_shots,
         "kills": out_kills,
         "hits": out_hits,
+        "kd0": _kd_before(demo, lo),
         "info": dict((getattr(demo, "round_info", None) or {}).get(round_no) or {}),
     }
 
@@ -482,9 +505,12 @@ def _duel_entry(r, t0: int, t1: int, tk: int, tr: int) -> dict:
     kft, vft = _row_tick(r, "killer_first_tick"), _row_tick(r, "victim_first_tick")
     firsts = [x for x in (kft, vft) if x is not None]
     start = min(firsts) if firsts else tk - tr
+    a = max(t0, start - int(0.75 * tr))
     return {
-        "a": max(t0, start - int(0.75 * tr)),
-        "b": min(t1, tk + int(1.5 * tr)),
+        "a": a,
+        # the duel ends just past the kill: the kill tick plus a one-second
+        # tail so the moment itself (and the body drop) is inside the segment
+        "b": min(t1, max(tk + tr, a)),
         "tick": tk,
         "killer": str(r.killer),
         "victim": str(r.victim),
@@ -521,8 +547,8 @@ def round_duels(
     window holds the kill tick (the same window the replay plays), never to
     a round number read from another column. ``a``/``b`` bracket the
     segment the replay locks to: from the first shot of EITHER duelist
-    (minus a short pre-roll to see the approach) to a bit after the kill
-    (to see the outcome / the trade), clamped to the round.
+    (minus a short pre-roll to see the approach) up to the kill itself -
+    the duel is over a second after one of them kills, clamped to the round.
 
     Besides who killed whom the entry carries the per-duelist numbers the
     duels table already measured at the FIRST SHOT of each side (speed,
