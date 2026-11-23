@@ -20,6 +20,7 @@ from __future__ import annotations
 import tomllib
 from functools import lru_cache
 from pathlib import Path
+from typing import Sequence
 
 import i18n
 from ui.table import _TONES, Col, data_table
@@ -137,16 +138,26 @@ def table(
     t=None,
     empty: str = "",
     icons: dict | None = None,
+    checkable: "Sequence[bool] | None" = None,
+    row_keys: "Sequence[str] | None" = None,
+    checked=None,
+    on_check=None,
 ) -> None:
     """One call instead of a hand-written data_table(...): cols, stripe and
     height come from tables.toml; selected/on_click are runtime values.
-    ``icons`` is the {key: [data-uri, w, h]} set for the icon columns."""
+    ``icons`` is the {key: [data-uri, w, h]} set for the icon columns.
+    ``checkable`` / ``row_keys`` / ``checked`` / ``on_check`` add the
+    checkbox column (see ui.table.data_table) - under the same
+    `selectable` gate as selected/on_click."""
     spec = _load()["table"].get(table_id)
     if spec is None:
         raise KeyError(f"unknown table {table_id!r}")
-    if (selected is not None or on_click is not None) and not spec.get(
-        "selectable", False
-    ):
+    if (
+        selected is not None
+        or on_click is not None
+        or checkable is not None
+        or on_check is not None
+    ) and not spec.get("selectable", False):
         raise ValueError(f"[table.{table_id}] does not take selected/on_click")
     stripe = None
     sp = spec.get("stripe")
@@ -164,6 +175,10 @@ def table(
         max_height=spec.get("max_height", 620),
         empty=empty,
         icons=icons,
+        checkable=checkable,
+        row_keys=row_keys,
+        checked=checked,
+        on_check=on_check,
     )
 
 

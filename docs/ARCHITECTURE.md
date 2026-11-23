@@ -11,9 +11,9 @@ written here, so the doc and the guardrails stay honest.
 | --------------------------------- | --------: | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `app.py`                          |       148 | Entry point only: page config, theme injection, the `st.Page` bodies (`_PAGE_FNS`) handed to `shell.navigation`, and `_match` - the only pipeline that loads a demo. |
 | `context.py`                      |       170 | Cached `core` calls (`get_demo`, `get_shots`, `get_duels`, `get_timeline`, `get_round_replay`) and the `Ctx` dataclass every page renders from. |
-| `shell.py`                        |       808 | App shell: `st.navigation` + the `st.page_link` rail + the language box (`navigation`), the URL state (`?m=&tab=`, legacy `?p=`), `go_page`/`go_match`, demo loading, the match header (`st.badge`), the context row, the library panel. |
+| `shell.py`                        |       904 | App shell: `st.navigation` + the `st.page_link` rail + the language box (`navigation`), the URL state (`?m=&tab=`, legacy `?p=`), `go_page`/`go_match`, demo loading, the match header (`st.badge`), the context row (incl. the identity ⋮ menu), the ask card / remember logic, the library panel. |
 | `filters_ui.py`                   |       562 | URL state (`_URL_KEYS`) and link migration, presets, callbacks, the filter summary row + the Edit `st.popover`.                              |
-| `views/matches.py`                |       580 | The Matches page: the unified table (filters, Refresh, Add match, row actions, the download flow).                                        |
+| `views/matches.py`                |       731 | The Matches page: the unified table (filters, Refresh, Add match, row actions, the single / multi download + on-the-spot analysis flow).                                        |
 | `views/_shared.py`                |        30 | Helpers shared by the pages (`steam_cfg`, `show_error`); started as the Matches/Settings duplicates.                                       |
 | `views/dashboard.py`              |        27 | The Dashboard stub (cross-match aggregates land in a future `core/aggregate.py`).                                                            |
 | `views/settings.py`               |       204 | The Settings page: language note, analysis sliders (`persist_state="session"`), accounts + Steam helper, Library and storage, privacy.      |
@@ -24,7 +24,7 @@ written here, so the doc and the guardrails stay honest.
 | `views/map.py`                    |       104 | Map page (`@st.fragment`, radar plot).                                                                                                       |
 | `views/extras.py`                 |        80 | Guide page and the debug expander rendered under every match tab.                                                                            |
 | `core/matchlist.py`               |       201 | The unified match list: provider records + library entries + summaries merged into `MatchRow`s (no Streamlit, no parsing).                   |
-| `core/matchstats.py`              |       163 | The per-match summary cache behind the Matches table (compute from a parsed demo, read/write the JSON cache, resolve "me").                 |
+| `core/matchstats.py`              |       176 | The per-match summary cache behind the Matches table (compute from a parsed demo, read/write/drop the JSON cache, resolve "me").                 |
 | `core/model.py`                   |       788 | Constants, the `Demo` container, pure helpers (weapons, angles, `wilson_ci`, `rank_in_lobby`).                                               |
 | `core/filters.py`                 |       203 | `Filters`, round halves/pistol rounds, `apply_filters`.                                                                                      |
 | `core/ids.py`                     |       191 | SteamID resolution (`build_id_lookup` / `fix_ids`) and frame normalization (punch, alive, fire-tick speed).                                |
@@ -39,13 +39,13 @@ written here, so the doc and the guardrails stay honest.
 | `core/replay.py`                  | 652 | `timeline_data`, `round_replay_data` (incl. the `ECONOMY_PROPS` tick columns), `round_duels` (incl. kill-modifier flags), `duel_telemetry`, radar transforms.            |
 | `core/checks.py`                  |       353 | `data_checks`, `debug_report`.                                                                                                               |
 | `core/__init__.py`                |       300 | Facade: re-exports the public API so `import core` / `core.X` keep working.                                                                  |
-| `ui/table.py`                     |       490 | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells), `data_table` (custom component).                       |
-| `ui/component.py`                 |        61 | Custom-component glue: `declare` + `event_callback` + `render` (declare, wire the trigger callback, render the payload), shared by table / strip / roundrep. |
-| `ui/schema.py` + `ui/tables.toml` | 338 + 354 | The table schema: loader, `build_cols`, `table`, `validate`; the TOML is the single source of truth for grids (incl. `[table.matches]`).     |
+| `ui/table.py`                     |       575 | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells + the checkbox column), `data_table` (custom component).                       |
+| `ui/component.py`                 |        83 | Custom-component glue: `declare` + `event_callback`(+`_set`) + `render` (declare, wire the trigger callbacks, render the payload), shared by table / strip / roundrep. |
+| `ui/schema.py` + `ui/tables.toml` | 388 + 354 | The table schema: loader, `build_cols`, `table` (selected/on_click + the checkbox column passthrough), `validate`; the TOML is the single source of truth for grids (incl. `[table.matches]`).     |
 | `ui/charts.py`                    |        86 | `style_figure` and shared chart builders.                                                                                                    |
 | `ui/format.py`                    |        63 | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`, `map_name`.                                                                           |
 | `ui/strip.py`                     |       339 | The duel navigation strip (Timeline).                                                                                                        |
-| `ui/icons.py`                     |       360 | The icon set loader: SVG sanitizer, SHA-256 verification, weapon-name aliases, `weapon_info` / `weapon_cells` / `payload` for grids and the replay. |
+| `ui/icons.py`                     |       442 | The icon set loader: SVG sanitizer, SHA-256 verification, weapon-name aliases, `weapon_info` / `weapon_cells` / `payload` for grids and the replay. |
 | `ui/roundrep.py`                  | 679 | 2D replay component: `round_payload` (pure JSON model, carries the round's `icons` / `wlab`, economy runs, `thr`) + `round_replay`; front end in `roundrep.js` / `.css`. |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css` (tabular digits only), the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `sources/model.py`                |       162 | The match-import model: `MatchRecord`, `DemoState`, the Steam config and the localized `ProviderError` family.                               |
@@ -56,11 +56,11 @@ written here, so the doc and the guardrails stay honest.
 | `sources/__init__.py`             |       169 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package - plus the `matches.json` cache glue (`read_cache` / `write_cache` / `cache_time`). |
 | `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `i18n.py`                         |        45 | Thin loader: `STR`/`LANGS`/`make_t` built from the `i18n/<lang>.toml` files; fails fast on a missing `en.toml`, a non-flat file or a file/LANGS mismatch. |
-| `i18n/en.toml` + `i18n/ru.toml`   | 650 + 650 | The UI strings themselves (645 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
+| `i18n/en.toml` + `i18n/ru.toml`   | 666 + 666 | The UI strings themselves (651 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
 | `store/` (package)                |       102 | The ONE place that knows where files live; the facade re-exports everything so `store.X` is unchanged.                                       |
 | `store/paths.py`                  |       249 | The `data/` folder next to `start.bat`: AIMAUDIT_DATA_DIR, the read-only fallback, every subfolder, file names / demo ids, `log_note`.      |
 | `store/library.py`                |       388 | The demo library: copies AND linked demos, add / relink / delete, the disk sync that adopts dropped files.                                  |
-| `store/caches.py`                 |       233 | Parsed / matchstats caches (parse keys, LRU pruning), the storage report and the clear actions.                                             |
+| `store/caches.py`                 |       242 | Parsed / matchstats caches (parse keys, LRU pruning, drop_matchstats), the storage report and the clear actions.                                             |
 | `store/importdata.py`             |        66 | accounts.json / matches.json: atomic writes, a corrupt file counts as empty.                                                                |
 | `state.py`                        |       151 | The `session_state` registry: key-name constants, typed get_*/set_* for the keys shared by 2+ modules, and the match-level mutators (`go_tab`/`leave_match`; `go_page`/`go_match` live in `shell` - they need the `st.Page` registry). |
 | `nativedialog.py`                 |        95 | Native Windows file dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
@@ -122,10 +122,15 @@ the registry only reads them:
 The Matches table never parses demos: its number cells come from
 `core/matchstats.py`'s JSON cache (`data/cache/matchstats/`, keyed like
 the parsed cache), computed at match open (the demo is parsed there
-anyway) or right after a row's demo download (the match opens and
-computes it on the way in). Who "me" is: the
-accounts' SteamID64 when she played, else the `me_sid` remembered in the
-library entry (the match view asks once).
+anyway) or right after a demo download - a single row's download opens
+the match, a multi-download (the checkbox column + "Download selected")
+analyzes every finished entry on the spot and opens the newest one. Who
+"me" is: the `me_sid` remembered in the library entry first (the
+explicit per-match pick - the ask card without the "remember" checkbox,
+or the "this is not me" ⋮ menu of the player row), else the accounts'
+SteamID64 when she played; the "remember" variant of either picker
+writes the SteamID into `accounts.json`, so future matches (downloads
+included) resolve on their own.
 
 ## Where files may live
 

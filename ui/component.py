@@ -38,6 +38,22 @@ def event_callback(
     return _cb
 
 
+def event_callback_set(
+    key: str, field: str, handler: Callable[[set], None]
+) -> Callable[[], None]:
+    """The set-flavoured event callback: the component reports a whole
+    selection (the table's checkbox column) as one newline-joined string
+    of row keys; the handler receives it as a set of strings."""
+
+    def _cb() -> None:
+        state = st.session_state.get(key)
+        v = state.get(field) if hasattr(state, "get") else None
+        if v is not None:
+            handler({k for k in str(v).split("\n") if k})
+
+    return _cb
+
+
 def render(
     name: str,
     css: str,
@@ -47,15 +63,21 @@ def render(
     data: Mapping,
     trigger: str,
     handler: Callable[[int], None] | None,
+    events: Mapping[str, Callable[[], None]] | None = None,
 ) -> None:
     """
     Declare the `name` component and render `data` under `key` - the one
     call every component module makes. `handler` (None = no callback)
     receives the int the front end reports in its `trigger` field, wired
-    through the on_<trigger>_change callback Streamlit needs.
+    through the on_<trigger>_change callback Streamlit needs. `events`
+    adds further on_<field>_change callbacks for components that report
+    more than one kind of event (the table: row clicks AND the checkbox
+    selection).
     """
     comp = declare(name, css=css, js=js)
     kwargs: dict = {}
     if handler is not None:
         kwargs[f"on_{trigger}_change"] = event_callback(key, trigger, handler)
+    for field, cb in (events or {}).items():
+        kwargs[f"on_{field}_change"] = cb
     comp(key=key, data=data, **kwargs)

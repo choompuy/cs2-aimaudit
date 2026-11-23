@@ -167,11 +167,36 @@ def _show_import_error(t) -> None:
         st.error(t("lib_save_failed", err=st.session_state.pop("mt_import_err")))
 
 
+def _analyze_entry(entry: dict, accounts: dict) -> str | None:
+    """Parse a finished download right away and cache its per-match summary
+    for the resolved 'me' - the Matches table's numbers are ready without
+    opening the demo. None when 'me' is unknown (the ask card will show on
+    open) or the demo does not parse; never raises (one broken download
+    must not take the rest of a multi-download with it)."""
+    try:
+        entry = store.get_demo(entry["id"]) or entry
+        path = core.decompressed_demo(store.demo_path(entry), tag=entry["id"][:8])
+        demo, _ = core.load_demo_cached(path)
+        me_sid = core.matchstats.resolve_me(demo, entry, accounts)
+        if me_sid is None:
+            return None
+        if core.matchstats.read_cached(store.demo_path(entry)) is None:
+            stats = core.matchstats.compute(
+                demo, me_sid, played_at=core.matchstats.played_at_of(entry)
+            )
+            core.matchstats.write_cached(store.demo_path(entry), stats)
+        return me_sid
+    except Exception:  # noqa: BLE001 - a broken demo is reported by open, not here
+        return None
+
+
 def _download(t, rec: sm.MatchRecord) -> None:
     """The row's download, run AFTER the table drew its "Downloading…"
     state: the cell stays busy for the whole transfer while the status +
-    progress line underneath tracks the real numbers."""
-    cfg = _steam_cfg(store.read_accounts())
+    progress line underneath tracks the real numbers. The finished demo is
+    analyzed on the spot, then opened (the summary is cached already)."""
+    accounts = store.read_accounts()
+    cfg = _steam_cfg(accounts)
     status = st.status(t("mt_dl_status"))
     bar = st.progress(0.0)
 
@@ -187,6 +212,8 @@ def _download(t, rec: sm.MatchRecord) -> None:
     try:
         with status:
             entry = sources.fetch_demo(rec, cfg, progress=_progress)
+            status.update(label=t("mt_dl_analyze", name=entry["name"]))
+            _analyze_entry(entry, accounts)
     except sm.ProviderError as e:
         status.update(label=t("mt_dl_status"), state="error")
         st.session_state["_dl_err"] = (e.key, e.kw)
@@ -198,6 +225,91 @@ def _download(t, rec: sm.MatchRecord) -> None:
         # an extra click on the row
         shell.go_match(entry["id"])
     st.session_state.pop("mt_dl", None)
+    st.rerun()
+
+
+# ----------------------------------------------------------- multi-download
+CHECKED = "mt_checked"  # the session key holding the selected row keys
+
+
+def _checked_keys() -> set:
+    v = st.session_state.get(CHECKED)
+    return set(v) if isinstance(v, (set, list, tuple)) else set()
+
+
+def _on_checked(keys: set) -> None:
+    """The table's checkbox column reported a new selection."""
+    st.session_state[CHECKED] = {k for k in keys if k}
+
+
+def _selected_rows(rows: list[core.MatchRow]) -> list[core.MatchRow]:
+    """The checked rows that can be downloaded right now."""
+    sel = _checked_keys()
+    return [r for r in rows if r.key in sel and _wants_download(r)]
+
+
+def _ask_multi_download() -> None:
+    """The button only flags the request: the loop runs after the table,
+    exactly like the single-row download."""
+    st.session_state["mt_dl_multi"] = True
+
+
+def _run_flagged_downloads(t, rows: list[core.MatchRow]) -> None:
+    """Download (and analyze) every selected match, one after another, with
+    one status box and one overall progress bar; the newest of them opens.
+    A failed demo is reported and does not stop the rest."""
+    if not st.session_state.pop("mt_dl_multi", None):
+        return
+    sel = _selected_rows(rows)
+    if not sel:
+        return
+    st.session_state.pop(CHECKED, None)  # the rows flip to in-library anyway
+    accounts = store.read_accounts()
+    cfg = _steam_cfg(accounts)
+    status = st.status(t("mt_dl_multi_status", n=len(sel)))
+    bar = st.progress(0.0)
+    ok, skipped, errs, first = 0, 0, [], None
+    with status:
+        for i, row in enumerate(sel):
+            if store.find_by_match(row.rec.provider, row.rec.match_id) is not None:
+                skipped += 1
+                continue
+            status.update(
+                label=t("mt_dl_multi_item", i=i + 1, n=len(sel), name=row.map_name or row.match_id)
+            )
+
+            def _progress(done: int, total, _i=i, _n=len(sel)) -> None:
+                frac = (done / total) if total else min(0.99, done / 60_000_000)
+                bar.progress(min(0.99, (_i + min(frac, 1.0)) / _n))
+
+            try:
+                entry = sources.fetch_demo(row.rec, cfg, progress=_progress)
+            except sm.ProviderError as e:
+                errs.append((row.rec.match_id, e.key, e.kw))
+                continue
+            ok += 1
+            if first is None:
+                first = entry  # the rows are date-sorted: the newest selected
+            status.update(label=t("mt_dl_analyze", name=entry["name"]))
+            _analyze_entry(entry, accounts)
+        bar.progress(1.0)
+    if errs:
+        status.update(
+            label=t("mt_dl_multi_done", ok=ok, n=len(sel)), state="error"
+        )
+        st.session_state["_dl_errs"] = errs
+    else:
+        status.update(
+            label=t("mt_dl_multi_done", ok=ok, n=len(sel)), state="complete"
+        )
+    if skipped:
+        st.toast(t("mt_dl_multi_skip", n=skipped))
+    if ok:
+        st.session_state["_dl_multi_done"] = (ok, len(sel))
+        # the newest of the selected matches opens (the first row of the
+        # date-sorted selection that made it); every other download was
+        # analyzed above, its row carries the numbers
+        shell.go_match(first["id"])
     st.rerun()
 
 
@@ -418,7 +530,19 @@ def _table(t, rows: list[core.MatchRow], empty: str = "") -> None:
     }
     from ui import schema
 
-    schema.table("matches", cells, key="mt_grid", on_click=_row_click, empty=empty)
+    schema.table(
+        "matches",
+        cells,
+        key="mt_grid",
+        on_click=_row_click,
+        empty=empty,
+        # the checkbox column: only the rows that can be downloaded (a
+        # click on such a row would download it; the checkbox stacks them)
+        checkable=[_wants_download(r) for r in rows],
+        row_keys=[r.key for r in rows],
+        checked=_checked_keys(),
+        on_check=_on_checked,
+    )
 
 
 # ---------------------------------------------------------- demo deletion
@@ -496,8 +620,16 @@ def _notices(t) -> None:
         st.toast(t("lib_added", name=st.session_state.pop("_added")))
     if "_dl_done" in st.session_state:
         st.toast(t("mt_dl_done", name=st.session_state.pop("_dl_done")))
+    if "_dl_multi_done" in st.session_state:
+        ok, n = st.session_state.pop("_dl_multi_done")
+        st.toast(t("mt_dl_multi_done", ok=ok, n=n))
     if "_dl_err" in st.session_state:
         _show_error(t, st.session_state.pop("_dl_err"))
+    if "_dl_errs" in st.session_state:
+        errs = st.session_state.pop("_dl_errs")
+        st.error(t("mt_dl_multi_errs", ids=", ".join(str(m) for m, _k, _w in errs)))
+        for _m, k, kw in errs[:3]:
+            _show_error(t, (k, kw))
 
 
 def _title_row(t) -> None:
@@ -535,6 +667,23 @@ def _run_flagged_download(t, rows) -> None:
         st.session_state.pop("mt_dl", None)
 
 
+def _download_bar(t, kept: list[core.MatchRow]) -> None:
+    """The multi-download affordance: only when something in the table can
+    be downloaded; disabled until at least one row is checked."""
+    dl_rows = [r for r in kept if _wants_download(r)]
+    if not dl_rows:
+        return
+    n_sel = len(_selected_rows(kept))
+    st.button(
+        t("mt_dl_selected", n=n_sel),
+        key="mt_dl_selected",
+        icon=":material/download:",
+        disabled=n_sel == 0,
+        on_click=_ask_multi_download,
+        help=t("mt_dl_selected_help"),
+    )
+
+
 def render(ctx) -> None:
     t = ctx.t
     _load_url_filters()
@@ -565,6 +714,7 @@ def render(ctx) -> None:
     i = st.session_state.pop("mt_action_row", None)
     if i is not None and 0 <= i < len(page_rows):
         _row_action(t, page_rows[i])
+    _download_bar(t, kept)
     _table(t, page_rows, empty=t("mflt_empty"))
     if len(kept) > len(page_rows):
         st.button(
@@ -577,4 +727,5 @@ def render(ctx) -> None:
         )
     _clear_control(t)
     _run_flagged_download(t, rows)
+    _run_flagged_downloads(t, rows)
     _sync_url_filters()

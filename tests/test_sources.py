@@ -870,11 +870,17 @@ def test_inbox():
 def test_no_sockets_in_app():
     """Opening the app on the Matches page must not open a network socket.
 
-    Streamlit's AppTest itself creates two AF_UNIX sockets for its asyncio
-    self-pipe; only internet-family sockets and urlopen count as network.
+    Streamlit's AppTest builds an asyncio self-pipe: on Linux that is a
+    native AF_UNIX pair (allowed below), but on Windows socketpair() is
+    emulated in pure Python over the loopback - ONE call constructs three
+    AF_INET sockets (listener + client + the accepted one), all bound to
+    127.0.0.1. That is the test harness talking to itself, not the app
+    talking to the network, so socketpair() runs with the recorder off;
+    every other internet socket still fails the test.
     """
     print("== sources: privacy (app start) ==")
     calls = []
+    quiet = [False]
 
     class _NoInet(socket.socket):
         def __init__(self, *a, **kw):
@@ -882,12 +888,31 @@ def test_no_sockets_in_app():
             if family not in (socket.AF_INET, socket.AF_INET6):
                 super().__init__(*a, **kw)
                 return
-            calls.append(("socket", family))
+            if not quiet[0]:
+                import traceback
+
+                where = " <- ".join(
+                    f"{f.filename.rsplit('/', 1)[-1]}:{f.name}"
+                    for f in traceback.extract_stack()[-4:-1]
+                )
+                calls.append(("socket", family, where))
             super().__init__(*a, **kw)
 
+    def _quiet_socketpair(*a, **kw):
+        # Windows' socketpair fallback (Lib/socket.py): loopback-only by
+        # construction (bind to 127.0.0.1 / ::1, port 0, peers verified),
+        # so the sockets it builds never reach any network
+        quiet[0] = True
+        try:
+            return orig_socketpair(*a, **kw)
+        finally:
+            quiet[0] = False
+
     orig_socket = socket.socket
+    orig_socketpair = socket.socketpair
     orig_urlopen = urllib.request.urlopen
     socket.socket = _NoInet
+    socket.socketpair = _quiet_socketpair
     urllib.request.urlopen = lambda *a, **kw: calls.append(("urlopen", None))
     try:
         from streamlit.testing.v1 import AppTest
@@ -901,6 +926,7 @@ def test_no_sockets_in_app():
         check("no network sockets while the app runs", not calls, calls)
     finally:
         socket.socket = orig_socket
+        socket.socketpair = orig_socketpair
         urllib.request.urlopen = orig_urlopen
 
 

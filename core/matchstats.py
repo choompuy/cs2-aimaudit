@@ -6,9 +6,11 @@ cache: <parse_key>-<code version>.json, see store) so the table NEVER
 parses a demo while it renders. The values reuse core's own functions
 (player_summary, impact_stats, round_winners) - no new formulas.
 
-Who "me" is: the accounts' SteamID64 when she played in the demo, else the
-me_sid remembered in the library entry (the match view asks once per demo).
-Without a "me" there is no summary.
+Who "me" is: the me_sid remembered in the library entry (the explicit
+per-match pick, also the "this is not me" correction) when she played in
+the demo, else the accounts' SteamID64. Without a "me" there is no
+summary; the match view asks once per demo and the Matches page analyzes
+a finished download with whatever it can resolve.
 """
 
 from __future__ import annotations
@@ -39,15 +41,16 @@ _STRICT = 1500
 
 
 def resolve_me(demo, entry: dict, accounts: dict) -> str | None:
-    """Who "me" is in this demo: the accounts' SteamID64 when she played,
-    else the entry's remembered me_sid. None when unknown (the UI asks)."""
+    """Who "me" is in this demo: the pick remembered for THIS match first
+    (it is the explicit answer, also the "this is not me" correction), else
+    the accounts' SteamID64 when she played. None when unknown (the UI asks)."""
     players = set(demo.players["sid"])
-    sid64 = str(accounts.get("steam_id64") or "").strip()
-    if sid64 and sid64 in players:
-        return sid64
     me = entry.get("me_sid")
     if me and me in players:
         return me
+    sid64 = str(accounts.get("steam_id64") or "").strip()
+    if sid64 and sid64 in players:
+        return sid64
     return None
 
 
@@ -150,6 +153,12 @@ def read_cached(path: str) -> dict | None:
 def write_cached(path: str, stats: dict) -> bool:
     """Cache a demo's summary; older code versions are dropped."""
     return store.write_matchstats(path, PARSE_VERSION, stats)
+
+
+def drop_cached(path: str) -> bool:
+    """Forget a demo's cached summary (the "me" changed and the numbers
+    must be recomputed for the new player); True when a cache file went."""
+    return store.drop_matchstats(path, PARSE_VERSION)
 
 
 def cached_stats(entry: dict) -> dict | None:

@@ -2230,23 +2230,36 @@ def scenario_matchstats():
             sources.read_cache("steam"), store.list_demos(), stats_of=core.matchstats.cached_stats
         )
 
-    # 1) no known account: opening a match asks who you are - once
+    # 1) no known account: opening a match asks who you are - once, with
+    # the "remember" choice (ON = Settings / every match, OFF = this demo)
     store.write_accounts({**store.read_accounts(), "steam_id64": ""})
     at = open_demo(make_match([1, 2]), "ms_ask.dem")
     did = at.session_state["match"]
     check(
         "ms: the ask card renders without a known 'me'",
         widget(at, "selectbox", "mt_who_pick") is not None
+        and widget(at, "checkbox", "mt_who_remember") is not None
         and widget(at, "button", "mt_who_set") is not None,
     )
     check(
         "ms: nothing cached before the answer",
         core.matchstats.read_cached(store.demo_path(store.get_demo(did))) is None,
     )
+    # remember OFF: the pick lands in the library entry only
+    act(
+        at,
+        "ms: untick 'remember in Settings'",
+        lambda: at.checkbox(key="mt_who_remember").uncheck().run(),
+    )
     act(at, "ms: pick yourself (Charlie)", lambda: at.selectbox(key="mt_who_pick").select(S3).run())
     act(at, "ms: press 'That's me'", lambda: at.button(key="mt_who_set").click().run())
     entry = store.get_demo(did)
     check("ms: the pick is remembered in the library", entry.get("me_sid") == S3, entry.get("me_sid"))
+    check(
+        "ms: without the checkbox the accounts stay untouched",
+        store.read_accounts().get("steam_id64") == "",
+        store.read_accounts().get("steam_id64"),
+    )
     stats = core.matchstats.read_cached(store.demo_path(entry))
     check("ms: the summary was computed right away", stats is not None and stats["me_sid"] == S3, stats)
     check(
@@ -2254,6 +2267,31 @@ def scenario_matchstats():
         stats is not None and stats["kills"] == 0 and stats["deaths"] == 2,
         (stats or {}).get("kills"),
     )
+
+    # 1b) the identity menu ("this is not me"): pick another player; with
+    # remember ON the pick goes to the accounts and the summary recomputes
+    check(
+        "ms: the identity menu offers the picker",
+        widget(at, "selectbox", "mt_me_pick") is not None
+        and widget(at, "checkbox", "mt_me_remember") is not None
+        and widget(at, "button", "mt_me_set") is not None,
+    )
+    act(at, "ms: the menu picks Alpha", lambda: at.selectbox(key="mt_me_pick").select(S1).run())
+    act(at, "ms: the menu presses 'That's me'", lambda: at.button(key="mt_me_set").click().run())
+    entry = store.get_demo(did)
+    check(
+        "ms: the new pick went to the accounts (remember ON)",
+        store.read_accounts().get("steam_id64") == S1,
+        store.read_accounts().get("steam_id64"),
+    )
+    check("ms: the stale per-match pick was cleared", not entry.get("me_sid"), entry.get("me_sid"))
+    stats = core.matchstats.read_cached(store.demo_path(entry))
+    check(
+        "ms: the summary recomputed for the new player",
+        stats is not None and stats["me_sid"] == S1 and stats["kills"] == 2,
+        ((stats or {}).get("me_sid"), (stats or {}).get("kills")),
+    )
+    check("ms: the player row followed the new identity", ss_get(at, "me") == S1, ss_get(at, "me"))
 
     # 2) the SteamID64 route: a match of the account's player never asks
     store.write_accounts({**store.read_accounts(), "version": 1, "steam_id64": S1})
@@ -2393,7 +2431,11 @@ def scenario_matches():
                 fh.write(f"fake steam demo {rec.match_id}".encode())
             if progress:
                 progress(24, 24)
-            return sources.import_local(rec, src)
+            entry = sources.import_local(rec, src)
+            # a real download is followed by the on-the-spot analysis: give
+            # the fake parser a parsable match for every fetched demo
+            FakeParser.demos[os.path.realpath(store.demo_path(entry))] = make_match([1, 2])
+            return entry
 
         _orig_replays = sources.inbox.replays_records
         sources.list_matches = _fake_list
@@ -2437,6 +2479,61 @@ def scenario_matches():
                 and sum(1 for r in rows if r.match_id == "m1") == 1,
                 (m1row.demo_id, m1row.demo_state),
             )
+
+            # multi-download: the checkboxes (the component reports the row
+            # KEYS into mt_checked), the button, the loop with per-demo
+            # analysis, and the last download opening as the match
+            goto(at, "matches")  # the single download opened m1 as a match
+            store.write_accounts({"version": 1, "match_count": 5, "steam_id64": S1})
+            rows = _rows()
+            sel_keys = {r.key for r in rows if r.match_id in ("m2", "m3")}
+            check(
+                "matches: the download bar stays disabled without a selection",
+                widget(at, "button", "mt_dl_selected") is not None
+                and at.button(key="mt_dl_selected").disabled,
+            )
+            act(
+                at,
+                "check two rows",
+                lambda: at.session_state.__setitem__("mt_checked", set(sel_keys)) or at.run(),
+            )
+            check(
+                "matches: the download bar wakes up with a selection",
+                not at.button(key="mt_dl_selected").disabled,
+            )
+            act(
+                at,
+                "press Download selected",
+                lambda: at.session_state.__setitem__("mt_dl_multi", True) or at.run(),
+            )
+            e2 = store.find_by_match("steam", "m2")
+            e3 = store.find_by_match("steam", "m3")
+            check(
+                "matches: both selected demos were downloaded",
+                e2 is not None and e3 is not None,
+                ((e2 or {}).get("file"), (e3 or {}).get("file")),
+            )
+            analyzed = []
+            for _e in (e2, e3):
+                _s = core.matchstats.read_cached(store.demo_path(_e)) if _e else None
+                analyzed.append(_s is not None and _s["me_sid"] == S1 and _s["kills"] == 2)
+            check(
+                "matches: multi downloads were analyzed on the spot",
+                analyzed == [True, True],
+                analyzed,
+            )
+            check(
+                "matches: the last download opened as the match",
+                ss_get(at, "match") is not None
+                and ss_get(at, "match") == (e3 or {}).get("id"),
+                ss_get(at, "match"),
+            )
+            check(
+                "matches: the selection was consumed",
+                not ss_get(at, "mt_checked"),
+                ss_get(at, "mt_checked"),
+            )
+            goto(at, "matches")
 
             # a row click opens the match
             FakeParser.demos[os.path.realpath(store.demo_path(entry))] = make_match([1, 2])

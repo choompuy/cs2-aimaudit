@@ -180,6 +180,15 @@ def write_matchstats(path: str, code_ver: str, d: dict) -> bool:
     return True
 
 
+def drop_matchstats(path: str, code_ver: str) -> bool:
+    """Delete the cached match summary of one demo (the "me" changed: the
+    next open recomputes it for the new player); True when a file went."""
+    f = _matchstats_file(path, code_ver)
+    if not f:
+        return False
+    return _unlink_freed(f) > 0
+
+
 def dir_size(path: str) -> int:
     total = 0
     for root, _dirs, names in os.walk(path):

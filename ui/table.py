@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Collection, Mapping, Sequence
 
 
 from ui import component
@@ -187,17 +187,27 @@ def table_payload(
     max_height: int = 620,
     empty: str = "",
     icons: Mapping[str, Sequence] | None = None,
+    checkable: Sequence[bool] | None = None,
+    row_keys: Sequence[str] | None = None,
+    checked: Collection[str] | None = None,
 ) -> dict:
     """JSON-ready model of the table (pure function: unit-testable).
 
     ``icons`` is {icon key: [data-uri, w, h]} for every icon the icon-kind
     cells of THIS table reference (ui/icons.py builds it); it travels with
     the payload so the renderer can deduplicate and the SVG never lands
-    in the DOM as anything but an <img>/mask source."""
+    in the DOM as anything but an <img>/mask source.
+
+    ``checkable`` (one bool per row) adds the checkbox column: the rows
+    marked True get a checkbox, the header one toggles all of them at
+    once. Every checkable row needs a stable ``row_keys`` entry; the
+    current selection is ``checked`` (a set of those keys), and each
+    change reports the whole selection back through the "checked" event."""
     n = len(next(iter(rows.values()))) if rows else 0
     col_max = _rel_maxima(rows, cols)
     col_rng = _auto_ranges(rows, cols)
     out_cols = [_col_payload(c) for c in cols]
+    has_checks = bool(checkable) and any(checkable)
     out_rows = []
     for i in range(n):
         cells = []
@@ -210,7 +220,11 @@ def table_payload(
             else:
                 cells.append(_text_cell(c, rows, i, src))
         s = stripe[i] if stripe is not None else None
-        out_rows.append({"i": i, "s": s if s in _TONES else None, "c": cells})
+        key = row_keys[i] if row_keys is not None and i < len(row_keys) else str(i)
+        ck = bool(checkable[i]) if checkable is not None and i < len(checkable) else False
+        out_rows.append(
+            {"i": i, "s": s if s in _TONES else None, "c": cells, "k": key, "ck": ck}
+        )
     return {
         "cols": out_cols,
         "rows": out_rows,
@@ -219,6 +233,8 @@ def table_payload(
         "maxh": int(max_height),
         "empty": empty,
         "icons": {str(k): list(v) for k, v in (icons or {}).items()},
+        "chk": has_checks,
+        "checked": sorted(k for k in (checked or set()) if k),
     }
 
 
@@ -233,6 +249,10 @@ def data_table(
     max_height: int = 620,
     empty: str = "",
     icons: Mapping[str, Sequence] | None = None,
+    checkable: Sequence[bool] | None = None,
+    row_keys: Sequence[str] | None = None,
+    checked: Collection[str] | None = None,
+    on_check: Callable[[set], None] | None = None,
 ) -> None:
     payload = table_payload(
         rows,
@@ -243,10 +263,16 @@ def data_table(
         max_height=max_height,
         empty=empty,
         icons=icons,
+        checkable=checkable,
+        row_keys=row_keys,
+        checked=checked,
     )
+    events = {}
+    if on_check is not None:
+        events["checked"] = component.event_callback_set(key, "checked", on_check)
     component.render(
         "aimaudit_table", _CSS, _JS, key=key, data=payload,
-        trigger="clicked", handler=on_click,
+        trigger="clicked", handler=on_click, events=events,
     )
 
 
@@ -323,6 +349,16 @@ _CSS = """
 }
 .aa-t tbody tr:hover td { background: var(--surface-2); }
 .aa-t tbody tr.clk { cursor: pointer; }
+/* the checkbox column: narrow, centred, its own accent; a click must not
+   trigger the row underneath (the row still opens on the rest of it) */
+.aa-t th.chk, .aa-t td.chk { width: 2.25rem; text-align: center; }
+.aa-t th.chk { padding: 0.35rem 0.25rem; }
+.aa-t .cell.chk { justify-content: center; padding: 0.35rem 0.5rem; }
+.aa-t input[type="checkbox"] {
+  width: 1rem; height: 1rem; margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .aa-t tbody tr.sel td { background: var(--surface-selected); }
 .aa-t tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .aa-t tbody tr.stripe td:first-child { box-shadow: inset 3px 0 0 var(--stripe); }
@@ -359,8 +395,19 @@ export default function (component) {
     host.className = "aa-host";
     root.appendChild(host);
   }
-  const sig = data.cols.map((c) => c.k).join("|");
+  const sig = data.cols.map((c) => c.k).join("|") + "#" + (data.chk ? "1" : "0");
   if (sig !== S.sig) { S.sig = sig; S.col = -1; S.dir = 0; S.top = 0; S.left = 0; }
+  // the checkbox selection: S.checked is the live set, re-synced from the
+  // payload whenever the app-side state changed behind our back (a rerun
+  // the JS toggle itself triggered lands here with the same set - no reset)
+  const checkedSig = (data.checked || []).join("\\n");
+  if (S.checkedSig !== checkedSig) {
+    S.checkedSig = checkedSig;
+    S.checked = new Set(data.checked || []);
+  } else if (!S.checked) {
+    S.checked = new Set(data.checked || []);
+  }
+  const reportChecked = () => setTriggerValue("checked", Array.from(S.checked).join("\\n"));
 
   const el = (tag, cls, text) => {
     const n = document.createElement(tag);
@@ -417,6 +464,26 @@ export default function (component) {
     }
     const table = el("table", "aa-t");
     const trh = el("tr");
+    if (data.chk) {
+      // the header checkbox toggles every checkable row at once; the
+      // dash marks the in-between state
+      const th = el("th", "chk");
+      const all = el("input");
+      all.type = "checkbox";
+      const keys = data.rows.filter((r) => r.ck).map((r) => r.k);
+      const on = keys.filter((k) => S.checked.has(k)).length;
+      all.checked = keys.length > 0 && on === keys.length;
+      all.indeterminate = on > 0 && on < keys.length;
+      all.addEventListener("click", (e) => e.stopPropagation());
+      all.addEventListener("change", () => {
+        if (all.checked) keys.forEach((k) => S.checked.add(k));
+        else keys.forEach((k) => S.checked.delete(k));
+        reportChecked();
+        draw();
+      });
+      th.appendChild(all);
+      trh.appendChild(th);
+    }
     data.cols.forEach((c, ci) => {
       const th = el("th", [c.b ? "bar" : "", c.s ? "stick" : ""].join(" ").trim());
       th.appendChild(el("span", "lbl", c.l));
@@ -445,6 +512,24 @@ export default function (component) {
         const go = () => setTriggerValue("clicked", r.i);
         tr.addEventListener("click", go);
         tr.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+      }
+      if (data.chk) {
+        const td = el("td", "chk");
+        if (r.ck) {
+          const box = el("div", "cell chk");
+          const cb = el("input");
+          cb.type = "checkbox";
+          cb.checked = S.checked.has(r.k);
+          cb.addEventListener("click", (e) => e.stopPropagation());
+          cb.addEventListener("change", () => {
+            if (cb.checked) S.checked.add(r.k); else S.checked.delete(r.k);
+            reportChecked();
+            draw();
+          });
+          box.appendChild(cb);
+          td.appendChild(box);
+        }
+        tr.appendChild(td);
       }
       r.c.forEach((cell, ci) => {
         const c = data.cols[ci];

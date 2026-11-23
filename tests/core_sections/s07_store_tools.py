@@ -723,17 +723,22 @@ from core import matchstats as _ms
 
 _ms_demo = core.load_demo("match.dem")
 
-# who "me" is: the accounts' SteamID64 when she played, else the entry's
-# remembered me_sid, else nothing (the match view asks once)
+# who "me" is: the entry's remembered me_sid first (the explicit per-match
+# pick, also the "this is not me" correction), else the accounts' SteamID64,
+# else nothing (the match view asks once)
 check(
-    "matchstats: resolve_me prefers the accounts' SteamID64",
+    "matchstats: resolve_me falls back to the accounts' SteamID64",
     _ms.resolve_me(_ms_demo, {}, {"steam_id64": S1}) == S1
     and _ms.resolve_me(_ms_demo, {}, {"steam_id64": "76569999999999999"}) is None,
 )
 check(
-    "matchstats: resolve_me falls back to the entry's me_sid",
+    "matchstats: resolve_me reads the entry's me_sid",
     _ms.resolve_me(_ms_demo, {"me_sid": S3}, {"steam_id64": "76569999999999999"}) == S3
     and _ms.resolve_me(_ms_demo, {"me_sid": "76569999999999999"}, {}) is None,
+)
+check(
+    "matchstats: the per-match pick beats the accounts' SteamID64",
+    _ms.resolve_me(_ms_demo, {"me_sid": S3}, {"steam_id64": S1}) == S3,
 )
 
 # the summary of the synthetic match: Alpha (S1) killed Charlie (S3) once

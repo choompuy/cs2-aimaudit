@@ -360,17 +360,19 @@ def _chips(t, entry: dict, m: dict, result) -> None:
 def match_stats(ctx) -> None:
     """The per-match summary at open (the demo is parsed already, so the
     compute is cheap): fill it for the resolved 'me', or ask who 'me' is -
-    once per demo, the answer is remembered in the library entry."""
+    once per demo, the answer is remembered (globally or for this match,
+    see _ask_who)."""
     t = ctx.t
     demo = ctx.demo
     entry = ctx.entry
-    if core.matchstats.read_cached(store.demo_path(entry)) is not None:
-        return  # already summarized (the table's cells are full)
     accounts = store.read_accounts()
     me_sid = core.matchstats.resolve_me(demo, entry, accounts)
     if me_sid is None:
         _ask_who(t, demo, entry)
         return
+    cached = core.matchstats.read_cached(store.demo_path(entry))
+    if cached is not None and cached.get("me_sid") == me_sid:
+        return  # already summarized for exactly this player
     with st.spinner(t("mt_summarizing")):
         stats = core.matchstats.compute(
             demo, me_sid, played_at=core.matchstats.played_at_of(entry)
@@ -378,9 +380,22 @@ def match_stats(ctx) -> None:
         core.matchstats.write_cached(store.demo_path(entry), stats)
 
 
+def _remember_me(me_sid: str) -> None:
+    """Save the picked identity globally: the accounts' SteamID64 - every
+    match resolves on its own from now on, and the Settings field follows."""
+    accounts = store.read_accounts()
+    accounts["steam_id64"] = me_sid
+    accounts.setdefault("version", 1)
+    store.write_accounts(accounts)
+    # the Settings field follows, so the saved id is visible (and editable)
+    # there; the widget reads its state on the next render
+    st.session_state["mt_steamid"] = me_sid
+
+
 def _ask_who(t, demo, entry: dict) -> None:
     """'Which player are you?' - asked once per demo; the pick is remembered
-    as the entry's me_sid and the summary follows on the next run."""
+    globally (the Settings SteamID64) or for this demo only, and the summary
+    follows on the next run."""
     names = demo.names
     sids = list(names)
     with st.container(border=True):
@@ -395,18 +410,45 @@ def _ask_who(t, demo, entry: dict) -> None:
                 key="mt_who_pick",
                 label_visibility="collapsed",
             )
+            remember = st.checkbox(
+                t("mt_who_remember"),
+                value=True,
+                key="mt_who_remember",
+                help=t("mt_who_remember_hint"),
+            )
             st.button(
                 t("mt_who_set"),
                 key="mt_who_set",
                 type="primary",
                 icon=":material/person_check:",
                 on_click=_set_me,
-                args=(entry["id"], pick),
+                args=(entry["id"], pick, remember),
             )
 
 
-def _set_me(demo_id: str, me_sid: str) -> None:
-    store.update_meta(demo_id, me_sid=me_sid)
+def _set_me(demo_id: str, me_sid: str, remember: bool) -> None:
+    """The ask card's answer: save the identity and follow it with the
+    player selectbox, so the analysis below opens on the same player."""
+    if remember:
+        _remember_me(me_sid)
+    else:
+        store.update_meta(demo_id, me_sid=me_sid)
+    state.set_me(me_sid)
+
+
+def _change_me(demo_id: str, me_sid: str, remember: bool) -> None:
+    """The identity menu's answer ("this is not me"): like _set_me, but the
+    demo already carries a summary for the other player - drop it so the
+    next run recomputes every number for the new one."""
+    entry = store.get_demo(demo_id) or {}
+    if remember:
+        _remember_me(me_sid)
+        # a stale per-match pick must not keep winning over the new global
+        store.update_meta(demo_id, me_sid=None)
+    else:
+        store.update_meta(demo_id, me_sid=me_sid)
+    core.matchstats.drop_cached(store.demo_path(entry))
+    state.set_me(me_sid)
 
 
 # ----------------------------------------------------- library actions
@@ -791,12 +833,66 @@ def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
             width="content",
             type="tertiary",
         )
+        _who_menu(t, demo, me_opts, name_of)
     if saved.get("last_player") != me:
         saved["last_player"] = me
         core.save_state(saved)
 
     ctx.me = me
     ctx.name_of = name_of
+
+
+def _who_menu(t, demo, me_opts: list, name_of: dict) -> None:
+    """The "⋮" identity menu of the player row: "this is not me" - pick
+    another player and the whole match (the summary of the Matches table
+    included) is recomputed for the new one. The pick lands in Settings
+    (every match) or only in this match, exactly like the ask card."""
+    entry = store.get_demo(state.get_match()) or {}
+    accounts = store.read_accounts()
+    cur = core.matchstats.resolve_me(demo, entry, accounts)
+    cur_name = name_of.get(cur, cur) if cur else None
+    with st.popover(
+        "",
+        icon=":material/more_vert:",
+        key="mt_who_pop",
+        help=t("mt_me_title"),
+        width="content",
+    ):
+        st.caption(t("mt_me_title"))
+        if cur_name:
+            scope = (
+                t("mt_me_from_settings")
+                if str(accounts.get("steam_id64") or "").strip() == cur
+                and not entry.get("me_sid")
+                else t("mt_me_from_match")
+            )
+            st.caption(t("mt_me_current", name=cur_name, scope=scope))
+        else:
+            st.caption(t("mt_me_unset"))
+        st.caption(t("mt_me_hint"))
+        idx = me_opts.index(cur) if cur in me_opts else 0
+        pick = st.selectbox(
+            t("player"),
+            me_opts,
+            index=idx,
+            format_func=lambda s: name_of.get(s, s),
+            key="mt_me_pick",
+            label_visibility="collapsed",
+        )
+        remember = st.checkbox(
+            t("mt_who_remember"),
+            value=True,
+            key="mt_me_remember",
+            help=t("mt_who_remember_hint"),
+        )
+        st.button(
+            t("mt_who_set"),
+            key="mt_me_set",
+            type="primary",
+            icon=":material/person_check:",
+            on_click=_change_me,
+            args=(entry.get("id") or "", pick, remember),
+        )
 
 
 def context_bar(ctx) -> None:
