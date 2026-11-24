@@ -171,7 +171,7 @@ def _shot_frames(demo: Demo, s: pd.DataFrame) -> pd.DataFrame:
     """Fire rows joined with the shooter's tick frame (speed, position,
     state), the tick-before speed, counter-strafe flags, dist and hit."""
     tcols = ["tick", "steamid", "speed", "X", "Y", "Z"] + [
-        c for c in ("flash_duration", "velo_modifier") if c in demo.ticks.columns
+        c for c in ("flash_left", "velo_modifier") if c in demo.ticks.columns
     ]
     t = demo.ticks[tcols].rename(columns={"steamid": "sid"})
     out = s.merge(t, on=["tick", "sid"], how="left").reset_index(drop=True)
@@ -198,8 +198,8 @@ def _state_flags(out: pd.DataFrame) -> None:
     """flashed / slowed: True/False when the prop is known, NA when the
     demo/parser does not provide it (an old demo must not look like
     "0% flashed")."""
-    if "flash_duration" in out.columns:
-        fd = pd.to_numeric(out["flash_duration"], errors="coerce")
+    if "flash_left" in out.columns:
+        fd = pd.to_numeric(out["flash_left"], errors="coerce")
     else:
         fd = pd.Series(np.nan, index=out.index, dtype=float)
     fl = pd.Series(pd.NA, index=out.index, dtype="boolean")
@@ -253,7 +253,7 @@ def shots_table(demo: Demo) -> pd.DataFrame:
     out = _shot_frames(demo, _fire_rows(demo))
     _state_flags(out)
     _flick_moves(demo, out)
-    out = out.drop(columns=["flash_duration", "velo_modifier"], errors="ignore")
+    out = out.drop(columns=["flash_left", "velo_modifier"], errors="ignore")
     out["side"] = [
         demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"], strict=True)
     ]

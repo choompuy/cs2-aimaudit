@@ -390,6 +390,14 @@ Sources: two real demos parsed with `tools/inspect_rounds.py`
   defuse, a side wiped out -> elimination, no plant and nobody wiped out ->
   CT on time). On that demo the inference matched `round_end` in 9 of 9
   rounds; the UI marks an inferred result as such.
+- **demoparser2 0.42.2 builds `round_end` itself:** it is still not in
+  `list_game_events()`, but `parse_event("round_end")` returns a row per round
+  with `tick`, `round`, `winner` as `"T"` / `"CT"` and `reason` as a WORD
+  (`bomb_exploded`, `bomb_defused`, `t_killed`, `ct_killed`, `time_ran_out`,
+  `t_surrender`, `ct_surrender`, ...), no `message`. All 7 Valve demos checked
+  have it. `core.classify_round_end` reads all three spellings. A plant AFTER
+  `round_end` is real: T wiped the CTs out and planted before
+  `round_officially_ended`.
 - Round boundary events that DO exist: `round_freeze_end`,
   `round_prestart` / `round_poststart`, `round_officially_ended`,
   `cs_pre_restart`, `begin_new_match`, `round_announce_last_round_half`,
@@ -525,6 +533,14 @@ was verified on every demo, not read from the docs.
 - `attackerblind` at kills is nearly never True (0/132, 1/147) — by the time
   a kill lands the flash is usually below the game's blind threshold, so
   **flash_duration at the fire tick is the usable signal**, not the kill flag.
+  CORRECTED (2026-11-25): it is NOT the seconds left. The server writes the
+  whole length of the blindness at the flash, holds it, and zeroes it only after
+  ~1.4 x that length (3.25 s: held 292 ticks = 4.56 s). It equals
+  `player_blind.blind_duration` exactly, so the seconds left are
+  `blind_duration - (tick - event tick) / tickrate` (`phases._flash_left`,
+  column `flash_left`). Reading it as "left" called 1229 of 16674 shots of 7
+  demos flashed instead of 685. An overlapping flash replaces the value with
+  its own length from its own tick.
 - `thrusmoke` kills do exist (16/132, 10/147); `noscope` / `penetrated` /
   `distance` are native player_death fields (all three demos).
 
@@ -548,7 +564,7 @@ traceable.
   "velo_modifier"], ticks=fire ticks)` merged into the ticks table (failure →
   columns absent, never a crash — the buttons lesson).
 - `shots_table`: `zone` ("" unknown), `round_sec` (NaN outside [0, 300]),
-  `flashed` (> `FLASH_SHOT_S`=0.5 s left), `slowed` (`velo_modifier` <
+  `flashed` (> `FLASH_SHOT_S`=0.5 s of `flash_left`), `slowed` (`velo_modifier` <
   `SLOWED_MAX`=0.99). Flags are nullable booleans: unknown ≠ False.
 - `build_duels` / `duels_for`: `round_sec` + `killer_zone`/`victim_zone` →
   `my_zone`/`opp_zone` (kill-time values from the death event).

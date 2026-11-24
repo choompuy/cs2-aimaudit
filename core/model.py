@@ -177,7 +177,7 @@ MAX_DUEL_DIST = 10000.0
 
 # ------------------------------------------------- shot context
 # Per-shot context from server fields:
-# flash_duration above FLASH_SHOT_S -> the shot counts as fired while
+# more than FLASH_SHOT_S of blindness left -> the shot counts as fired while
 # flashed; velo_modifier below SLOWED_MAX -> still slowed by recent damage;
 # round_second outside [0, ROUND_SEC_MAX] -> bad clock data -> NaN.
 FLASH_SHOT_S = 0.5
@@ -564,8 +564,10 @@ class Demo:
 
 # How a round ended (the key of Demo.round_info[n]["reason"]).
 ROUND_REASONS = ("bomb", "defuse", "elim", "time", "surrender", "hostage", "draw", "other")
-# round_end's `message` is the stable signal; the numeric `reason` codes are
-# the fallback (CS2: 1 bombed, 7 defused, 8 CT win, 9 T win, 12 target saved).
+# Three spellings of the same thing: the `message` of a real round_end event,
+# the word demoparser2 puts into `reason` when it builds round_end itself (no
+# message then), and the numeric code (CS2: 1 bombed, 7 defused, 8 CT win,
+# 9 T win, 12 target saved).
 _REASON_BY_MESSAGE = (
     ("Target_Bombed", "bomb"),
     ("Bomb_Defused", "defuse"),
@@ -588,14 +590,31 @@ _REASON_BY_CODE = {
     17: "surrender",
     18: "surrender",
 }
+# demoparser2 0.42.2; the escape / VIP words (modes CS2 does not have) and
+# t_saved stay "other"
+_REASON_BY_WORD = {
+    "bomb_exploded": "bomb",
+    "bomb_defused": "defuse",
+    "t_killed": "elim",
+    "ct_killed": "elim",
+    "time_ran_out": "time",
+    "t_surrender": "surrender",
+    "ct_surrender": "surrender",
+    "hostage_rescued": "hostage",
+    "ct_reached_hostage": "hostage",
+    "RoundEndReasonHostagesNotRescued": "hostage",
+    "draw": "draw",
+}
 
 
 def classify_round_end(message, code=None) -> str:
-    """round_end -> one of ROUND_REASONS (message first, numeric code second)."""
+    """round_end -> one of ROUND_REASONS (message, then the word, then the number)."""
     msg = str(message or "")
     for needle, key in _REASON_BY_MESSAGE:
         if needle in msg:
             return key
+    if isinstance(code, str) and code in _REASON_BY_WORD:
+        return _REASON_BY_WORD[code]
     try:
         return _REASON_BY_CODE.get(int(code), "other")
     except (TypeError, ValueError):
@@ -618,14 +637,16 @@ def build_round_windows(
     events,
     tickrate: int = TICKRATE,
     max_s: float = 180.0,
+    marks=(),
 ) -> dict[int, tuple[int, int]]:
     """
     {round: (t0, t1)} tick windows of the played rounds, for the 2D replay.
 
     ``freeze_ends`` are the sorted live round_freeze_end ticks (round i
     starts at freeze_ends[i]); ``officially_ended`` the round_officially_ended
-    ticks - the win panel belongs to the round, so the one falling inside
-    a window is its end when present. ``events`` is a frame with ``tick``
+    ticks - the win panel belongs to the round, so the tick BEFORE the one
+    falling inside a window is its end when present (on the tick itself
+    everybody is already respawned for the next round). ``events`` is a frame with ``tick``
     and ``round`` (1-based, from total_rounds_played + 1).
 
     A window without events is not a played round and is skipped. The round
@@ -634,12 +655,16 @@ def build_round_windows(
     ended (already counted in the next round) stays inside the window its
     tick belongs to. Two windows claiming one number -> the later one gets
     the next free number. End = officially_ended | last event + 5 s,
-    capped by the next freeze end - 1 and start + max_s.
+    capped by the next freeze end - 1 and start + max_s. ``marks`` (ticks of
+    round_end / the bomb defused or exploded) count as events for that end
+    only: the LAST round of a match has no officially_ended, and a defuse
+    can come later than 5 s after the last shot.
     """
     fe = sorted(int(x) for x in (freeze_ends or []))
     if not fe or events is None or not len(events):
         return {}
     off = sorted(int(x) for x in (officially_ended or []))
+    marks = [int(x) for x in marks]
     cap = int(max_s * tickrate)
     five_s = 5 * tickrate
     ev = events
@@ -668,9 +693,10 @@ def build_round_windows(
         # so the tick is looked up inside the window itself
         cands = [o for o in off if start < o <= hard]
         if cands:
-            end = min(cands)
+            end = max(min(cands) - 1, start + 1)
         else:
-            end = min(hard, int(inside["_t"].max()) + five_s)
+            last = max([int(inside["_t"].max()), *(m for m in marks if start <= m <= hard)])
+            end = min(hard, last + five_s)
         n = n0
         while n in used:
             n += 1

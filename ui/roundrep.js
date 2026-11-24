@@ -15,6 +15,7 @@ export default function (component) {
   S.hidden = S.hidden || {};
   if (S.panel == null) S.panel = true;
   if (S.dpanel == null) S.dpanel = true;
+  if (S.labels == null) S.labels = true;
   if (!S.speed) S.speed = 1;
   S.view = S.view || [];
 
@@ -31,7 +32,9 @@ export default function (component) {
     return n;
   };
   const fmtT = (sec) => {
-    sec = Math.max(0, Math.round(sec));
+    // before the freeze ends the clock is negative; a whole second shows once it is full
+    if (sec < 0) return "-" + fmtT(Math.ceil(-sec));
+    sec = Math.floor(sec + 1e-6);
     return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
   };
   const lab = d.lab || {};
@@ -39,17 +42,17 @@ export default function (component) {
   const P = d.players || [];
   // glyphs of how a round ended / what the bomb did - the FALLBACK when the
   // icon of a badge is missing; every use also carries a title / text label
-  const WHY_GLYPH = { bomb: "\u{1F4A5}", defuse: "\u2702", elim: "\u2620", time: "\u23F1", surrender: "\u2691" };
+  const WHY_GLYPH = { bomb: "\u{1F4A5}", defuse: "\u2702", elim: "\u2620", time: "\u23F1", surrender: "\u2691", hostage: "\u2691", draw: "\u2691" };
   const BOMB_GLYPH = { plant: "\u{1F4A3}", defuse: "\u2702", boom: "\u{1F4A5}" };
   // the icons of the same things (ui/icons.py): silhouettes in the CS2
   // kill-feed style, delivered in d.icons for exactly this round
   const WHY_ICON = { bomb: "bomb_explode", defuse: "defuse", elim: "skull", time: "hourglass" };
   const BOMB_ICON = { plant: "bomb", defuse: "defuse", boom: "bomb_explode" };
-  // how the round ended, as a reason key: the demo's own when it maps to an
-  // icon, else read it off the bomb story (explosion / defuse) or the wipe -
+  // how the round ended, as a reason key: the demo's own when it has a
+  // mark, else read it off the bomb story (explosion / defuse) or the wipe -
   // never a bare flag where the fight or the bomb already says what happened
   const endWhy = (why) => {
-    if (WHY_ICON[why]) return why;
+    if (WHY_GLYPH[why]) return why;
     const bs = d.bomb || [];
     for (let i = bs.length - 1; i >= 0; i--) {
       if (bs[i][1] === "boom") return "bomb";
@@ -60,8 +63,30 @@ export default function (component) {
   const IC = d.icons || {};
   const WLAB = d.wlab || {};
   const wl = (w) => (w ? (WLAB[w] || w) : "");
+  // the tick the round clock counts from: the end of the freeze
+  const T0 = typeof d.start === "number" ? d.start : d.t0;
+  // One size for things of different proportions. `box` is the height a square
+  // icon gets, `cap` the most a line can hold: the longer an icon, the lower
+  // it is (a rifle and a pistol weigh about the same), and a knife, a solid
+  // shape drawn across its whole image, is smaller still.
+  const iconH = (key, box, cap) => {
+    const m = IC[key];
+    const ar = m && m[1] && m[2] ? m[1] / m[2] : 1;
+    const knife = /^(knife|bayonet)/.test(key) ? 0.68 : 1;
+    return Math.round(Math.min(cap || box, box * Math.min(1, Math.pow(ar, -0.25))) * knife);
+  };
   const THR = typeof d.thr === "number" ? d.thr : null;
   const GRENADES = ["hegrenade", "flashbang", "smokegrenade", "molotov", "incgrenade", "decoy"];
+  // the bomb carrier's bomb on the map: white, the yellow one is lost on the radar
+  const BOMB_WHITE = "#ffffff";
+  // the ink of the map: the text colour, a little towards the background (pure
+  // white on the dark art is harsh)
+  const hexOf = (h) => { const v = parseInt(String(h || "").replace("#", ""), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+  const mixHex = (a, b, k) => {
+    const p = hexOf(a), q = hexOf(b);
+    return "#" + p.map((v, i) => Math.round(v * k + q[i] * (1 - k)).toString(16).padStart(2, "0")).join("");
+  };
+  const INK = C.text && C.bg ? mixHex(C.text, C.bg, 0.92) : C.text;
 
   // an icon in the DOM: the SVG is never inlined - only its data URI, as
   // the alpha MASK of a colour box (fill inside the file never matters:
@@ -82,22 +107,13 @@ export default function (component) {
     }
     return s;
   };
-  // the icon if there is one, else the plain text (the no-icon fallback)
-  const icoOrText = (key, text, title, h, color) =>
-    iconEl(key, title, h, color) || el("span", null, text);
-  const whyIco = (why, title) => {
-    if (why && WHY_ICON[why] && IC[WHY_ICON[why]]) return iconEl(WHY_ICON[why], title, 13);
-    if (why && WHY_GLYPH[why]) return el("i", "rr-wg", WHY_GLYPH[why]);
-    return null;
-  };
-
   let host = root.querySelector(".rr-host");
   if (!host) { host = el("div", "rr-host"); root.appendChild(host); }
   host.replaceChildren();
   const box = el("div", "rr");
   host.appendChild(box);
-  // team colours + round-chip backgrounds as custom properties for the DOM
-  for (const [ck, v] of [["ct", C.ct], ["t", C.t], ["ctb", C.ctb], ["tb", C.ttb], ["acc", C.acc], ["warn", C.warn]]) {
+  // team colours as custom properties for the DOM
+  for (const [ck, v] of [["ct", C.ct], ["t", C.t]]) {
     if (v) box.style.setProperty("--rr-" + ck, v);
   }
   const FF = (root.isConnected && window.getComputedStyle
@@ -109,7 +125,6 @@ export default function (component) {
   const right = el("div", "rr-right");
   grid.append(main);
   box.appendChild(grid);
-  const outEl = el("div", "rr-out");
   const wrap = el("div", "rr-wrap");
   const cvs = document.createElement("canvas");
   // the player / duel panels float OVER the map: transparent chrome, the
@@ -124,12 +139,12 @@ export default function (component) {
   ptab.setAttribute("aria-label", ptab.title);
   dtab.setAttribute("aria-label", dtab.title);
   ptab.addEventListener("click", () => { S.panel = true; applyPanel(); layout(); draw(); });
-  dtab.addEventListener("click", () => { S.dpanel = true; applyPanel(); draw(); });
+  dtab.addEventListener("click", () => { S.dpanel = true; applyPanel(); layout(); draw(); });
   wrap.append(ptab, dtab);
   const ctl = el("div", "rr-ctl");
   const tl = el("div", "rr-tl");
   const roundsEl = el("div", "rr-rounds");
-  main.append(outEl, wrap, ctl, tl, roundsEl);
+  main.append(wrap, ctl, tl, roundsEl);
   const duelWrap = el("div", "rr-duelp hid");
   box.appendChild(duelWrap);
 
@@ -164,63 +179,50 @@ export default function (component) {
     if (a <= 0) return "armor_none";
     return a > 50 ? "armor_full" : "armor_half";
   }
+  // The flash_duration of a demo is the WHOLE length of the blindness, put there at the
+  // flash and held (it goes to 0 only after the fade): what is left is counted
+  // from the tick it changed. blinds[player] = [[start tick, seconds]]
+  const blinds = P.map((p) => {
+    const runs = [];
+    let cur = 0;
+    (p.fl || []).forEach((v, i) => {
+      v = v || 0;
+      if (v === cur) return;
+      cur = v;
+      if (v > 0.2) runs.push([d.t0 + i * d.step, v]);
+    });
+    return runs;
+  });
+  // { left: seconds, k: 1 -> 0 } or null
+  function blindAt(pi, tick) {
+    let r = null;
+    for (const b of blinds[pi]) { if (b[0] <= tick) r = b; else break; }
+    if (!r) return null;
+    const left = r[1] - (tick - r[0]) / d.tr;
+    return left > 0.05 ? { left: left, k: left / r[1] } : null;
+  }
   const countKeys = (keys) => { const c = {}; for (const k of keys) c[k] = (c[k] || 0) + 1; return c; };
 
-  // ---------- round result: who won and HOW -----------------------------------------------
-  function buildOutcome() {
-    outEl.replaceChildren();
-    const o = d.out || {};
-    outEl.className = "rr-out" + (o.win === "CT" ? " wct" : o.win === "T" ? " wt" : " unk");
-    const head = el("div", "rr-out1");
-    head.appendChild(el("span", "rr-badge", (lab.round || "R") + " " + d.round));
-    if (o.win) {
-      head.appendChild(el("b", "rr-owin", o.win === "CT" ? (lab.won_ct || "CT") : (lab.won_t || "T")));
-      const ewhy = endWhy(o.why);
-      const w = el("span", "rr-why");
-      const wg = whyIco(ewhy, lab["why_" + ewhy] || ewhy);
-      if (wg) w.appendChild(wg);
-      w.appendChild(document.createTextNode(" " + (lab["why_" + ewhy] || ewhy)));
-      head.appendChild(w);
-    } else {
-      head.appendChild(el("span", "rr-owin dim", lab.out_unknown || ""));
-    }
-    if (o.win && o.inferred) {
-      const inf = el("span", "rr-inf", lab.out_inferred || "");
-      inf.title = lab.out_inferred || "";
-      head.appendChild(inf);
-    }
-    if (o.end != null) {
-      const ot = el("span", "rr-outt");
-      const ti = iconEl("timer", lab.time || "time", 11);
-      if (ti) ot.appendChild(ti);
-      else ot.appendChild(document.createTextNode("\u23F1 "));
-      ot.appendChild(document.createTextNode(fmtT((o.end - d.t0) / d.tr)));
-      head.appendChild(ot);
-    }
-    outEl.appendChild(head);
-    // the bomb story of the round (plant / defuse / explosion with the time and the player)
-    const parts = [];
-    for (const b of d.bomb || []) {
-      const key = b[1];
-      if (!BOMB_GLYPH[key]) continue;
-      // the explosion's player is only the planter: not worth repeating
-      const who = key !== "boom" && b[2] >= 0 && P[b[2]] ? P[b[2]].name : "";
-      const text = (lab["b_" + key] || key) + " " + fmtT((b[0] - d.t0) / d.tr) + (who ? " \u00B7 " + who : "");
-      parts.push(icoOrText(BOMB_ICON[key], BOMB_GLYPH[key] + " " + text, text, 13));
-    }
-    if (parts.length) {
-      const o2 = el("div", "rr-out2");
-      parts.forEach((p, i) => {
-        if (i) o2.appendChild(document.createTextNode("   "));
-        o2.appendChild(p);
-      });
-      outEl.appendChild(o2);
-    }
-  }
-
   // ---------- controls --------------------------------------------------------------------
+  // Lucide icons (ISC License, see THIRD_PARTY_LICENSES.md): static markup,
+  // no data inside, so the innerHTML of a button is safe by construction
+  const svg = (body, fill) => '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="' + (fill || "none")
+    + '" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + body + "</svg>";
+  const ICO = {
+    play: svg('<path d="M6 3l14 9-14 9z"/>', "currentColor"),
+    pause: svg('<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>', "currentColor"),
+    start: svg('<path d="M19 20L9 12l10-8z" fill="currentColor"/><path d="M5 19V5"/>'),
+    prev: svg('<path d="m15 18-6-6 6-6"/>'),
+    next: svg('<path d="m9 18 6-6-6-6"/>'),
+    exit: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
+    reset: svg('<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'),
+    full: svg('<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>'),
+    unfull: svg('<path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/>'),
+  };
   const btn = (cls, ch, title, fn) => {
-    const b = el("button", "rr-sbtn " + (cls || ""), ch);
+    const b = el("button", "rr-sbtn " + (cls || ""));
+    if (ICO[ch]) { b.classList.add("ic"); b.innerHTML = ICO[ch]; }
+    else b.textContent = ch;
     b.type = "button";
     if (title) { b.title = title; b.setAttribute("aria-label", title); }
     b.addEventListener("click", fn);
@@ -258,15 +260,15 @@ export default function (component) {
     if (i >= 0 && nx) setTriggerValue("rnd", nx[0]);
   };
 
-  const playBtn = btn("", "\u25B6", lab.play || "play", () => {
+  const playBtn = btn("play", "play", lab.play || "play", () => {
     if (!playing && t >= winEnd() - 0.5) t = winStart();
     setPlaying(!playing);
   });
-  const rPrev = btn("", "\u00AB", lab.round_prev || "previous round", () => gotoRound(-1));
-  const rNext = btn("", "\u00BB", lab.round_next || "next round", () => gotoRound(1));
-  const dPrev = btn("", "\u2039", lab.duel_prev || "previous duel", () => jumpDuel(-1));
-  const dNext = btn("", "\u203A", lab.duel_next || "next duel", () => jumpDuel(1));
-  const exitBtn = btn("exit", "\u2715", lab.exit || "exit duel", () => exitDuel());
+  const rPrev = btn("", "prev", lab.round_prev || "previous round", () => gotoRound(-1));
+  const rNext = btn("", "next", lab.round_next || "next round", () => gotoRound(1));
+  const dPrev = btn("", "prev", lab.duel_prev || "previous duel", () => jumpDuel(-1));
+  const dNext = btn("", "next", lab.duel_next || "next duel", () => jumpDuel(1));
+  const exitBtn = btn("exit", "exit", lab.exit || "exit duel", () => exitDuel());
 
   // speed: ONE button showing the current speed; a menu with 0.1x..4x opens on
   // hover (mouse) or on click / tap / Enter (touch, keyboard), Escape closes it
@@ -346,19 +348,71 @@ export default function (component) {
     S.panel = !S.panel; applyPanel(); layout(); draw();
   });
   const dpBtn = btn("", lab.duels || "duels", lab.duels_hide || "hide", () => {
-    S.dpanel = !S.dpanel; applyPanel(); draw();
+    S.dpanel = !S.dpanel; applyPanel(); layout(); draw();
   });
-  const resetBtn = btn("", "\u21BB", lab.view_reset || "reset view", () => resetView());
+  // the names on the map (the weapons stay)
+  const lbBtn = btn("", lab.labels || "names", lab.labels_hide || "hide", () => {
+    S.labels = !S.labels; applyPanel(); draw();
+  });
+  const resetBtn = btn("", "reset", lab.view_reset || "reset view", () => resetView());
+  // Full screen: the HOST element goes full screen, not the player inside it - a
+  // round switch replaces the player, and the browser would leave the mode.
+  // Inside a shadow root document.fullscreenElement is the shadow host; the
+  // root's own property names the real element.
+  // When the browser refuses (or has no such mode) the host fills the WINDOW
+  // instead, as a popover: the top layer is above everything of the page.
+  const isScreen = () => {
+    const rn = host.getRootNode();
+    const e = (rn && rn.fullscreenElement) || document.fullscreenElement;
+    return !!e && e === host;
+  };
+  const isFill = () => host.hasAttribute("popover");
+  const isFull = () => isScreen() || isFill();
+  function fillWindow() {
+    if (!host.showPopover || isFill()) return;
+    host.setAttribute("popover", "auto");  // Escape closes it
+    host.showPopover();
+    onFull();
+  }
+  function toggleFull() {
+    if (isFill()) { host.hidePopover(); return; }
+    if (isScreen()) { document.exitFullscreen(); return; }
+    let pr = null;
+    try { pr = host.requestFullscreen ? host.requestFullscreen() : null; } catch (err) { /* refused */ }
+    if (pr && pr.catch) pr.catch(fillWindow);
+    else if (!pr) fillWindow();
+  }
+  const onPop = (e) => {
+    if (e.target !== host || e.newState !== "closed") return;
+    host.removeAttribute("popover");  // a closed popover is not displayed at all
+    onFull();
+  };
+  host.addEventListener("toggle", onPop);
+  disposers.push(() => host.removeEventListener("toggle", onPop));
+  const fullBtn = btn("full", "full", lab.full || "full screen", () => toggleFull());
+  if (!host.requestFullscreen && !host.showPopover) fullBtn.style.display = "none";
+  const onFull = () => {
+    const on = isFull();
+    fullBtn.innerHTML = on ? ICO.unfull : ICO.full;
+    fullBtn.title = on ? (lab.full_exit || "exit full screen") : (lab.full || "full screen");
+    fullBtn.setAttribute("aria-label", fullBtn.title);
+    layout(); draw();
+  };
+  document.addEventListener("fullscreenchange", onFull);
+  disposers.push(() => document.removeEventListener("fullscreenchange", onFull));
   const timeLab = el("span", "rr-time");
+  const timeNow = el("b"), timeEnd = el("span");
+  timeLab.append(timeNow, timeEnd);
   const lockChip = el("span", "rr-lock", lab.locked || "");
+  const group = (cls, ...kids) => { const g = el("div", "rr-grp " + cls); g.append(...kids); return g; };
+  const dLab = el("span", "rr-glab"), rLab = el("span", "rr-glab", (lab.round || "R") + " " + d.round);
   ctl.append(
-    playBtn,
-    btn("", "\u23EE", lab.restart || "restart", () => { setPlaying(false); t = winStart(); sync(); draw(); }),
-    spdWrap,
-    el("i", "rr-sep"), dPrev, dNext, exitBtn,
-    el("i", "rr-sep"), rPrev, rNext,
-    el("i", "rr-sep"), plBtn, dpBtn, resetBtn,
-    timeLab, lockChip,
+    group("tr", playBtn,
+      btn("", "start", lab.restart || "restart", () => { setPlaying(false); t = winStart(); sync(); draw(); }),
+      spdWrap, timeLab),
+    group("rn", rPrev, rLab, rNext),
+    group("dl", dPrev, dLab, dNext, exitBtn, lockChip),
+    group("vw", lbBtn, plBtn, dpBtn, resetBtn, fullBtn),
   );
 
   function jumpDuel(dir) {
@@ -385,23 +439,26 @@ export default function (component) {
   const span = Math.max(1, d.t1 - d.t0);
   const pct = (tick) => (tick - d.t0) / span;
   const sideOf = (i) => (i >= 0 && P[i] ? P[i].side : "?");
-  // a row above the track: bomb plant / defuse / explosion and the end of the round
-  const bm = el("div", "rr-bm");
+  // ONE row above the track: the round clock and, over it, the bomb plant /
+  // defuse / explosion and the end of the round
+  const bm = el("div", "rr-bm"), bmAt = [], clock = [];
   const addBm = (tick, glyph, title, iconKey) => {
     if (tick == null || tick < d.t0 || tick > d.t1) return;
     const m = el("span", "rr-bmk");
-    const ic = iconKey ? iconEl(iconKey, title, 12) : null;
+    const ic = iconKey ? iconEl(iconKey, title, 17) : null;
     if (ic) m.appendChild(ic);
     else if (glyph) m.textContent = glyph;
     else return;
     m.style.left = (pct(tick) * 100) + "%";
+    bmAt.push(pct(tick));
     m.title = title;
+    m.addEventListener("click", () => { if (playing) setPlaying(false); seek(tick); });
     bm.appendChild(m);
   };
   for (const b of d.bomb || []) {
     if (!BOMB_GLYPH[b[1]]) continue;
     const who = b[1] !== "boom" && b[2] >= 0 && P[b[2]] ? " \u00B7 " + P[b[2]].name : "";
-    addBm(b[0], BOMB_GLYPH[b[1]], (lab["b_" + b[1]] || b[1]) + " " + fmtT((b[0] - d.t0) / d.tr) + who, BOMB_ICON[b[1]]);
+    addBm(b[0], BOMB_GLYPH[b[1]], (lab["b_" + b[1]] || b[1]) + " " + fmtT((b[0] - T0) / d.tr) + who, BOMB_ICON[b[1]]);
   }
   if (d.out && d.out.end != null && d.out.win) {
     const ewhy = endWhy(d.out.why);
@@ -413,7 +470,27 @@ export default function (component) {
   track.tabIndex = 0;
   track.setAttribute("role", "slider");
   track.setAttribute("aria-label", lab.time || "time");
+  // a clock label every 10 / 15 / 30 s
+  {
+    const secs = (d.t1 - T0) / d.tr;
+    const every = secs <= 60 ? 10 : secs <= 120 ? 15 : 30;
+    for (let s = 0; s <= secs; s += every) {
+      const at = pct(T0 + s * d.tr);
+      // the labels at the ends stay inside the track
+      const a = el("span", "rr-tm" + (at < 0.02 ? " first" : at > 0.98 ? " last" : ""), fmtT(s));
+      a.style.left = (at * 100) + "%";
+      bm.insertBefore(a, bm.firstChild);
+      clock.push([a, at]);
+    }
+  }
+  // a label gives way to an event it would run into
+  const clearClock = () => {
+    const w = tl.clientWidth || W;
+    for (const [a, at] of clock) a.hidden = bmAt.some((b) => Math.abs(b - at) * w < 28);
+  };
   tl.append(bm, track);
+  const fill = el("div", "rr-fill");
+  track.appendChild(fill);
   const killTitle = (k) => {
     const a = k[1] >= 0 ? P[k[1]] : null, v = k[2] >= 0 ? P[k[2]] : null;
     let s = (a ? a.name : "?") + " > " + (v ? v.name : "?");
@@ -457,7 +534,8 @@ export default function (component) {
   // frame-by-frame aim study), Shift = 1 s, Home / End, Space = play, [ ] = speed
   track.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const k = e.key;
+    const k = e.code === "BracketLeft" ? "[" : e.code === "BracketRight" ? "]" : e.key;
+    if (e.code === "KeyF" || k === "f") { e.preventDefault(); toggleFull(); return; }
     if (k === " " || k === "Spacebar") { e.preventDefault(); playBtn.click(); return; }
     if (k === "[" || k === "]") { e.preventDefault(); stepSpeed(k === "[" ? -1 : 1); return; }
     if (k !== "ArrowLeft" && k !== "ArrowRight" && k !== "Home" && k !== "End") return;
@@ -490,7 +568,7 @@ export default function (component) {
       if (why && WHY_GLYPH[why]) {
         slot.appendChild(
           WHY_ICON[why] && IC[WHY_ICON[why]]
-            ? iconEl(WHY_ICON[why], lab["why_" + why] || why, 10)
+            ? iconEl(WHY_ICON[why], lab["why_" + why] || why, 14)
             : el("i", "rr-rg", WHY_GLYPH[why]));
       }
       b.appendChild(slot);
@@ -521,7 +599,7 @@ export default function (component) {
     colR.type = "button";
     colR.title = lab.duels_hide || "hide";
     colR.setAttribute("aria-label", colR.title);
-    colR.addEventListener("click", () => { S.dpanel = false; applyPanel(); draw(); });
+    colR.addEventListener("click", () => { S.dpanel = false; applyPanel(); layout(); draw(); });
     rh.appendChild(colR);
     right.appendChild(rh);
     if (!d.duels.length) {
@@ -531,20 +609,19 @@ export default function (component) {
     d.duels.forEach((z, i) => {
       const c = el("button", "rr-card");
       c.type = "button";
+      // the kill-feed line: killer, the weapon with the headshot / modifier
+      // icons, victim (text only without icons); the numbers under it
       const top = el("div", "rr-ch");
       const kn = el("span", "rr-kn", z.kn);
       const vn = el("span", "rr-vn", z.vn);
       kn.style.color = sideCol(sideOf(z.ki));
       vn.style.color = sideCol(sideOf(z.vi));
-      top.append(kn, el("span", "rr-ar", "\u25B8"), vn, el("span", "rr-ctm2", fmtT((z.tk - d.t0) / d.tr)));
-      // the meta line: the weapon icon (tooltip = name), the headshot icon
-      // and the modifier icons, then the numbers; text only without icons
-      const meta = el("div", "rr-cmeta");
-      const wIco = iconEl(z.w, wl(z.w), 11);
+      const meta = el("span", "rr-cmeta");
+      const wIco = iconEl(z.w, wl(z.w), iconH(z.w, 20, 16));
       if (wIco) meta.appendChild(wIco);
       else if (z.w) meta.appendChild(el("span", null, z.w));
       if (z.hs) {
-        const hsIco = iconEl("headshot", lab.hs || "HS", 11);
+        const hsIco = iconEl("headshot", lab.hs || "HS", 16);
         meta.appendChild(hsIco || el("span", null, lab.hs || "HS"));
       }
       for (const [flag, key, text] of [
@@ -554,20 +631,21 @@ export default function (component) {
         [z.bl, "flashed_kill", lab.flashed_kill || "flashed"],
       ]) {
         if (!flag) continue;
-        const f = iconEl(key, text, 11);
+        const f = iconEl(key, text, 15);
         if (f) meta.appendChild(f);
         else meta.appendChild(el("span", null, text));
       }
-      const nums = [(z.dist != null ? z.dist + "u" : ""), (z.dur != null ? z.dur + "s" : "")]
-        .filter(Boolean).join(" \u00B7 ");
-      if (nums) meta.appendChild(el("span", null, nums));
-      const tipBits = [wl(z.w) || z.w, z.hs ? (lab.hs || "HS") : "",
+      top.append(kn, meta, vn);
+      const sub = el("div", "rr-csub");
+      const numBits = [(z.dist != null ? z.dist + " u" : ""), (z.dur != null ? z.dur + " s" : "")].filter(Boolean);
+      sub.append(el("b", "rr-ctm2", fmtT((z.tk - T0) / d.tr)), ...numBits.map((x) => el("span", null, x)));
+      const nums = numBits.join(" \u00B7 ");
+      const ariaBits = [wl(z.w) || z.w, z.hs ? (lab.hs || "HS") : "",
         z.wb ? (lab.wallbang || "") : "", z.ns ? (lab.noscope || "") : "",
         z.sm ? (lab.smoke_kill || "") : "", z.bl ? (lab.flashed_kill || "") : "", nums]
         .filter(Boolean).join(" \u00B7 ");
-      c.title = z.kn + " > " + z.vn + (tipBits ? " \u00B7 " + tipBits : "");
-      c.setAttribute("aria-label", c.title);
-      c.append(top, meta);
+      c.setAttribute("aria-label", z.kn + " > " + z.vn + (ariaBits ? " \u00B7 " + ariaBits : ""));
+      c.append(top, sub);
       c.addEventListener("click", () => toggleDuel(i));
       right.appendChild(c);
       cardEls.push(c);
@@ -606,6 +684,8 @@ export default function (component) {
   function buildLeft() {
     left.replaceChildren();
     lrows.length = 0;
+    for (const k in sideHeads) delete sideHeads[k];
+    dens = "";
     const head = el("div", "rr-lh");
     head.appendChild(el("span", "rr-lt", lab.players || "players"));
     masterEye = el("button", "rr-eye");
@@ -624,22 +704,29 @@ export default function (component) {
     colL.addEventListener("click", () => { S.panel = false; applyPanel(); layout(); draw(); });
     head.appendChild(colL);
     left.appendChild(head);
-    let lastSide = null;
+    let lastSide = null, grp = null;
     P.forEach((p, pi) => {
-      if (p.side !== lastSide) {
-        // a group header per side; the players inside are sorted by nickname
+      if (grp === null || p.side !== lastSide) {
+        // a group per side (a column of its own in the stacked layout); the
+        // players inside are sorted by nickname
         lastSide = p.side;
+        grp = el("div", "rr-pg " + sideCls(p.side));
         const th2 = el("div", "rr-th " + sideCls(p.side));
         const cntEl = el("span", null, (p.side === "CT" ? "CT" : p.side === "T" ? "T" : "?") + " \u00B7 0");
         const cashEl = el("span", "rr-th-m", "");
         th2.append(cntEl, cashEl);
         sideHeads[p.side] = { l: cntEl, m: cashEl };
-        left.appendChild(th2);
+        grp.appendChild(th2);
+        left.appendChild(grp);
       }
-      // a spectator-style card, no photo, three lines:
-      //   eye | name + status .......... weapon armor HP
-      //       | kills deaths ............ utility kit bomb
-      //       | money speed
+      // a spectator-style card, no photo. EVERY element below is a slot of a
+      // fixed size that exists whether it holds an icon or not, so nothing
+      // moves when an icon appears or goes away (see roundrep.css):
+      //   full: name | weapon armor HP
+      //         K/D | grenades+kit bomb
+      //         money speed | flashed / defusing
+      //   cmp : the third line is gone, the money sits after the K/D
+      //   mini: the name line only
       const row = el("div", "rr-prow " + sideCls(p.side));
       const eye = el("button", "rr-eye");
       eye.type = "button";
@@ -650,48 +737,88 @@ export default function (component) {
       const nameCell = el("span", "rr-pn");
       const nm = el("span", "rr-pname", p.name);
       nm.title = p.name;
-      const ind = el("span", "rr-pind");
-      nameCell.append(nm, ind);
+      nameCell.append(nm);
+      const wc = el("span", "rr-pw");
+      const ac = el("span", "rr-pa");
+      const hc = el("span", "rr-php", "");
+      const lineOf = (cls) => {
+        const ln = el("div", cls);
+        const l = el("span", "rr-pl-l"), r = el("span", "rr-pl-r");
+        ln.append(l, r);
+        return { ln: ln, l: l, r: r };
+      };
+      const L1 = lineOf("rr-pl1"), L2 = lineOf("rr-pl2"), L3 = lineOf("rr-pl3");
+      L1.l.append(nameCell);
+      // armor sits right before the HP number
+      L1.r.append(wc, ac, hc);
       const kdLine = el("span", "rr-pkd");
       const kk = kdCell(ICO_KILLS, "rr-pkk", lab.pt_kills || "Kills");
       const dk = kdCell(ICO_SKULL, "rr-pdk", lab.pt_deaths || "Deaths", "skull");
       kdLine.append(kk.w, dk.w);
-      const wc = el("span", "rr-pw");
-      const ac = el("span", "rr-pa");
-      const hc = el("span", "rr-php", "");
-      const l1 = el("div", "rr-pl1");
-      l1.append(el("span", "rr-pl-l", null), el("span", "rr-pl-r"));
-      l1.firstChild.append(nameCell);
-      // armor sits right before the HP number
-      l1.lastChild.append(wc, ac, hc);
       const util = el("span", "rr-putil");
       const bc = el("span", "rr-pbm", "");
-      const l2 = el("div", "rr-pl2");
-      l2.append(el("span", "rr-pl-l", null), el("span", "rr-pl-r"));
-      l2.firstChild.append(kdLine);
-      // utility, then the kit and the bomb on the same spot at the right end
-      l2.lastChild.append(util, bc);
+      L2.l.append(kdLine);
+      // utility, then the bomb at the same spot at the right end
+      L2.r.append(util, bc);
       const mc = el("span", "rr-pm", "");
       const sp = el("span", "rr-psp");
       const spv = el("b", "rr-pspv", "");
       sp.append(spv);
-      const l3 = el("div", "rr-pl3");
-      l3.append(el("span", "rr-pl-l", null), el("span", "rr-pl-r"));
-      l3.firstChild.append(mc, sp);
+      const ind = el("span", "rr-pind");  // defusing: its own slot, never next to the name
+      L3.l.append(mc, sp);
+      L3.r.append(ind);
       const lines = el("div", "rr-pl");
-      lines.append(l1, l2, l3);
+      lines.append(L1.ln, L2.ln, L3.ln);
       // the HP as the card's background: the team colour fills the card from the left
       // up to hp% (a soft tint, the text stays readable)
       const bar = el("span", "rr-pbar");
       const barf = el("i");
       bar.appendChild(barf);
-      row.append(bar, eye, lines);
-      left.appendChild(row);
+      // blinded: a light wash over the card that runs out with the blindness and
+      // the seconds left in the place of the eye (the eye is back on hover)
+      const fw = el("span", "rr-pfl");
+      const fwi = el("i"), fws = el("b");
+      const fic = iconEl("blind", null, 13);
+      const fcol = el("span", "rr-pfc");
+      if (fic) fcol.appendChild(fic);
+      fcol.appendChild(fws);
+      fw.append(fwi, fcol);
+      row.append(bar, fw, eye, lines);
+      row.addEventListener("mouseenter", () => setHover(pi));
+      row.addEventListener("mouseleave", () => setHover(-1));
+      grp.appendChild(row);
       lrows.push({ p: p, pi: pi, row: row, eye: eye, wc: wc, ac: ac, hc: hc, mc: mc, ind: ind,
-        util: util, spv: spv, bc: bc, kn: kk.n, dn: dk.n, bar: bar, barf: barf,
-        wk: null, ak: null, us: null, is: null, hk: null, kv: -1, dv: -1 });
+        util: util, spv: spv, bc: bc, kn: kk.n, dn: dk.n, bar: bar, barf: barf, fwi: fwi, fws: fws, bl: false, bk: -1, bs: "",
+        l2l: L2.l, l3l: L3.l,
+        wk: null, ak: null, us: null, is: null, hk: null, kv: -1, dv: -1,
+        dd: null, hv: null, bw: -1, mv: undefined, sv: null });
     });
     applyHidden();
+    applyDensity(pickDensity());
+  }
+  // ---- density: how much of a card fits the height of the map ----
+  // The card heights below are the ones of roundrep.css (rows 1.2 / 1.05 /
+  // .95rem, padding .16rem, gap .12rem); the panel chrome is the header and a
+  // header per team. The stacked layout has no height limit: always "full".
+  let dens = "";
+  function pickDensity() {
+    if (box.classList.contains("narrow")) return "full";
+    const rem = parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+    const groups = Math.max(1, Object.keys(sideHeads).length);
+    const per = (H - (2.0 + 1.5 * groups + 0.35) * rem) / Math.max(1, P.length);
+    if (per >= 3.48 * rem) return "full";
+    if (per >= 2.53 * rem) return "cmp";
+    return "mini";
+  }
+  function applyDensity(tier) {
+    if (tier === dens) return;
+    dens = tier;
+    left.dataset.dens = tier;
+    // the money lives on the third line; without that line it moves up behind the K/D
+    for (const lr of lrows) {
+      if (tier === "full") lr.l3l.insertBefore(lr.mc, lr.l3l.firstChild);
+      else lr.l2l.appendChild(lr.mc);
+    }
   }
   function applyHidden() {
     for (const lr of lrows) {
@@ -716,12 +843,15 @@ export default function (component) {
       if (vi >= 0 && kdLive[vi]) kdLive[vi][1] += 1;
       if (ki >= 0 && vi >= 0 && ki !== vi && kdLive[ki] && P[ki].side !== P[vi].side) kdLive[ki][0] += 1;
     }
+    // This runs on EVERY frame while playing: each write below is guarded by
+    // the value it last wrote, so a frame that changes nothing touches no DOM
+    // (no style recalculation, no layout).
     for (const lr of lrows) {
       const p = lr.p;
       const s = state(p, t);
       const alive = s ? s.al : false;
       aliveBySide[p.side] = (aliveBySide[p.side] || 0) + (alive ? 1 : 0);
-      lr.row.classList.toggle("dead", !alive);
+      if (lr.dd !== !alive) { lr.dd = !alive; lr.row.classList.toggle("dead", !alive); }
       const kd = kdLive[lr.pi];
       if (lr.kv !== kd[0]) { lr.kv = kd[0]; lr.kn.textContent = String(kd[0]); }
       if (lr.dv !== kd[1]) { lr.dv = kd[1]; lr.dn.textContent = String(kd[1]); }
@@ -731,7 +861,7 @@ export default function (component) {
       if (lr.wk !== w) {
         lr.wk = w; lr.wc.replaceChildren();
         if (w) {
-          const wIco = iconEl(w, wl(w), 16);
+          const wIco = iconEl(w, wl(w), iconH(w, 22, 18));
           if (wIco) lr.wc.appendChild(wIco);
           else lr.wc.appendChild(el("span", "rr-wtxt", wl(w) || w));
         }
@@ -746,64 +876,83 @@ export default function (component) {
         lr.ak = ak; lr.ac.replaceChildren(); lr.ac.title = "";
         if (ak) {
           const title = (lab.pt_armor || "armor") + " " + armor + (helm ? " + " + (lab.pt_helmet || "helmet") : "");
-          const aIco = iconEl(armorKey(armor, helm), title, 15);
+          const aIco = iconEl(armorKey(armor, helm), title, 16);
           lr.ac.title = title;
           if (aIco) lr.ac.appendChild(aIco);
         }
       }
-      // hp: the big number; a dead player gets the skull instead
+      // hp: the number; a dead player gets the skull instead
       if (!alive) {
         if (lr.hk !== "dead") {
-          lr.hk = "dead";
+          lr.hk = "dead"; lr.hv = null; lr.bw = 0;
           // the skull of the icon set; the drawn one when the set is not installed
-          lr.hc.replaceChildren(iconEl("skull", lab.dead || "dead", 16) || svgSpan(ICO_SKULL, "rr-pdead"));
+          lr.hc.replaceChildren(iconEl("skull", lab.dead || "dead", 17) || svgSpan(ICO_SKULL, "rr-pdead"));
           lr.hc.title = lab.dead || "dead";
+          lr.hc.className = "rr-php dead";
+          lr.barf.style.width = "0%";
         }
-        lr.hc.className = "rr-php dead";
-        lr.barf.style.width = "0%";
       } else {
-        lr.hk = "hp";
-        lr.hc.textContent = hp == null ? "" : String(hp);
-        lr.hc.className = "rr-php";
-        lr.hc.title = (lab.pt_hp || "hp") + " " + (hp == null ? "" : hp);
-        lr.barf.style.width = (hp == null ? 0 : Math.max(0, Math.min(100, hp))) + "%";
+        if (lr.hk !== "hp") { lr.hk = "hp"; lr.hv = null; lr.hc.className = "rr-php"; }
+        const hv = hp == null ? "" : String(hp);
+        if (lr.hv !== hv) {
+          lr.hv = hv;
+          lr.hc.textContent = hv;
+          lr.hc.className = "rr-php" + (hp != null && hp < 30 ? " low" : "");
+          lr.hc.title = (lab.pt_hp || "hp") + " " + hv;
+        }
+        const bw = hp == null ? 0 : Math.max(0, Math.min(100, hp));
+        if (lr.bw !== bw) { lr.bw = bw; lr.barf.style.width = bw + "%"; }
       }
       // money (the gear value is not shown on the card)
       const mo = valAt(p.mo, t, null);
-      lr.mc.textContent = mo == null ? "" : money(mo);
-      lr.mc.title = mo == null ? "" : (lab.pt_money_t || "money") + " " + money(mo);
-      // utility: grenades and the kit; status by the name, the bomb by the kit
+      if (lr.mv !== mo) {
+        lr.mv = mo;
+        lr.mc.textContent = mo == null ? "" : money(mo);
+        lr.mc.title = mo == null ? "" : (lab.pt_money_t || "money") + " " + money(mo);
+      }
+      // utility: the grenades; the slot at the right end of that line holds the bomb
+      // (T) or the defuse kit (CT) - so a CT line is never left with a hole
       const inv = alive ? ((runAt(p.inv, t) || [0, []])[1]) : [];
       const kit = alive && valAt(p.kit, t, 0) === 1;
       const defusing = alive && valAt(p.dg, t, 0) === 1;
-      const us = inv.filter((k) => GRENADES.indexOf(k) >= 0).sort().join(",") + "|" + (kit ? "k" : "");
+      const us = inv.filter((k) => GRENADES.indexOf(k) >= 0).sort().join(",");
       if (lr.us !== us) {
         lr.us = us; lr.util.replaceChildren();
         const cnt = countKeys(inv);
         for (const g of GRENADES) {
           for (let n = 0; n < (cnt[g] || 0); n++) {
-            const gIco = iconEl(g, wl(g), 15);
+            const gIco = iconEl(g, wl(g), 16);
             if (gIco) lr.util.appendChild(gIco);
             else lr.util.append(el("span", "rr-wtxt", wl(g) || g));
           }
         }
-        if (kit) {
-          const kIco = iconEl("defuse", lab.pt_kit || "defuse kit", 15);
-          if (kIco) lr.util.appendChild(kIco);
-        }
       }
-      const is = (inv.indexOf("c4") >= 0 ? "c" : "") + (defusing ? "d" : "") + (s && s.fl > 0.2 ? "b" : "");
+      const carries = inv.indexOf("c4") >= 0 && w !== "c4";  // in hands it is the weapon
+      const is = (carries ? "c" : kit ? "k" : "") + (defusing ? "d" : "");
       if (lr.is !== is) {
         lr.is = is; lr.ind.replaceChildren(); lr.bc.replaceChildren();
-        // the bomb sits right of the kit in the utility row; defusing /
-        // flashed stay by the name
-        if (is.indexOf("c") >= 0) { const ic = iconEl("c4", lab.pt_bomb || "carries the bomb", 14, C.warn); if (ic) lr.bc.appendChild(ic); }
-        if (is.indexOf("d") >= 0) { const ic = iconEl("defuse", lab.pt_defusing || "defusing", 14, C.acc); if (ic) lr.ind.appendChild(ic); }
-        if (is.indexOf("b") >= 0) { const ic = iconEl("blind", lab.pt_blind || "flashed", 14); if (ic) lr.ind.appendChild(ic); }
+        // the bomb and the kit in the colour of the other icons: a coloured one
+        // vanishes on the team-coloured HP fill
+        if (is.indexOf("c") >= 0) { const ic = iconEl("c4", lab.pt_bomb || "carries the bomb", 16); if (ic) lr.bc.appendChild(ic); }
+        else if (is.indexOf("k") >= 0) { const ic = iconEl("defuse", lab.pt_kit || "defuse kit", 16); if (ic) lr.bc.appendChild(ic); }
+        if (is.indexOf("d") >= 0) { const ic = iconEl("defuse", lab.pt_defusing || "defusing", 14); if (ic) lr.ind.appendChild(ic); }
+      }
+      // blinded: the wash and the seconds
+      const bl = alive ? blindAt(lr.pi, t) : null;
+      if (lr.bl !== !!bl) {
+        lr.bl = !!bl;
+        lr.row.classList.toggle("blind", !!bl);
+        lr.fws.parentNode.title = bl ? (lab.pt_blind || "flashed") : "";
+      }
+      if (bl) {
+        const bk = Math.round(bl.k * 400) / 400, bs = bl.left.toFixed(1);
+        if (lr.bk !== bk) { lr.bk = bk; lr.fwi.style.setProperty("--k", String(bk)); }
+        if (lr.bs !== bs) { lr.bs = bs; lr.fws.textContent = bs; }
       }
       // live speed: just the digits and the unit, no label
       const v = alive ? speedAt(p, t) : null;
-      lr.spv.textContent = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
+      const sv = v == null ? "" : Math.round(v) + " " + (lab.u_s || "u/s");
+      if (lr.sv !== sv) { lr.sv = sv; lr.spv.textContent = sv; }
       const sm = sums[p.side];
       if (sm) { sm.n += 1; if (mo != null) { sm.mo += mo; sm.mon = true; } }
     }
@@ -811,12 +960,28 @@ export default function (component) {
       const h = sideHeads[side];
       const sm = sums[side];
       const mon = sm && sm.mon;
-      h.l.textContent = (side === "CT" ? "CT" : side === "T" ? "T" : side) + " \u00B7 " + (aliveBySide[side] || 0);
-      h.m.textContent = mon ? money(sm.mo) : "";
-      h.m.title = mon ? (lab.pt_money_t || "money") + " " + money(sm.mo) : "";
+      const lt = (side === "CT" ? "CT" : side === "T" ? "T" : side) + " \u00B7 " + (aliveBySide[side] || 0);
+      if (h.lv !== lt) { h.lv = lt; h.l.textContent = lt; }
+      const mt = mon ? money(sm.mo) : "";
+      if (h.mv !== mt) {
+        h.mv = mt; h.m.textContent = mt;
+        h.m.title = mon ? (lab.pt_money_t || "money") + " " + mt : "";
+      }
     }
   }
+  // the player under the pointer (his card or his marker): the same one is
+  // ringed on the map and outlined in the list
+  let hov = -1;
+  function setHover(pi) {
+    if (hov === pi) return;
+    hov = pi;
+    for (const lr of lrows) lr.row.classList.toggle("hov", lr.pi === pi);
+    if (!playing) draw();
+  }
   function applyPanel() {
+    lbBtn.classList.toggle("on", !!S.labels);
+    lbBtn.title = S.labels ? (lab.labels_hide || "hide") : (lab.labels_show || "show");
+    lbBtn.setAttribute("aria-label", lbBtn.title);
     grid.classList.toggle("nolf", !S.panel);
     grid.classList.toggle("nord", !S.dpanel);
     plBtn.classList.toggle("on", !!S.panel);
@@ -879,7 +1044,7 @@ export default function (component) {
     // the duel's weapon: the silhouette between the duelists' names, its
     // localized name as the tooltip (text only when icons are missing)
     const wh = el("span", "rr-dpw");
-    const wIco = iconEl(z.w, wl(z.w), 12);
+    const wIco = iconEl(z.w, wl(z.w), iconH(z.w, 23, 18));
     if (wIco) wh.appendChild(wIco);
     else if (z.w) wh.appendChild(document.createTextNode(wl(z.w) || z.w));
     wh.title = wl(z.w) || z.w || "";
@@ -911,7 +1076,7 @@ export default function (component) {
       col.appendChild(stats);
       // what the duels table measured at THIS player's first shot
       const fb = [];
-      if (sd.ft != null) fb.push((lab.tel_first || "first shot") + " " + fmtT((sd.ft - d.t0) / d.tr));
+      if (sd.ft != null) fb.push((lab.tel_first || "first shot") + " " + fmtT((sd.ft - T0) / d.tr));
       if (sd.sp != null) fb.push(sd.sp + " " + (lab.u_s || "u/s") + (THR != null ? " (" + (sd.sp > THR ? (lab.tel_moving || "moving") : (lab.tel_standing || "standing")) + ")" : ""));
       if (sd.er != null) fb.push(sd.er + "\u00B0");
       if (sd.sh != null) fb.push((lab.tel_shots || "shots") + ": " + sd.sh);
@@ -946,9 +1111,10 @@ export default function (component) {
     if (tel) {
       const lg = el("div", "rr-dleg");
       const mk = (cls, col, text) => { const s = el("span"); const i = el("i", cls); i.style.background = col; s.append(i, " " + text); return s; };
-      lg.append(mk("rr-legline", C.acc, lab.tel_leg_speed || "speed"),
-        mk("rr-legline", C.warn, lab.tel_leg_err || "aim error"));
-      lg.append(mk("rr-legline", C.text, lab.tel_leg_shot || "shot"));
+      lg.append(mk("rr-legline", C.text, lab.tel_leg_speed || "speed"),
+        mk("rr-legline", C.acc, lab.tel_leg_err || "aim error"));
+      lg.append(mk("rr-legline tick", C.text, lab.tel_leg_shot || "shot"),
+        mk("rr-legline tick", C.good, lab.tel_first || "first shot"));
       if (THR != null) lg.append(mk("rr-legdash", C.text2, (lab.tel_leg_thr || "moving threshold") + " " + Math.round(THR)));
       duelWrap.appendChild(lg);
     }
@@ -961,7 +1127,7 @@ export default function (component) {
     for (const c of dp.cols) {
       if (!c.cv) continue;
       const w = Math.max(160, Math.round(c.cv.getBoundingClientRect().width || 300));
-      c.w = w; c.h = 92;
+      c.w = w; c.h = 124;
       c.cv.width = Math.round(w * k); c.cv.height = Math.round(c.h * k);
       c.cv.style.height = c.h + "px";
       c.cx.setTransform(k, 0, 0, k, 0, 0);
@@ -981,7 +1147,7 @@ export default function (component) {
       c.live.tn.textContent = tn == null ? "\u2014" : tn + "\u00B0/s";
       c.live.er.textContent = er == null ? "\u2014" : er + "\u00B0";
       if (!c.cx || !tel) continue;
-      const cx = c.cx, W2 = c.w, H2 = c.h, padB = 12, hh = H2 - padB;
+      const cx = c.cx, W2 = c.w, H2 = c.h, padB = 14, hh = H2 - padB;
       cx.clearRect(0, 0, W2, H2);
       cx.fillStyle = rgba(C.text2, 0.07);
       cx.fillRect(0, 0, W2, hh);
@@ -989,7 +1155,7 @@ export default function (component) {
       const ySp = (v) => hh - Math.min(1, v / c.vmax) * (hh - 3) - 1;
       const yEr = (v) => hh - Math.min(1, v / ERR_MAX) * (hh - 3) - 1;
       const line = (arr, yf, col) => {
-        cx.strokeStyle = col; cx.lineWidth = 1.6; cx.beginPath();
+        cx.strokeStyle = col; cx.lineWidth = 2; cx.lineJoin = "round"; cx.beginPath();
         let pen = false;
         arr.forEach((v, j) => {
           if (v == null) { pen = false; return; }
@@ -999,8 +1165,8 @@ export default function (component) {
         });
         cx.stroke();
       };
-      line(tel[who].er, yEr, C.warn);
-      line(tel[who].sp, ySp, C.acc);
+      line(tel[who].er, yEr, C.acc);
+      line(tel[who].sp, ySp, C.text);
       // the moving threshold: shots above it are the moving shots
       if (THR != null && THR <= c.vmax) {
         cx.setLineDash([4, 3]); cx.strokeStyle = rgba(C.text2, 0.8); cx.lineWidth = 1;
@@ -1010,7 +1176,7 @@ export default function (component) {
       // this player's shots (ticks along the bottom), the first shot taller
       if (c.p) {
         const pi = P.indexOf(c.p);
-        cx.strokeStyle = C.text; cx.lineWidth = 1;
+        cx.strokeStyle = C.text; cx.lineWidth = 2;
         for (const sh of d.shots) {
           if (sh[1] !== pi || sh[0] < z.a || sh[0] > z.b) continue;
           const x = Math.round(xOf(sh[0])) + 0.5;
@@ -1024,17 +1190,17 @@ export default function (component) {
       }
       // the kill
       const xk = Math.round(xOf(z.tk)) + 0.5;
-      cx.strokeStyle = C.dead; cx.lineWidth = 1.5;
+      cx.strokeStyle = rgba(C.text2, 0.9); cx.lineWidth = 1.5;
       cx.beginPath(); cx.moveTo(xk, 0); cx.lineTo(xk, hh); cx.stroke();
       // playhead
       const xp = xOf(t);
-      cx.strokeStyle = C.acc; cx.lineWidth = 2;
+      cx.strokeStyle = C.text; cx.lineWidth = 2;
       cx.beginPath(); cx.moveTo(xp, 0); cx.lineTo(xp, H2); cx.stroke();
       // axis hints
-      cx.font = "9px " + FF; cx.fillStyle = C.text2; cx.textAlign = "left";
-      cx.fillText(Math.round(c.vmax) + " " + (lab.u_s || "u/s"), 3, 9);
+      cx.font = "11px " + FF; cx.fillStyle = C.text2; cx.textAlign = "left";
+      cx.fillText(Math.round(c.vmax) + " " + (lab.u_s || "u/s"), 6, 14);
       cx.textAlign = "right";
-      cx.fillText(ERR_MAX + "\u00B0", W2 - 3, 9);
+      cx.fillText(ERR_MAX + "\u00B0", W2 - 6, 14);
     }
     for (const c of dp.cols) {
       if (!c.kp) continue;
@@ -1049,14 +1215,62 @@ export default function (component) {
   const ctx = cvs.getContext("2d");
   const imgs = [];
   const twoPanels = !!(d.radar && d.radar.lo);
+  // What is drawn of a radar image is a toned-down copy: the art is the
+  // background, the only saturated colours on the map are the two teams.
+  // bounds[i] is where the art really is (the images have wide empty margins):
+  // the map is fitted by it, not by the whole image.
+  // The art differs a lot in brightness from map to map: it is brought to one
+  // level, where the markers stand out and the walls are still readable.
+  const toned = [], bounds = [], RADAR_LEVEL = 0.4;
+  function prepRadar(im, i) {
+    const n = im.naturalWidth, m = im.naturalHeight;
+    if (!n || !m) return;
+    let bright = 0.8;
+    try {
+      const K = 128, sc = document.createElement("canvas");
+      sc.width = K; sc.height = K;
+      const sx = sc.getContext("2d");
+      sx.drawImage(im, 0, 0, K, K);
+      const px = sx.getImageData(0, 0, K, K).data;
+      let x0 = K, y0 = K, x1 = -1, y1 = -1, sum = 0, cnt = 0;
+      for (let y = 0; y < K; y++) for (let q = 0; q < K; q++) {
+        const o = (y * K + q) * 4;
+        if (px[o + 3] < 40) continue;
+        if (q < x0) x0 = q;
+        if (q > x1) x1 = q;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+        const l = (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]) / 255;
+        if (l > 0.06) { sum += l; cnt += 1; }  // the black gaps are not the art
+      }
+      if (x1 > x0 && y1 > y0) bounds[i] = [x0 / K, y0 / K, (x1 + 1) / K, (y1 + 1) / K];
+      if (cnt) bright = Math.max(0.6, Math.min(1.6, RADAR_LEVEL / (sum / cnt)));
+    } catch (e) { /* the whole image then, at a fixed brightness */ }
+    const c = document.createElement("canvas");
+    c.width = n; c.height = m;
+    const x = c.getContext("2d");
+    const canFilter = typeof x.filter === "string";
+    if (canFilter) x.filter = "saturate(0.5) brightness(" + bright.toFixed(2) + ")";
+    // without the outermost pixels: some images carry a thin frame there
+    x.drawImage(im, 2, 2, n - 4, m - 4, 2, 2, n - 4, m - 4);
+    if (!canFilter && bright < 1) {
+      x.globalCompositeOperation = "source-atop";
+      x.fillStyle = rgba(C.bg, 1 - bright);
+      x.fillRect(0, 0, n, m);
+    }
+    toned[i] = c;
+  }
   const loadImg = (uri, i) => {
     const im = new Image();
     imgs[i] = im;
-    im.addEventListener("load", () => draw());
+    im.addEventListener("load", () => { prepRadar(im, i); layout(); draw(); });
     if (uri) im.src = uri;
   };
   if (d.radar) { loadImg(d.radar.png, 0); if (twoPanels) loadImg(d.radar.lo, 1); }
-  let W = 600, H = 420, panels = [], lastW = 0, lastBW = 0;
+  let W = 600, H = 420, panels = [], lvl = [], lastW = 0, lastBW = 0, lastVH = 0;
+  // below this width of the whole player the side panels stop floating over the
+  // map and stack under it (the overlays would cover most of a narrow map)
+  const NARROW_W = 900;
 
   function layout() {
     // the single-column layout depends on the WIDTH OF THE WHOLE PLAYER, not
@@ -1064,11 +1278,22 @@ export default function (component) {
     // it would flip the layout back and forth at the threshold)
     const bw = box.getBoundingClientRect().width;
     lastBW = bw;
-    box.classList.toggle("narrow", bw > 0 && bw < 780);
+    box.classList.toggle("narrow", bw > 0 && bw < NARROW_W);
     const r = wrap.getBoundingClientRect();
     W = Math.max(240, r.width);
     lastW = W;
-    H = Math.max(280, Math.min(560, Math.round(W * 0.62)));
+    // the map as high as the screen allows: what is left of the viewport after
+    // the rest of the player (controls, timeline, rounds) and the page
+    // header, never under 360 and never over 900
+    const vh = window.innerHeight || 900;
+    lastVH = vh;
+    const narrow = box.classList.contains("narrow");
+    const cap = Math.max(360, Math.min(900, vh - 272));
+    H = Math.max(300, Math.min(cap, Math.round(W * (narrow ? 0.85 : 0.62))));
+    // full screen: everything the controls leave
+    clearClock();
+    if (isFull()) H = Math.max(300, vh - ctl.offsetHeight - tl.offsetHeight - roundsEl.offsetHeight - 24);
+    applyDensity(pickDensity());
     const k = DPR();
     cvs.width = Math.round(W * k); cvs.height = Math.round(H * k);
     cvs.style.height = H + "px";
@@ -1078,17 +1303,33 @@ export default function (component) {
       const v = S.view[i] || (S.view[i] = { z: 1, dx: 0, dy: 0 });
       panels[i] = { ox: ox, oy: oy, fit: fit, v: v };
     };
+    // the map sits in the space BETWEEN the side panels, unless they leave too
+    // little of it - then it goes under them
+    let x0 = narrow || !S.panel ? 0 : left.offsetWidth || 0;
+    let x1 = W - (narrow || !S.dpanel ? 0 : right.offsetWidth || 0);
+    const lack = Math.min(W, 360) - (x1 - x0);
+    if (lack > 0) { x0 = Math.max(0, x0 - lack / 2); x1 = Math.min(W, x1 + lack / 2); }
     if (d.radar) {
       const n = twoPanels ? 2 : 1;
-      const pw = W / n;
+      const aw = x1 - x0, size = d.radar.size, pad = 14, top = n > 1 ? 24 : 0;
+      // the same part of both levels, so they keep one scale
+      const b = [0, 1].slice(0, n).map((i) => bounds[i] || [0, 0, 1, 1]);
+      const bx0 = Math.min(...b.map((q) => q[0])) * size, by0 = Math.min(...b.map((q) => q[1])) * size;
+      const bw2 = Math.max(...b.map((q) => q[2])) * size - bx0, bh2 = Math.max(...b.map((q) => q[3])) * size - by0;
+      // two levels: side by side or one under the other, whichever is bigger
+      const fitOf = (cols, rows) => Math.min((aw / cols - 2 * pad) / bw2, (H / rows - 2 * pad - top) / bh2);
+      const rows = n > 1 && fitOf(1, 2) > fitOf(2, 1) ? 2 : 1, cols = n / rows;
+      const fit = fitOf(cols, rows);
       for (let i = 0; i < n; i++) {
-        const fit = Math.min(pw, H) / d.radar.size;
-        mk(i, i * pw + (pw - d.radar.size * fit) / 2, (H - d.radar.size * fit) / 2, fit);
+        const cx = x0 + aw / cols * ((rows > 1 ? 0 : i) + 0.5);
+        const y0 = H / rows * (rows > 1 ? i : 0), cy = y0 + (H / rows + top) / 2;
+        mk(i, cx - (bx0 + bw2 / 2) * fit, cy - (by0 + bh2 / 2) * fit, fit);
+        lvl[i] = { x: cx, y: cy, ty: y0 + 20 };
       }
     } else if (d.gridb) {
       const g = d.gridb;
-      const fit = Math.min(W / (g.maxx - g.minx), H / (g.maxy - g.miny));
-      mk(0, (W - (g.maxx - g.minx) * fit) / 2, (H - (g.maxy - g.miny) * fit) / 2, fit);
+      const fit = Math.min((x1 - x0) / (g.maxx - g.minx), H / (g.maxy - g.miny));
+      mk(0, (x0 + x1) / 2 - (g.maxx - g.minx) * fit / 2, (H - (g.maxy - g.miny) * fit) / 2, fit);
     }
     sizeCharts();
   }
@@ -1107,12 +1348,13 @@ export default function (component) {
     for (const p of panels) { if (p) { p.v.z = 1; p.v.dx = 0; p.v.dy = 0; } }
     draw();
   }
-  const panelAt = (mx) => (twoPanels ? (mx < W / 2 ? 0 : 1) : 0);
+  const panelAt = (mx, my) => (twoPanels && lvl[1]
+    && Math.hypot(mx - lvl[1].x, my - lvl[1].y) < Math.hypot(mx - lvl[0].x, my - lvl[0].y) ? 1 : 0);
 
   // wheel = zoom (around the cursor), LMB drag = pan, dblclick = reset
   cvs.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const p = panels[panelAt(e.offsetX)];
+    const p = panels[panelAt(e.offsetX, e.offsetY)];
     if (!p) return;
     const z2 = Math.max(0.6, Math.min(14, p.v.z * (e.deltaY < 0 ? 1.18 : 1 / 1.18)));
     const kk = z2 / p.v.z;
@@ -1125,7 +1367,7 @@ export default function (component) {
   let pan = null;
   cvs.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
-    pan = { x: e.offsetX, y: e.offsetY, i: panelAt(e.offsetX) };
+    pan = { x: e.offsetX, y: e.offsetY, i: panelAt(e.offsetX, e.offsetY) };
     try { cvs.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     wrap.classList.add("dragging");
   });
@@ -1140,46 +1382,31 @@ export default function (component) {
   cvs.addEventListener("pointerup", endPan);
   cvs.addEventListener("pointercancel", endPan);
   cvs.addEventListener("dblclick", resetView);
+  // a click on the map hands the keyboard to the timeline: Space, the arrows,
+  // [ ] (on click: the press itself moves the focus away after its handlers)
+  cvs.addEventListener("click", () => { try { track.focus({ preventScroll: true }); } catch (err) { /* ignore */ } });
 
-  // ---------- the canvas hover tooltip: name / weapon / hp of a plate ----
-  // (a canvas has no title attribute: the hit-test draws a floating tip
-  // that names the weapon icon over the player's plate)
-  const tip = el("div", "rr-tip");
-  tip.hidden = true;
-  wrap.appendChild(tip);
-  const plateAt = (mx, my) => {
-    // alive players were pushed last: they win the hit-test on an overlap
-    for (let i = plates.length - 1; i >= 0; i--) {
-      const b = plates[i];
-      if (Math.abs(mx - b.x) <= b.w / 2 + 2 && my >= b.y - 13 && my <= b.y + b.h + 2) return b;
+  // ---------- the canvas hover: the marker under the pointer -------------
+  // Only a MARKER reacts, never a name (names move out of each other's way, a
+  // name under the pointer would jump). The nearest one wins, the living
+  // before the dead. It is looked up on every frame: while the round plays
+  // the players move under a still pointer. There is no tooltip: the name shows
+  // above the marker and the card on the left is outlined.
+  let mouse = null;
+  function hoverAt() {
+    let b = null, best = Infinity;
+    if (!pan) {
+      for (const c of marks) {
+        const dist = Math.hypot(mouse.x - c.x, mouse.y - c.y);
+        if (dist > c.r) continue;
+        const rank = dist + (c.al ? 0 : 1000);
+        if (rank < best) { best = rank; b = c; }
+      }
     }
-    return null;
-  };
-  let tipFor = "";
-  cvs.addEventListener("pointermove", (e) => {
-    const b = plateAt(e.offsetX, e.offsetY);
-    if (!b) {
-      if (!tip.hidden) { tip.hidden = true; tip.textContent = ""; }
-      return;
-    }
-    const lines = [b.p.name];
-    if (!b.al) lines.push(lab.dead || "dead");
-    else {
-      if (b.w) lines.push(wl(b.w) || b.w);
-      if (b.hp != null) lines.push("HP " + b.hp);
-    }
-    const txt = lines.join(" \u00B7 ");
-    if (txt !== tipFor) {
-      tipFor = txt;
-      tip.textContent = txt;
-      tip.setAttribute("aria-label", txt);
-    }
-    tip.hidden = false;
-    const r = wrap.getBoundingClientRect();
-    tip.style.left = Math.min(e.offsetX + 12, Math.max(4, r.width - 170)) + "px";
-    tip.style.top = Math.max(2, e.offsetY - 26) + "px";
-  });
-  cvs.addEventListener("pointerleave", () => { tip.hidden = true; tipFor = ""; });
+    setHover(b ? b.pi : -1);
+  }
+  cvs.addEventListener("pointermove", (e) => { mouse = { x: e.offsetX, y: e.offsetY }; hoverAt(); });
+  cvs.addEventListener("pointerleave", () => { mouse = null; setHover(-1); });
 
   // ---------- interpolated player state -------------------------------------------------------------------------
   function state(p, tick) {
@@ -1198,7 +1425,6 @@ export default function (component) {
     return {
       x: num(p.x[i0], p.x[i1]), y: num(p.y[i0], p.y[i1]), yaw: yaw,
       hp: p.hp ? p.hp[i0] : null, al: al,
-      fl: p.fl ? (p.fl[i0] || 0) : 0,
       lvl: p.lvl ? (p.lvl[i0] ? 1 : 0) : 0,
     };
   }
@@ -1231,7 +1457,6 @@ export default function (component) {
     const n = parseInt(h, 16);
     return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
   };
-  const hpCol = (hp) => (hp < 30 ? C.bad : hp < 70 ? (C.warn || C.bad) : C.good);
 
   // ---------- weapon icons on the canvas --------------------------------------------------
   // The silhouettes are TINTED through the alpha mask, never through the
@@ -1252,16 +1477,19 @@ export default function (component) {
     });
     return iconImgs[key];
   };
+  const ICON_PAD = 4;
   function tintedIcon(key, color, h) {
     if (!IC[key] || !color) return null;
-    const ck = key + "|" + color + "|" + h;
+    const k = DPR();
+    const ck = key + "|" + color + "|" + h + "|" + k;
     if (iconTinted[ck]) return iconTinted[ck];
     const m = IC[key];
     const ar = (m[1] && m[2]) ? m[1] / m[2] : 1;
     const w = Math.max(1, Math.round(h * ar));
     const cv = document.createElement("canvas");
-    cv.width = w; cv.height = h;
-    return (iconTinted[ck] = { c: cv, x: cv.getContext("2d"), w: w, h: h, ready: false, im: null });
+    cv.width = Math.round((w + 2 * ICON_PAD) * k);
+    cv.height = Math.round((h + 2 * ICON_PAD) * k);
+    return (iconTinted[ck] = { c: cv, x: cv.getContext("2d"), w: w, h: h, k: k, ready: false, im: null });
   }
   // the icon cache is filled while the radar images load; draw() runs again
   // on every Image.onload, so the icons pop in with the same mechanism
@@ -1278,15 +1506,26 @@ export default function (component) {
     if (!t) return false;
     if (!t.ready) {
       // not tinted yet: tint as soon as the source image has loaded
-      if (!t.im) {
+      // ONCE: every frame comes here until the image is there, and a second
+      // pass would lay one more halo over the first
+      if (!t.asked) {
+        t.asked = true;
         loadIconImg(key).then((im) => {
           if (!im) { t.ready = true; return; }
           t.im = im;
-          t.x.drawImage(im, 0, 0, t.w, t.h);
-          t.x.globalCompositeOperation = "source-in";
-          t.x.fillStyle = color;
-          t.x.fillRect(0, 0, t.w, t.h);
-          t.x.globalCompositeOperation = "source-over";
+          const tw = Math.max(1, Math.round(t.w * t.k)), th = Math.max(1, Math.round(t.h * t.k));
+          const tc = document.createElement("canvas");
+          tc.width = tw; tc.height = th;
+          const tx = tc.getContext("2d");
+          tx.drawImage(im, 0, 0, tw, th);
+          tx.globalCompositeOperation = "source-in";
+          tx.fillStyle = color;
+          tx.fillRect(0, 0, tw, th);
+          // the halo: a dark blur under the silhouette
+          t.x.shadowColor = rgba(C.bg, 0.75);
+          t.x.shadowBlur = 1.5 * t.k;
+          const off = Math.round(ICON_PAD * t.k);
+          t.x.drawImage(tc, off, off);
           t.ready = true;
           draw();
         });
@@ -1294,7 +1533,8 @@ export default function (component) {
       return false;
     }
     if (!t.im) return false;
-    ctx.drawImage(t.c, Math.round(x - t.w / 2), Math.round(y - t.h / 2));
+    ctx.drawImage(t.c, Math.round(x - t.w / 2) - ICON_PAD, Math.round(y - t.h / 2) - ICON_PAD,
+      t.w + 2 * ICON_PAD, t.h + 2 * ICON_PAD);
     return true;
   }
 
@@ -1308,7 +1548,7 @@ export default function (component) {
       if (!p) continue;
       if (d.radar && imgs[i] && imgs[i].complete && imgs[i].naturalWidth) {
         const sz = d.radar.size * p.fit * p.v.z;
-        ctx.drawImage(imgs[i], p.ox + p.v.dx, p.oy + p.v.dy, sz, sz);
+        ctx.drawImage(toned[i] || imgs[i], p.ox + p.v.dx, p.oy + p.v.dy, sz, sz);
       } else if (!d.radar && d.gridb) {
         ctx.strokeStyle = C.grid;
         ctx.lineWidth = 1;
@@ -1324,17 +1564,17 @@ export default function (component) {
       }
       if (twoPanels && lab["lvl" + i]) {
         ctx.fillStyle = C.text;
-        ctx.font = "600 11px " + FF;
-        ctx.textAlign = "left";
-        ctx.fillText(lab["lvl" + i], p.ox + p.v.dx + 8, p.oy + p.v.dy + 16);
+        ctx.font = "600 13px " + FF;
+        ctx.textAlign = "center";
+        ctx.fillText(lab["lvl" + i], lvl[i].x, lvl[i].ty);
       }
     }
   }
 
   // text with a thin halo so names stay readable on top of the radar art
   function halo(text, x, y) {
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = rgba(C.bg, 0.85);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = rgba(C.bg, 0.7);
     ctx.strokeText(text, x, y);
     ctx.fillText(text, x, y);
   }
@@ -1360,7 +1600,7 @@ export default function (component) {
       const a = (s.yaw == null ? 0 : s.yaw) * Math.PI / 180;
       const a0 = toPx(s.lvl, s.x, s.y);
       const b0 = toPx(s.lvl, s.x + Math.cos(a) * 700, s.y + Math.sin(a) * 700);
-      ctx.globalAlpha = 0.65 * (1 - (t - tk) / fade);
+      ctx.globalAlpha = 0.7 * (1 - (t - tk) / fade);
       ctx.strokeStyle = sideCol(p.side);
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(a0[0], a0[1]); ctx.lineTo(b0[0], b0[1]); ctx.stroke();
@@ -1368,17 +1608,69 @@ export default function (component) {
     ctx.globalAlpha = 1;
   }
 
+  // A marker, from the outside in: the cone he looks at, the HP ring (the team
+  // colour up to hp%, red under 30), the disc in the team colour with a nose.
+  // The name is above it, the weapon (white, with a halo) under it; names never
+  // overlap: a plate that would hit another one moves up.
+  function drawMarker(s, px, py, R, col, bl) {
+    const a = -(s.yaw == null ? 0 : s.yaw) * Math.PI / 180;
+    // the view cone: a blinded player sees nothing, it comes back as he does
+    const far = R * 4.6, seen = bl ? 1 - bl.k : 1;
+    if (seen > 0.02) {
+      const g = ctx.createRadialGradient(px, py, R, px, py, far);
+      g.addColorStop(0, rgba(col, 0.42 * seen));
+      g.addColorStop(1, rgba(col, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.arc(px, py, far, a - 0.42, a + 0.42); ctx.closePath(); ctx.fill();
+    }
+    // the dark base under everything (keeps the marker off the art)
+    ctx.fillStyle = rgba(C.bg, 0.7);
+    ctx.beginPath(); ctx.arc(px, py, R + 0.5, 0, Math.PI * 2); ctx.fill();
+    const nx = Math.cos(a), ny = Math.sin(a), tipR = R + 5, base = R - 0.5, hw = R * 0.5;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(px + nx * tipR, py + ny * tipR);
+    ctx.lineTo(px + nx * base - ny * hw, py + ny * base + nx * hw);
+    ctx.lineTo(px + nx * base + ny * hw, py + ny * base - nx * hw);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(px, py, R - 3, 0, Math.PI * 2); ctx.fill();
+    // the HP ring
+    const hp = s.hp == null ? 100 : Math.max(0, Math.min(100, s.hp));
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = rgba(col, 0.2);
+    ctx.beginPath(); ctx.arc(px, py, R - 1, 0, Math.PI * 2); ctx.stroke();
+    if (hp > 0) {
+      ctx.strokeStyle = hp < 30 ? C.bad : col;
+      ctx.beginPath(); ctx.arc(px, py, R - 1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hp / 100); ctx.stroke();
+    }
+    if (bl) drawBlind(px, py, R, bl);
+  }
+  // Blinded: the disc is white and gets its colour back as the eyes do, an arc
+  // around it runs out like a clock.
+  function drawBlind(px, py, R, bl) {
+    ctx.fillStyle = rgba(C.flash, 0.15 + 0.8 * bl.k);
+    ctx.beginPath(); ctx.arc(px, py, R - 2, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = rgba(C.flash, 0.9);
+    ctx.beginPath(); ctx.arc(px, py, R + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * bl.k); ctx.stroke();
+  }
+
   function drawPlayers() {
-    const R = Math.max(5, Math.min(7.5, W / 110));  // small dots: the map stays readable
+    const R0 = Math.max(6.5, Math.min(8, H / 85));
     ctx.textAlign = "center";
-    plates = [];
+    marks = [];
     const z = duelAt(sel);
     const ord = [];
     P.forEach((p, pi) => {
       if (!visible(p)) return;
       const s = state(p, t);
       if (!s || s.x == null || s.y == null) return;
-      ord.push({ p: p, pi: pi, s: s });
+      const q = toPx(s.lvl, s.x, s.y);
+      const pn = panels[s.lvl] || panels[0];
+      // the markers grow with the zoom, much slower than the map
+      const k = pn ? Math.max(0.9, Math.min(1.5, Math.pow(pn.v.z, 0.3))) : 1;
+      const hot = pi === hov || (!!z && (z.ki === pi || z.vi === pi));
+      ord.push({ p: p, pi: pi, s: s, px: q[0], py: q[1], R: R0 * k, hot: hot, bl: s.al ? blindAt(pi, t) : null, w: "" });
     });
     // z-order on the map: the dead sink to the bottom (the earlier the death,
     // the lower they lie); the living keep the LEFT TABLE's order - the top
@@ -1390,105 +1682,93 @@ export default function (component) {
       return B.pi - A.pi;
     });
     for (const it of ord) {
-      const p = it.p, s = it.s;
-      {
-        const q = toPx(s.lvl, s.x, s.y), px = q[0], py = q[1];
-        const col = sideCol(p.side);
-        if (s.al) {
-        if (s.fl > 0.2) {
-          ctx.beginPath(); ctx.arc(px, py, R + 3, 0, Math.PI * 2);
-          ctx.strokeStyle = rgba(C.flash, Math.min(0.9, 0.3 + s.fl / 4));
-          ctx.lineWidth = 2.5; ctx.stroke();
-        }
-        // view direction: only the arrowhead, close to the dot (no shaft)
-        const a = (s.yaw == null ? 0 : s.yaw) * Math.PI / 180;
-        const dx = Math.cos(a), dy = -Math.sin(a), ox = -dy, oy = dx;
-        const hx = px + dx * (R + 4), hy = py + dy * (R + 4);
-        ctx.fillStyle = col;
-        ctx.beginPath();
-        ctx.moveTo(hx, hy);
-        ctx.lineTo(hx - dx * 4 + ox * 2.8, hy - dy * 4 + oy * 2.8);
-        ctx.lineTo(hx - dx * 4 - ox * 2.8, hy - dy * 4 - oy * 2.8);
-        ctx.closePath(); ctx.fill();
-        ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2);
-        ctx.fillStyle = col; ctx.fill();
-        // the two duelists of the selected duel get an accent ring
-        if (z && (P[z.ki] === p || P[z.vi] === p)) {
-          ctx.beginPath(); ctx.arc(px, py, R + 6.5, 0, Math.PI * 2);
-          ctx.strokeStyle = C.acc; ctx.lineWidth = 1.6; ctx.stroke();
-        }
-        // HP bar under the dot; the NAME sits above it in a dark rounded
-        // plate in the team colour, and the weapon SILHOUETTE sits on top
-        // of the plate (kill-feed style, tinted by the same alpha mask)
-        if (s.hp != null && s.hp > 0) {
-          const bw = 16, bx = px - bw / 2, by = py + R + 3;
-          ctx.fillStyle = rgba(C.bg, 0.75);
-          ctx.fillRect(bx - 0.5, by - 0.5, bw + 1, 4);
-          ctx.fillStyle = hpCol(s.hp);
-          ctx.fillRect(bx, by, bw * Math.min(1, s.hp / 100), 3);
-        }
-        const inv = (runAt(p.inv, t) || [0, []])[1];
-        const w = weaponAt(p, t);
-        ctx.font = "600 10px " + FF;
-        const nmW = ctx.measureText(p.name).width;
-        const plateW = nmW + 10, plateH = PLATE_H, plateY = py - R - 8 - plateH;
-        // the plate: team colour at low alpha over the dark surface
-        const bc = p.side === "CT" ? C.ctb : p.side === "T" ? C.ttb : C.bg;
-        if (bc) {
-          ctx.fillStyle = bc;
-          roundRect(ctx, px - plateW / 2, plateY, plateW, plateH, 4);
-          ctx.fill();
-        }
-        ctx.fillStyle = C.text;
-        ctx.fillText(p.name, px, plateY + 10.5);
-        // the weapon icon above the plate (fallback: the old text under
-        // the dot, so a missing icon set changes nothing semantically)
-        const ICO_H = 11;  // ~10-12 px, like the spectator HUD
-        const wy = plateY - ICO_H / 2 - 1;
-        // the bomb rides RIGHT of the weapon icon on the same row; without a
-        // weapon icon it falls back to the status marks by the dot
-        let c4x = 0;
-        if (w && IC[w]) {
-          const wm = IC[w], ar = wm[1] && wm[2] ? wm[1] / wm[2] : 1;
-          c4x = px + ICO_H * ar / 2 + 5;
-        }
-        if (w && !drawIcon(w, px, wy, col, ICO_H)) {
-          ctx.font = "9px " + FF; ctx.fillStyle = C.text2;
-          halo(w, px, py + R + 14);
-        }
-        if (c4x && inv.indexOf("c4") >= 0) drawIcon("c4", c4x, wy, C.warn, 9);
-        // small status marks right of the dot: the defuse kit while
-        // defusing, the flash (the bomb is by the weapon when there is one)
-        let sx = px + R + 4;
-        const mark = (key, color, hh) => {
-          if (drawIcon(key, sx, py, color || C.text, hh || 9)) sx += 11;
-        };
-        if (inv.indexOf("c4") >= 0 && !c4x) mark("c4", C.warn);
-        if (valAt(p.dg, t, 0) === 1) mark("defuse", C.acc);
-        if (s.fl > 0.2) mark("blind", C.text);
-        plates.push({ x: px, y: plateY, w: plateW, h: plateH, p: p, w: w, hp: s.hp, al: true });
-      } else {
-        // grey skull (the icon set's silhouette, tinted like the weapons);
-        // the old cross stays as the no-icon fallback
-        const dc = C.text2 || C.dead;
-        if (!drawIcon("skull", px, py, dc, Math.round(R * 2.1))) {
-          ctx.strokeStyle = dc; ctx.lineWidth = 2;
+      const s = it.s, px = it.px, py = it.py, R = it.R, col = sideCol(it.p.side);
+      if (s.al) it.w = weaponAt(it.p, t);
+      marks.push({ x: px, y: py, r: s.al ? R + 5 : 9, pi: it.pi, al: s.al });
+      if (!s.al) {
+        // the skull of the icon set in a washed-out team colour; the cross
+        // stays as the no-icon fallback. The name shows on hover only
+        ctx.globalAlpha = it.pi === hov ? 1 : 0.6;
+        if (!drawIcon("skull", px, py, col, 15)) {
+          ctx.strokeStyle = col; ctx.lineWidth = 2;
+          const r = R * 0.65;
           ctx.beginPath();
-          ctx.moveTo(px - R * 0.8, py - R * 0.8); ctx.lineTo(px + R * 0.8, py + R * 0.8);
-          ctx.moveTo(px + R * 0.8, py - R * 0.8); ctx.lineTo(px - R * 0.8, py + R * 0.8);
+          ctx.moveTo(px - r, py - r); ctx.lineTo(px + r, py + r);
+          ctx.moveTo(px + r, py - r); ctx.lineTo(px - r, py + r);
           ctx.stroke();
         }
-        ctx.font = "600 10px " + FF; ctx.fillStyle = dc;
-        halo(p.name, px, py - R - 5);
-        plates.push({ x: px, y: py - R - 15, w: plateWFor(p), h: PLATE_H, p: p, w: "", hp: s.hp, al: false });
+        ctx.globalAlpha = 1;
+        continue;
       }
+      drawMarker(s, px, py, R, col, it.bl);
+      // the hovered player and the two duelists of the selected duel are ringed
+      // (a blinded one has his arc already: never two of them)
+      if (it.hot && !it.bl) {
+        ctx.beginPath(); ctx.arc(px, py, R + 2.5, 0, Math.PI * 2);
+        ctx.strokeStyle = rgba(INK, 0.8); ctx.lineWidth = 1.25; ctx.stroke();
+      }
+    }
+    // the second pass, over every marker: the weapon and the bomb on one row
+    // under it
+    for (const it of ord) {
+      const p = it.p, s = it.s, px = it.px, py = it.py, R = it.R;
+      if (!s.al) continue;
+      const inv = (runAt(p.inv, t) || [0, []])[1];
+      const wy = py + R + 11, ICO_H = it.w ? iconH(it.w, 15, 13) : 13;
+      const wm = it.w ? IC[it.w] : null;
+      let bx = px;
+      if (wm) {
+        drawIcon(it.w, px, wy, it.w === "c4" ? BOMB_WHITE : INK, ICO_H);
+        bx = px + ICO_H * (wm[1] && wm[2] ? wm[1] / wm[2] : 1) / 2 + 11;
+      } else if (it.w) {
+        ctx.font = "11px " + FF; ctx.fillStyle = C.text2;
+        halo(it.w, px, wy + 4);
+        bx = px + R + 14;
+      }
+      if (inv.indexOf("c4") >= 0 && it.w !== "c4") drawIcon("c4", bx, wy, BOMB_WHITE, 15);
+      // right of the marker: defusing, the seconds of blindness left
+      let sx = px + R + 13;
+      if (valAt(p.dg, t, 0) === 1 && drawIcon("defuse", sx, py, INK, 14)) sx += 11;
+      if (it.bl) {
+        ctx.font = "700 12px " + FF; ctx.fillStyle = C.flash;
+        ctx.textAlign = "left";
+        halo(it.bl.left.toFixed(1), sx - 5, py + 4);
+        ctx.textAlign = "center";
+      }
+    }
+    // the names last, over everything. Their places do not depend on what is
+    // hovered: the living first, a dead one's name (hover only) gives way
+    const taken = [];
+    for (let i = ord.length - 1; i >= 0; i--) {
+      const it = ord[i], p = it.p, s = it.s, px = it.px, py = it.py, R = it.R;
+      if (!s.al && it.pi !== hov) continue;
+      if (S.labels || it.hot) {
+        ctx.font = "600 12px " + FF;
+        const w = Math.ceil(ctx.measureText(p.name).width) + 12;
+        const y0 = py - R - 8 - PLATE_H;
+        let y = y0;
+        for (let n = 0; n < 12; n++) {
+          const hit = taken.find((b) => Math.abs(b.x - px) < (b.w + w) / 2 + 2 && Math.abs(b.y - y) < PLATE_H + 2);
+          if (!hit) break;
+          y = hit.y - PLATE_H - 2;
+        }
+        taken.push({ x: px, y: y, w: w });
+        // moved away from its marker: a thin leader line
+        if (y < y0 - 1) {
+          ctx.strokeStyle = rgba(sideCol(p.side), 0.6); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(px, y + PLATE_H); ctx.lineTo(px, py - R - 3); ctx.stroke();
+        }
+        ctx.fillStyle = rgba(C.bg, it.hot ? 0.92 : 0.72);
+        roundRect(ctx, px - w / 2, y, w, PLATE_H, 4);
+        ctx.fill();
+        ctx.fillStyle = it.hot ? INK : sideCol(p.side);
+        ctx.fillText(p.name, px, y + 12.5);
       }
     }
   }
-  // the name plates of the current frame, for the canvas hover tooltip
-  // (the canvas has no DOM title: the hit-test draws its own floating tip)
-  let plates = [];
-  const PLATE_H = 14;
+  // the markers of the current frame, for the hover (hoverAt)
+  let marks = [];
+  const PLATE_H = 17;
   // the first tick each player dies (Infinity = alive the whole round,
   // -Infinity = dead from the start): the stacking order of the corpses
   const deathTick = P.map((p) => {
@@ -1497,21 +1777,18 @@ export default function (component) {
     for (let i = 1; i < al.length; i++) if (al[i - 1] && !al[i]) return d.t0 + i * d.step;
     return al[0] ? Infinity : -Infinity;
   });
-  function plateWFor(p) {
-    ctx.font = "600 10px " + FF;
-    return ctx.measureText(p.name).width + 10;
-  }
-
+  // the hits that did not kill: the one that did is the cross of the kill
+  const wounds = d.hits.filter((h) => !d.kills.some((k) => k[2] === h[2] && Math.abs(k[0] - h[0]) <= 2));
   function drawImpacts() {
     const fadeHit = 0.45 * d.tr, fadeKill = 1.2 * d.tr;
-    for (const h of d.hits) {
+    for (const h of wounds) {
       const tk = h[0], v = h[2] >= 0 ? P[h[2]] : null;
       if (!visible(v) || tk > t || t - tk > fadeHit) continue;
       const s = state(v, tk);
       if (!s || s.x == null) continue;
       const q = toPx(s.lvl, s.x, s.y), px = q[0], py = q[1];
-      const k = 1 - (t - tk) / fadeHit, r = 6 + 5 * k;
-      ctx.globalAlpha = k; ctx.strokeStyle = C.hit; ctx.lineWidth = 2;
+      const k = 1 - (t - tk) / fadeHit, r = 9 + 7 * k;
+      ctx.globalAlpha = 0.85 * k; ctx.strokeStyle = C.hit; ctx.lineWidth = 1.5;
       ctx.beginPath();  // 4-point star
       ctx.moveTo(px, py - r); ctx.lineTo(px + r * 0.35, py - r * 0.35);
       ctx.lineTo(px + r, py); ctx.lineTo(px + r * 0.35, py + r * 0.35);
@@ -1527,7 +1804,7 @@ export default function (component) {
       const q = toPx(s.lvl, s.x, s.y), px = q[0], py = q[1];
       ctx.globalAlpha = 1 - (t - tk) / fadeKill;
       ctx.strokeStyle = C.dead; ctx.lineWidth = 2.5;
-      const r = 9;
+      const r = 10;
       ctx.beginPath();
       ctx.moveTo(px - r, py - r); ctx.lineTo(px + r, py + r);
       ctx.moveTo(px + r, py - r); ctx.lineTo(px - r, py + r);
@@ -1544,7 +1821,7 @@ export default function (component) {
     return s;
   };
   const deadLeg = el("span");
-  deadLeg.append(iconEl("skull", lab.dead || "dead", 10) || document.createTextNode("\u2715 "), document.createTextNode(" " + (lab.dead || "dead")));
+  deadLeg.append(iconEl("skull", lab.dead || "dead", 14) || document.createTextNode("\u2715 "), document.createTextNode(" " + (lab.dead || "dead")));
   leg.append(
     mark("rr-dot", C.ct, "CT"), mark("rr-dot", C.t, "T"),
     deadLeg,
@@ -1553,13 +1830,17 @@ export default function (component) {
     mark("rr-legline", C.ct, lab.leg_ct || "CT kill"),
     mark("rr-legline", C.t, lab.leg_t || "T kill"),
   );
-  box.appendChild(leg);
-  if (lab.howto) box.appendChild(el("div", "rr-howto", lab.howto));
+  const help = el("details", "rr-help");
+  help.append(el("summary", null, lab.howto_title || "?"), leg);
+  if (lab.howto) help.appendChild(el("div", "rr-howto", lab.howto));
+  help.open = !!S.help;
+  help.addEventListener("toggle", () => { S.help = help.open; });
+  box.appendChild(help);
 
   // ---------- sync / draw ------------------------------------------------------------------------------------------------------------
   let builtSel = null;
   function sync() {
-    playBtn.textContent = playing ? "\u23F8" : "\u25B6";
+    playBtn.innerHTML = playing ? ICO.pause : ICO.play;
     playBtn.title = playing ? (lab.pause || "pause") : (lab.play || "play");
     playBtn.setAttribute("aria-label", playBtn.title);
     spdBtn.textContent = spdTxt(speed) + " \u25BE";
@@ -1571,9 +1852,14 @@ export default function (component) {
       b.setAttribute("aria-checked", on ? "true" : "false");
     });
     const z = duelAt(sel);
-    exitBtn.style.display = z ? "" : "none";
-    lockChip.style.display = z ? "" : "none";
-    if (z) lockChip.textContent = (lab.locked || "") + ": " + z.kn + " \u25B8 " + z.vn;
+    // hidden, never removed: the buttons to the right of the exit button keep
+    // their place when a duel is picked
+    exitBtn.style.visibility = z ? "visible" : "hidden";
+    exitBtn.disabled = !z;
+    lockChip.style.visibility = z ? "visible" : "hidden";
+    if (z) lockChip.title = lockChip.textContent = z.kn + " \u25B8 " + z.vn;
+    dLab.textContent = (lab.duel || "duel") + " " + (z ? sel + 1 : "\u2013") + "/" + d.duels.length;
+    dPrev.disabled = dNext.disabled = !d.duels.length;
     const ri = roundIdx();
     rPrev.disabled = ri <= 0;
     rNext.disabled = ri < 0 || ri >= d.rounds.length - 1;
@@ -1600,21 +1886,30 @@ export default function (component) {
     drawDuelPanel();
     updateLeft();
     cardEls.forEach((c, i) => c.classList.toggle("up", !!(d.duels[i] && d.duels[i].b > t)));
-    timeLab.textContent = "\u23F1 " + fmtT((t - d.t0) / d.tr) + " / " + fmtT((winEnd() - d.t0) / d.tr);
-    ph.style.left = (Math.max(0, Math.min(1, pct(t))) * 100) + "%";
+    timeNow.textContent = fmtT((t - T0) / d.tr);
+    timeEnd.textContent = fmtT((winEnd() - T0) / d.tr);
+    const at = (Math.max(0, Math.min(1, pct(t))) * 100) + "%";
+    ph.style.left = at;
+    fill.style.width = at;
     track.setAttribute("aria-valuenow", Math.round(t));
+    // nothing to reset while the map is where it was put
+    const still = !panels.some((p) => p && (p.v.z !== 1 || p.v.dx || p.v.dy));
+    if (resetBtn.disabled !== still) resetBtn.disabled = still;
+    if (mouse) hoverAt();
     S.st = { t: t, playing: playing, sel: sel, speed: speed, hidden: Object.keys(S.hidden), z: panels.map((p) => (p ? p.v.z : 1)) };
   }
 
   // ---------- init ------------------------------------------------------------------------------------------------------------------------
-  buildOutcome();
-  layout();
   applyPanel();
+  buildRounds();
+  layout();
   buildLeft();
   buildCards();
-  buildRounds();
   sync();
   draw();
+  if (isFull()) onFull();
+  const slide = requestAnimationFrame(() => requestAnimationFrame(() => left.classList.add("slide")));
+  disposers.push(() => cancelAnimationFrame(slide));
   // re-layout only on a real width change: the canvas height itself depends
   // on W, and reacting to our own height edits would loop the observer
   if (typeof ResizeObserver !== "undefined") {
@@ -1627,5 +1922,22 @@ export default function (component) {
     ro.observe(wrap);
     disposers.push(() => ro.disconnect());
   }
+  // the ResizeObserver only sees widths: the height of the window (and a
+  // browser without the observer) comes through the window's resize event
+  let rzRaf = null;
+  const onWinResize = () => {
+    if (rzRaf != null) return;
+    rzRaf = requestAnimationFrame(() => {
+      rzRaf = null;
+      const bw = box.getBoundingClientRect().width;
+      if ((window.innerHeight || 900) === lastVH && Math.abs(bw - lastBW) < 1) return;
+      layout(); draw();
+    });
+  };
+  window.addEventListener("resize", onWinResize);
+  disposers.push(() => {
+    window.removeEventListener("resize", onWinResize);
+    if (rzRaf != null) cancelAnimationFrame(rzRaf);
+  });
   return cleanup;
 }

@@ -7,11 +7,19 @@
 There is no "selected player" here: a replay shows everyone the same way.
 Layout (everything client-side, like the in-game spectator HUD):
 
-- the ROUND RESULT above the map: who won and HOW (bomb exploded, bomb
-  defused, everybody eliminated, time ran out) from the demo's own
-  round_end event, with the bomb plant / defuse as markers on the timeline;
-- the MAP is the whole stage: the player and duel panels float OVER the
-  canvas with a transparent chrome (each hides from a transport button);
+- the MAP is the whole stage: from 900px of width the player and duel panels
+  float OVER the canvas with a transparent chrome (each hides from a
+  transport button); under 900px they STACK under the map in the same frame
+  (the players a column per team, the duels in a grid). The map is as high
+  as the screen allows (360-900px, never over 0.62 of its width), its art is
+  toned down and fitted between the panels; a saturated colour always means
+  a team, the state of the interface is white;
+- NOTHING MOVES while it plays: every line of a card has a fixed height and
+  every element of it (weapon, armor, HP, grenades, bomb, status, money,
+  speed) is a slot of a fixed width that exists with or without an icon in
+  it; the card shows as much as the height of the map allows (data-dens):
+  all three lines, or two (the money moves behind the K/D), or the name
+  line only;
 - LEFT overlay: the players of both teams in ONE list sorted by nickname
   inside a team, so every player keeps his place from round to round (sides
   swap at halftime, the team colour follows them). A spectator-style card
@@ -29,7 +37,7 @@ Layout (everything client-side, like the in-game spectator HUD):
   view-direction arrow, the name, an HP bar and the weapon; a dashed ring
   marks a player moving faster than the stop threshold; the living stack
   in the left table's order and the dead lie under them in death order,
-  grey skulls included; flashed ones get a white halo; shots are fading
+  grey skulls included; flashed ones turn white with a ring that runs out; shots are fading
   tracers and hits stars;
 - the TIMELINE under the map: kill marks coloured by the KILLER'S side, the
   bomb events, the selected duel's segment highlighted, a draggable
@@ -323,7 +331,7 @@ def _player_frames(
             alive = g["is_alive"].astype(float).ffill().fillna(1.0).astype(bool).to_numpy()
             p["al"] = alive.astype(int).tolist()
         if "flash_duration" in g.columns:
-            fl = pd.to_numeric(g["flash_duration"], errors="coerce").fillna(0.0).to_numpy()
+            fl = pd.to_numeric(g["flash_duration"], errors="coerce").ffill().fillna(0.0).to_numpy()
             if (fl > 0.2).any():  # most players are never flashed: no array
                 p["fl"] = [_r1(v) for v in fl]
         if "active_weapon_name" in g.columns:
@@ -676,6 +684,7 @@ def round_payload(
     return {
         "t0": m.t0,
         "t1": m.t1,
+        "start": int(data.get("start", m.t0)),
         "step": m.step,
         "tr": m.tr,
         "round": int(data.get("round") or 0),

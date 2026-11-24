@@ -59,8 +59,7 @@ const heads = $$(".rr-th").map((n) => n.textContent.replace(/\s+/g, " ").trim())
 assert.strictEqual(heads.length, 2);
 assert.ok(heads[0].startsWith("CT") && heads[1].startsWith("T"));
 // each team header sits right before the first player of that team
-const order = [...root.querySelector(".rr-left").children]
-  .filter((n) => n.classList.contains("rr-th") || n.classList.contains("rr-prow"))
+const order = $$(".rr-left .rr-th, .rr-left .rr-prow")
   .map((n) => (n.classList.contains("rr-th") ? "H" : "P"))
   .join("");
 assert.ok(/^HP+HP+$/.test(order), order);
@@ -93,6 +92,92 @@ await new Promise((r) => setTimeout(r, 60));
 assert.deepStrictEqual(kdOf("zeta"), [7, 12]);
 ok("player cards: kills / deaths of the match, live; a dead player's HP is the skull");
 
+// nothing in a card appears or disappears: every slot is in every card,
+// empty or not
+const SLOTS = [".rr-pw", ".rr-pa", ".rr-php", ".rr-putil", ".rr-pbm", ".rr-pind", ".rr-pm", ".rr-psp", ".rr-pkd", ".rr-pbar i"];
+for (const r of $$(".rr-prow")) {
+  for (const c of SLOTS) assert.ok(r.querySelector(c), "slot " + c);
+  assert.strictEqual(r.querySelectorAll(".rr-pl1, .rr-pl2, .rr-pl3").length, 3);
+}
+assert.strictEqual($$(".rr-pg").length, 2);   // one group per team
+ok("fixed slots: every card has all of them");
+
+// the screen decides how much of a card is shown: height -> density, width -> stacked panels
+const screen = async (wrapW, boxW, vh) => {
+  sizes["rr-wrap"] = [wrapW, 470];
+  sizes.rr = [boxW, 600];
+  window.innerHeight = vh;
+  window.dispatchEvent(new window.Event("resize"));
+  await new Promise((r) => setTimeout(r, 80));
+};
+const where = (name) => (card(name).querySelector(".rr-pm").closest(".rr-pl3") ? "pl3" : card(name).querySelector(".rr-pm").closest(".rr-pl2") ? "pl2" : "?");
+await screen(1100, 1180, 1000);   // wide and tall: all three lines
+assert.strictEqual($(".rr-left").dataset.dens, "full");
+assert.strictEqual(where("zeta"), "pl3");
+assert.ok(!$(".rr").classList.contains("narrow"));
+await screen(1100, 1180, 800);    // a shorter screen: two lines, the money moves up behind the K/D
+assert.strictEqual($(".rr-left").dataset.dens, "cmp");
+assert.strictEqual(where("zeta"), "pl2");
+await screen(1100, 1180, 600);    // a short one: the name line only
+assert.strictEqual($(".rr-left").dataset.dens, "mini");
+await screen(700, 700, 800);      // narrow: the panels stack under the map, a card is whole
+assert.ok($(".rr").classList.contains("narrow"));
+assert.strictEqual($(".rr-left").dataset.dens, "full");
+assert.strictEqual(where("zeta"), "pl3");
+await screen(1100, 1180, 1000);
+assert.strictEqual($(".rr-left").dataset.dens, "full");
+assert.strictEqual(where("zeta"), "pl3");
+assert.deepStrictEqual(kdOf("zeta"), [7, 12]);   // a relayout keeps the live numbers
+await screen(760, 1180, 768);
+ok("density follows the screen: full / cmp / mini by height, stacked panels under 900px");
+
+// a card and the map point at the same player; the Names toggle hides the labels of the map
+{
+  const row = card("zeta");
+  row.dispatchEvent(new window.MouseEvent("mouseenter"));
+  assert.deepStrictEqual($$(".rr-prow.hov .rr-pname").map((n) => n.textContent), ["zeta"]);
+  row.dispatchEvent(new window.MouseEvent("mouseleave"));
+  assert.strictEqual($$(".rr-prow.hov").length, 0);
+  const names = $(".rr-grp.vw .rr-sbtn");
+  assert.ok(names.classList.contains("on") && root.__rr.labels === true);
+  click(names);
+  assert.ok(!names.classList.contains("on") && root.__rr.labels === false);
+  click(names);
+  assert.strictEqual(root.__rr.labels, true);
+  ok("hover links a card with the map; the Names toggle");
+}
+
+// blinded: the demo holds the WHOLE length of the flash, what is left is counted
+// from its start; the card shows the seconds and a wash that runs out
+{
+  const pi = payload.players.findIndex((p) => p.name === "Charlie");
+  const n = payload.players[pi].x.length, from = 10, secs = 2;
+  const held = Math.ceil(secs * 1.4 * payload.tr / payload.step);   // the demo holds it through the fade
+  const fl = Array.from({ length: n }, (_, i) => (i >= from && i < from + held ? secs : 0));
+  cleanup();
+  const at = (s) => payload.t0 + from * payload.step + s * payload.tr;
+  const mountAt = async (tick) => {
+    cleanup = mount({ ...payload, at: tick, sel: -1, players: payload.players.map((p, i) => (i === pi ? { ...p, fl } : p)) });
+    await new Promise((r) => setTimeout(r, 60));
+  };
+  const look = () => [card("Charlie").classList.contains("blind"), card("Charlie").querySelector(".rr-pfc b").textContent,
+    Number(card("Charlie").querySelector(".rr-pfl i").style.getPropertyValue("--k"))];
+  await mountAt(at(-0.2));
+  assert.strictEqual(look()[0], false);
+  await mountAt(at(0.5));
+  assert.deepStrictEqual(look(), [true, "1.5", 0.75]);
+  cleanup();
+  await mountAt(at(1.5));
+  assert.deepStrictEqual(look(), [true, "0.5", 0.25]);
+  cleanup();
+  await mountAt(at(2.3));   // still held by the demo, but over
+  assert.strictEqual(look()[0], false);
+  cleanup();
+  cleanup = mount(payload);
+  await new Promise((r) => setTimeout(r, 100));
+  ok("blinded: the seconds left and the wash run out by the flash's own length");
+}
+
 // every duel of the round has a card
 assert.strictEqual($$(".rr-card").length, payload.duels.length);
 ok("a card for every duel of the round (" + payload.duels.length + ")");
@@ -124,7 +209,7 @@ ok("the hidden choice survives a round switch");
 if (payload.duels.length) {
   click($$(".rr-card")[0]);
   const z = payload.duels[0];
-  assert.ok($(".rr-lock").style.display !== "none");
+  assert.ok($(".rr-lock").style.visibility !== "hidden" && !$(".rr-sbtn.exit").disabled);
   seekFrac(0.99);
   assert.ok(root.__rr.st.t <= z.b && root.__rr.st.t >= z.a);
   const named = $$(".rr-dcol .rr-dnm b").map((n) => n.textContent).sort();
@@ -132,6 +217,9 @@ if (payload.duels.length) {
   save("duel");
   click($(".rr-sbtn.exit"));
   assert.strictEqual(root.__rr.st.sel, -1);
+  // hidden, not removed: the controls to the right of the exit button do not move
+  assert.ok($(".rr-lock").style.visibility === "hidden" && $(".rr-sbtn.exit").style.visibility === "hidden");
+  assert.ok($(".rr-ctl").contains($(".rr-lock")) && $(".rr-ctl").contains($(".rr-sbtn.exit")));
   ok("a duel locks the playhead to its segment, the panel names both duelists, exit releases");
 }
 
@@ -146,11 +234,8 @@ if (payload.rounds.length > 1) {
   ok("a round chip click -> one 'rnd' trigger " + JSON.stringify(triggers[0]));
 }
 
-// the result banner: who won and how, plus the bomb story
-const out = $(".rr-out");
-assert.ok(out && out.classList.contains(payload.out.win === "CT" ? "wct" : "wt"));
-if (payload.out.why) assert.ok(out.textContent.includes(payload.lab["why_" + payload.out.why]));
-ok("result banner: " + out.querySelector(".rr-out1").textContent.replace(/\s+/g, " ").trim());
+// the round result banner is gone: the round chips + the timeline markers carry it
+assert.strictEqual($(".rr-out"), null);
 if (payload.bomb.length) {
   assert.strictEqual($$(".rr-bmk").length, payload.bomb.length + (payload.out.end != null ? 1 : 0));
   ok("bomb events + the round end are marked on the timeline (" + $$(".rr-bmk").length + ")");
@@ -172,6 +257,14 @@ assert.ok(!row0.querySelector(".rr-pnum"), "armor shows no number");
 assert.ok(!$(".rr-eco"), "no bottom economy block");
 assert.ok(heads.some((h) => /\$\d/.test(h)), "team money sits in the group headers: " + heads.join(" | "));
 assert.ok($$(".rr-prow .rr-pbm .rr-ico").length >= 1, "the bomb carrier is marked in the utility row");
+// the kit sits in the same slot as the bomb (a CT line has no hole), never among the grenades
+assert.ok(card("Charlie").querySelector(".rr-pbm .rr-ico"), "the T bomb carrier: the bomb in the slot");
+assert.ok(card("bravo").querySelector(".rr-pbm .rr-ico"), "the CT with a kit: the kit in the same slot");
+assert.ok(!card("bravo").querySelector(".rr-putil .rr-ico[title*='kit' i]"), "no kit among the grenades");
+assert.strictEqual(card("delta").querySelectorAll(".rr-pbm .rr-ico").length, 0);  // nothing to carry: the slot stays empty
+// the bomb and the kit have the colour of the other icons, the money is green
+assert.ok(!card("Charlie").querySelector(".rr-pbm .rr-ico").style.getPropertyValue("--icol"));
+assert.ok(!card("bravo").querySelector(".rr-pbm .rr-ico").style.getPropertyValue("--icol"));
 // every name is on hover only: the weapon icon carries its name in the title
 assert.ok(row0.querySelector(".rr-pw .rr-ico").title.length > 0);
 ok("players table: weapon, armor, hp, money, grenades, bomb carrier; economy of both teams");
@@ -341,11 +434,10 @@ if (Object.keys(payload.icons || {}).length) {
   assert.ok(dk && dk.querySelector(".rr-ico"), "deaths cell uses the game skull icon");
   ok("player list: live weapon icons; the dead get the skull, K/D uses the game skull");
 
-  // the outcome banner, the round chips and the timeline markers
-  assert.ok($(".rr-out .rr-why .rr-ico"), "outcome why icon missing");
+  // the round chips and the timeline markers
   assert.ok($$(".rr-rd .rr-ico").length > 0, "round chip icons missing");
   assert.ok($$(".rr-bmk .rr-ico").length >= 3, "timeline marker icons missing");
-  ok("outcome banner, round chips and bomb timeline markers carry icons");
+  ok("round chips and bomb timeline markers carry icons");
 
   // the duel panel names the weapon with its silhouette
   click($$(".rr-card")[0]);
@@ -353,9 +445,37 @@ if (Object.keys(payload.icons || {}).length) {
   click($(".rr-sbtn.exit"));
   ok("the duel panel shows the duel's weapon icon");
 
-  // the hover tooltip exists (hidden until the pointer is over a plate)
-  assert.ok($(".rr-tip") && $(".rr-tip").hidden);
-  ok("the canvas hover tooltip is in place (hidden)");
+  // no second copy of what is on the screen: no tooltip on the map, none on a duel card
+  assert.ok(!$(".rr-tip"));
+  assert.ok($$(".rr-card").every((c) => !c.title && c.getAttribute("aria-label")));
+  ok("no tooltips that repeat the card");
+
+  // the bomb in hands is the weapon: the bomb slot stays empty, a knife is lower than a rifle
+  {
+    cleanup();
+    const inHands = payload.players.map((p) => (p.name === "Charlie" ? { ...p, w: [[payload.t0, "c4"]] } : p));
+    cleanup = mount({ ...payload, at: payload.t0, players: inHands });
+    await new Promise((r) => setTimeout(r, 80));
+    assert.strictEqual(card("Charlie").querySelectorAll(".rr-pbm .rr-ico").length, 0);
+    assert.strictEqual(card("Charlie").querySelectorAll(".rr-pw .rr-ico").length, 1);
+    cleanup();
+    const wide = { ...payload.icons, knife: ["data:,", 440, 110], ak47: ["data:,", 678, 222] };
+    const hOf = (n) => parseFloat(card(n).querySelector(".rr-pw .rr-ico").style.getPropertyValue("--h"));
+    cleanup = mount({ ...payload, at: payload.t0, icons: wide, players: payload.players.map((p) => (
+      p.name === "Charlie" ? { ...p, w: [[payload.t0, "knife"]] } : p.name === "delta" ? { ...p, w: [[payload.t0, "ak47"]] } : p)) });
+    await new Promise((r) => setTimeout(r, 80));
+    assert.ok(hOf("Charlie") * 4 < hOf("delta") * 3.05, "a knife is shorter than a rifle: " + hOf("Charlie") + " / " + hOf("delta"));
+    ok("the bomb in hands is shown once; icons of one size");
+  }
+  // the clock counts from the end of the freeze, the lead before it is negative
+  {
+    cleanup();
+    cleanup = mount({ ...payload, at: payload.t0, start: payload.t0 + 2 * payload.tr });
+    await new Promise((r) => setTimeout(r, 80));
+    assert.strictEqual($(".rr-time b").textContent, "-0:02");
+    assert.strictEqual($$(".rr-bm .rr-tm").map((n) => n.textContent).includes("0:00"), true);
+    ok("the round clock starts at the end of the freeze");
+  }
 
   // the no-icon fallback: same payload without icons -> plain text everywhere
   cleanup();

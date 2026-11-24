@@ -63,6 +63,9 @@ red-400 = "#e8625a"     # tier bad / loss
 win-400 = "#5fd0a0"     # result win / positive
 blue-400 = "#56b4e9"    # info / good-series
 grey-400 = "#8899aa"    # context series (misses, baselines, thresholds)
+# --- the two teams on the 2D replay (muted: there are many of them on a screen)
+ct-400 = "#70adec"
+t-400 = "#e8a757"
 # --- subtle team row tints (backgrounds, not text colours)
 tint-t = "#2a2118"
 tint-ct = "#182432"
@@ -104,6 +107,8 @@ result-loss = "negative"
 team-t = "tint-t"                # T row background tint
 team-ct = "tint-ct"              # CT row background tint
 surface-selected = "pink-strong" # selected row highlight
+side-ct = "ct-400"               # CT on the 2D replay (markers, names, marks)
+side-t = "t-400"                 # T on the 2D replay
 context = "grey-400"             # context series: misses, baselines, thresholds
 chart-1 = "accent"               # categorical palette leads with the brand pair
 chart-2 = "opponent"

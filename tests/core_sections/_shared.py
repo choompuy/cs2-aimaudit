@@ -152,6 +152,15 @@ def make_match():
                 "game_time": [70.0, 137.0],
             }
         ),
+        # the flash behind S1's flash_duration at 110
+        "player_blind": pd.DataFrame(
+            {
+                "tick": [110],
+                "user_steamid": [S1],
+                "user_name": ["Alpha"],
+                "blind_duration": [2.0],
+            }
+        ),
     }
     # Rows exist at every fire tick AND tick-1 (core requests both). S1 and S3
     # have rows on all such ticks of rounds 1; S4 only around its own shot

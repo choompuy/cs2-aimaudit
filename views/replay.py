@@ -454,6 +454,7 @@ _RR_LABEL_KEYS = (
     "pt_player", "pt_weapon", "pt_armor", "pt_hp", "pt_money", "pt_helmet",
     "pt_money_t", "pt_kit", "pt_bomb", "pt_defusing", "pt_blind",
     "pt_kills", "pt_deaths",
+    "duel", "full", "full_exit", "labels", "labels_hide", "labels_show", "howto_title",
 )
 
 
@@ -475,12 +476,10 @@ def _replay_labels(t, data: dict) -> dict:
 def _replay_colors() -> dict:
     """The replay front end's colour bundle (theme tokens + palette)."""
     return {
-        "ct": theme.tok("info"),
-        "t": theme.tok("warning"),
-        "ctb": theme.tok("team-ct"),
-        "ttb": theme.tok("team-t"),
+        "ct": theme.tok("side-ct"),
+        "t": theme.tok("side-t"),
         "dead": PAL["bad"],
-        "hit": theme.tok("chart-5"),
+        "hit": theme.tok("text-primary"),
         "flash": theme.tok("text-primary"),
         "good": theme.tok("positive"),
         "bad": PAL["bad"],

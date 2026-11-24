@@ -53,8 +53,9 @@ check(
 )
 _w = _bw([10000, 20000], [10800, 20900], _ev([(10200, 1), (10900, 1), (10950, 2), (20300, 2), (20600, 2)]), 64)
 check(
-    "windows: round_officially_ended is the end of the round (the win panel is part of it)",
-    _w == {1: (10000, 10800), 2: (20000, 20900)},
+    "windows: the round ends on the tick before round_officially_ended (the win panel is part of it,"
+    " the respawn of the next round is not)",
+    _w == {1: (10000, 10799), 2: (20000, 20899)},
     _w,
 )
 _w = _bw([10000, 20000, 30000], [], _ev([(10200, 1), (30200, 3)]), 64)
@@ -193,7 +194,7 @@ _rr_end["events"]["round_officially_ended"] = pd.DataFrame({"tick": [900, 1900]}
 FakeParser.demos["rr_end.dem"] = _rr_end
 check(
     "load_demo: round_officially_ended is the end of the round",
-    core.load_demo("rr_end.dem").round_windows == {1: (100, 900)},
+    core.load_demo("rr_end.dem").round_windows == {1: (100, 899)},
     core.load_demo("rr_end.dem").round_windows,
 )
 # no round_freeze_end at all: windows from the events' own round numbers
@@ -261,6 +262,38 @@ check(
     and core.classify_round_end("", 12) == "time"
     and core.classify_round_end("", None) == "other"
     and core.classify_round_end(None, "x") == "other",
+)
+# the last round of a match has no officially_ended: it lasts to its own end
+_lw_ev = pd.DataFrame({"tick": [200, 1000], "round": [1, 1]})
+check(
+    "round windows: without officially_ended a late defuse / round_end stays inside",
+    core.build_round_windows([100], [], _lw_ev, 64)[1] == (100, 1320)
+    and core.build_round_windows([100], [], _lw_ev, 64, marks=[50, 1400])[1] == (100, 1720)
+    and core.build_round_windows([100], [], _lw_ev, 64, marks=[99999])[1] == (100, 1320)
+    and core.build_round_windows([100], [1200], _lw_ev, 64, marks=[1400])[1] == (100, 1199),
+)
+# the round_end demoparser2 0.42.2 builds itself: no message, the reason is a word
+_words = pd.DataFrame(
+    {
+        "reason": ["bomb_defused", "ct_killed", "t_killed", "bomb_exploded", "time_ran_out", "vip_killed"],
+        "round": [1, 2, 3, 4, 5, 6],
+        "tick": [150, 250, 350, 450, 550, 650],
+        "winner": ["CT", "T", "CT", "T", "CT", "T"],
+    }
+)
+_wi = core.build_round_info({n: (n * 100, n * 100 + 90) for n in range(1, 7)}, _words, [])
+check(
+    "round_info: the words demoparser2 puts into round_end.reason",
+    [_wi[n]["reason"] for n in range(1, 7)] == ["defuse", "elim", "elim", "bomb", "time", "other"]
+    and [_wi[n]["winner"] for n in range(1, 7)] == ["CT", "T", "CT", "T", "CT", "T"],
+    _wi,
+)
+check(
+    "classify_round_end: surrender / hostage / draw words, a number as text still works",
+    core.classify_round_end("", "ct_surrender") == "surrender"
+    and core.classify_round_end("", "hostage_rescued") == "hostage"
+    and core.classify_round_end("", "draw") == "draw"
+    and core.classify_round_end("", "12") == "time",
 )
 _re = pd.DataFrame(
     {
@@ -362,6 +395,31 @@ check(
     core.load_demo("rr.dem").round_info,
 )
 
+# --- the span of a replay: a lead before the freeze ends, one tail for every round -
+_span = core.replay._replay_span
+
+
+def _span_demo(end, deaths=(), bombs=()):
+    return type("D", (), {
+        "round_info": {2: {"end": end, "bomb": list(bombs)}},
+        "deaths": pd.DataFrame({"tick": list(deaths)}),
+    })()
+
+
+_sw = {1: (1000, 4000), 2: (5000, 9000)}
+check(
+    "replay span: 2 s before the freeze ends .. 5 s after the round is decided",
+    _span(_span_demo(8000), 2, _sw, 5000, 9000, 64) == (5000 - 128, 8000 + 320),
+)
+check(
+    "replay span: a late kill / plant keeps a second after it, never past the window",
+    _span(_span_demo(8000, deaths=[8500]), 2, _sw, 5000, 9000, 64)[1] == 8564
+    and _span(_span_demo(8000, bombs=[(8990, "plant", S1)]), 2, _sw, 5000, 9000, 64)[1] == 9000,
+)
+check(
+    "replay span: the lead stays out of the round before, an unknown end keeps the window",
+    _span(_span_demo(None), 2, {1: (1000, 4950), 2: (5000, 9000)}, 5000, 9000, 64) == (4951, 9000),
+)
 # --- round_replay_data -------------------------------------------------------
 _rrd = core.round_replay_data(_rrdemo, 1)
 check(
@@ -417,7 +475,7 @@ check(
 _rr_small = core.round_replay_data(_rrdemo, 1, max_samples=50)
 check(
     "round_replay_data: grid is downsampled to <= max_samples",
-    _rr_small["step"] == 15
+    _rr_small["step"] > 1
     and len(range(_rr_small["t0"], _rr_small["t1"] + 1, _rr_small["step"])) <= 50,
     (_rr_small["step"], _rr_small["t0"], _rr_small["t1"]),
 )

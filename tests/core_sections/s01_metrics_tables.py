@@ -172,6 +172,33 @@ check(
     and not bool(s4c["flashed"].iloc[0]),
     s1c["flashed"].tolist(),
 )
+# flash_duration holds the WHOLE length of a flash through its fade: only what is
+# left of it, counted from the player_blind event, makes a shot a flashed one
+def _flash_at_110(event):
+    m = make_match()
+    if event is None:
+        m["events"].pop("player_blind")
+    else:
+        m["events"]["player_blind"] = m["events"]["player_blind"].assign(**event)
+    FakeParser.demos["flash.dem"] = m
+    f = core.shots_table(core.load_demo("flash.dem"))
+    return f[f["sid"] == S1].set_index("tick")["flashed"]
+
+
+_fade = _flash_at_110({"tick": [110 - 120]})  # 1.875 s ago: 0.125 s left of 2.0
+check("flashed: the tail of the blindness is not a flashed shot", bool(_fade[110]) is False, _fade.tolist())
+_mid = _flash_at_110({"tick": [110 - 64]})  # 1 s left
+check("flashed: a second left is", bool(_mid[110]) is True and bool(_mid[100]) is False, _mid.tolist())
+_gone = _flash_at_110({"tick": [110 - 170]})  # the fade (held by the server), long over
+check("flashed: the fade after the blindness is not", bool(_gone[110]) is False, _gone.tolist())
+_other = _flash_at_110({"blind_duration": [3.1]})
+check(
+    "flashed: a value without its own event is unknown, the rest stays known",
+    pd.isna(_other[110]) and bool(_other[100]) is False,
+    _other.tolist(),
+)
+_none = _flash_at_110(None)
+check("flashed: no player_blind events at all -> unknown, never 'not flashed'", _none.isna().all(), _none.tolist())
 check(
     "slowed at 120 (S1) and 115 (S3)",
     bool(s1c.loc[120, "slowed"]) is True

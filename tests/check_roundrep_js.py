@@ -65,6 +65,7 @@ ICON_FIXTURE = {
     "flashbang": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle fill="white" cx="12" cy="12" r="8"/></svg>',
     "smokegrenade": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="6" y="6" width="12" height="12"/></svg>',
     "c4": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><rect fill="white" x="4" y="4" width="16" height="16"/></svg>',
+    "defuse": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M5 6h14v4H5zM10 10h4v8h-4z"/></svg>',
     "blind": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="white" d="M12 3l7 12H5z"/></svg>',
 }
 

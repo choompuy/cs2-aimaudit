@@ -257,6 +257,15 @@ def make_match(rounds, weapons=("ak47",)):
                     ],
                 }
             ),
+            # the flash behind Alpha's flash_duration at t0+2
+            "player_blind": pd.DataFrame(
+                {
+                    "tick": [1000 * r + 2 for r in rounds],
+                    "user_steamid": [S1] * len(rounds),
+                    "user_name": [NAMES[S1]] * len(rounds),
+                    "blind_duration": [1.5] * len(rounds),
+                }
+            ),
             "player_hurt": pd.DataFrame(
                 {
                     "tick": [t for t, _, _, _, _ in hurt_t],

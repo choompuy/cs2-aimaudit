@@ -420,6 +420,56 @@ def _filter_gun_events(players, deaths, fires, hurts):
     return fires, hurts
 
 
+def _flash_left(p, td, flookup, name_to_sid, tickrate) -> pd.Series:
+    """Seconds of blindness LEFT on every row of ``td``.
+
+    flash_duration is not that number: the server writes the whole length of
+    the blindness at the flash and holds it there until the fade is over
+    (~1.4 times as long), so it only says THAT the player was flashed. What is
+    left is counted from the player_blind event the value came with. A value
+    without its event (the parser has none, another length) is unknown -> NaN.
+    """
+    fd = pd.to_numeric(td["flash_duration"], errors="coerce")
+    left = fd.where(fd <= 0).astype(float)
+    rows = td.loc[fd > 0, ["tick", "steamid"]].dropna()
+    if not len(rows):
+        return left
+    try:
+        ev = dict(p.parse_events(["player_blind"])).get("player_blind")
+    except Exception:  # noqa: BLE001 - old parser / no such event
+        ev = None
+    need = {"tick", "user_steamid", "blind_duration"}
+    if ev is None or not len(ev) or not need <= set(ev.columns):
+        # flashed shots exist and cannot be told from the fade: nothing is
+        # known (zeros alone would read as "0% flashed")
+        return pd.Series(float("nan"), index=td.index)
+    start = pd.DataFrame(
+        {
+            "at": pd.to_numeric(ev["tick"], errors="coerce"),
+            "steamid": fix_ids(
+                ev["user_steamid"],
+                flookup,
+                ev["user_name"] if "user_name" in ev.columns else None,
+                name_to_sid,
+            ).astype(object),
+            "dur": pd.to_numeric(ev["blind_duration"], errors="coerce"),
+        }
+    ).dropna()
+    start["at"] = start["at"].astype("int64")
+    rows = rows.astype({"tick": "int64", "steamid": object})
+    rows["fd"] = fd
+    m = pd.merge_asof(
+        rows.rename_axis("row").reset_index().sort_values("tick"),
+        start.sort_values(["at", "dur"]),
+        left_on="tick",
+        right_on="at",
+        by="steamid",
+    )
+    val = (m["dur"] - (m["tick"] - m["at"]) / tickrate).clip(lower=0.0)
+    left.loc[m["row"]] = val.where((m["dur"] - m["fd"]).abs() < 0.05).to_numpy()
+    return left
+
+
 def _parse_tick_table(p, fires, flookup, name_to_sid, header, say):
     """Phase 5: the tick table at the fire ticks, with speed.
 
@@ -453,9 +503,9 @@ def _parse_tick_table(p, fires, flookup, name_to_sid, header, say):
     td = _decode_buttons(td)
     td = _norm_alive(td)
     td = _extract_punch(td)
-    # shooter state at the fire ticks: flash_duration (seconds of
-    # blindness left) and velo_modifier (<1 = slowed by recent damage). A
-    # separate parse_ticks call: an unknown prop must not take the
+    # shooter state at the fire ticks: flash_duration (the whole length of the
+    # blindness; _flash_left makes the seconds left of it) and velo_modifier
+    # (<1 = slowed by recent damage). A separate parse_ticks call: an unknown prop must not take the
     # POS/buttons chain down with it (the buttons lesson). On
     # failure the columns stay absent -> flags come out NA, not False.
     try:
@@ -477,6 +527,8 @@ def _parse_tick_table(p, fires, flookup, name_to_sid, header, say):
                 state[["tick", "steamid"] + _keep], on=["tick", "steamid"], how="left"
             )
     tickrate = tickrate_from_header(header)
+    if "flash_duration" in td.columns:
+        td["flash_left"] = _flash_left(p, td, flookup, name_to_sid, tickrate)
     td = _add_speed(td, tickrate)
     return td, ticks_list, tickrate
 
@@ -641,7 +693,15 @@ def _build_rounds(p, deaths, fires, hurts, fe_rows, live_start, tickrate):
     _win_ev = _named_event_windows(deaths, fires, hurts)
     if not fe_live:
         fe_live = _synthesize_round_bounds(_win_ev, tickrate)
-    round_windows = build_round_windows(fe_live, off_ticks, _win_ev, tickrate)
+    marks = [
+        int(x)
+        for name in ("round_end", "bomb_defused", "bomb_exploded")
+        if "tick" in (df := _roe.get(name, pd.DataFrame())).columns
+        for x in pd.to_numeric(df["tick"], errors="coerce").dropna()
+    ]
+    round_windows = build_round_windows(
+        fe_live, off_ticks, _win_ev, tickrate, marks=marks
+    )
     round_info = _round_info_from_events(_roe, round_windows, live_start)
     return round_windows, round_info
 

@@ -407,6 +407,33 @@ def _kd_before(demo: Demo, lo: int) -> dict[str, list[int]]:
     return out
 
 
+# the replay of a round: from REPLAY_LEAD_S before the freeze ends (everybody still
+# stands) to REPLAY_TAIL_S after the round is decided
+REPLAY_LEAD_S = 2.0
+REPLAY_TAIL_S = 5.0
+
+
+def _replay_span(demo, round_no, windows, lo, hi, tickrate) -> tuple[int, int]:
+    """The ticks the replay shows of the round window (lo, hi).
+
+    The lead never reaches into the round before; the tail is the same for
+    every round (the demo's own runs 5-11 s) but keeps every kill and bomb
+    event of the window, with a second after it.
+    """
+    t0 = lo - int(REPLAY_LEAD_S * tickrate)
+    t0 = max([t0, 0, *(int(w[1]) + 1 for n, w in windows.items() if n != round_no and w[1] < lo)])
+    info = (getattr(demo, "round_info", None) or {}).get(round_no) or {}
+    if info.get("end") is None:
+        return t0, hi
+    t1 = int(info["end"]) + int(REPLAY_TAIL_S * tickrate)
+    last = [int(b[0]) for b in info.get("bomb") or ()]
+    kills = _events_in_window(demo.deaths, lo, hi, {"tick"})
+    if kills is not None and len(kills):
+        last.append(int(kills["tick"].max()))
+    t1 = max([t1, *(x + tickrate for x in last)])
+    return t0, min(hi, t1)
+
+
 def round_replay_data(
     demo: Demo,
     round_no: int,
@@ -420,12 +447,14 @@ def round_replay_data(
     round's shots, kills and hits.
 
     The span is the demo's own round window (demo.round_windows, built by
-    build_round_windows); a round that cannot be placed raises
+    build_round_windows) with a short lead before the freeze ends and one
+    length of tail (_replay_span); ``start`` is the tick the round clock
+    counts from (the end of the freeze). A round that cannot be placed raises
     ValueError("no_round_data"). Frames are sampled on a uniform grid
     (<= max_samples points, the UI interpolates) and ffilled per player
     like the timeline. Returns a dict for ui.roundrep.round_payload:
 
-    {"t0", "t1", "step", "tickrate", "round", "frames": {sid: df},
+    {"t0", "t1", "start", "step", "tickrate", "round", "frames": {sid: df},
      "keys": [available key names], "shots": [(tick, sid, weapon)],
      "kills": [(tick, attacker, victim, weapon, hs)],
      "hits": [(tick, attacker, victim)],
@@ -447,11 +476,18 @@ def round_replay_data(
     if hi <= lo:
         raise ValueError("no_round_data")
 
-    frames, step, keys = _round_frames(DemoParser(demo.path), lo, hi, max_samples)
+    t0, hi = _replay_span(demo, round_no, windows, lo, hi, tickrate)
+    frames, step, keys = _round_frames(DemoParser(demo.path), t0, hi, max_samples)
+    # no lead where the demo has nothing before the round (moved by whole steps:
+    # the frames lie on this grid)
+    seen = [int(f["tick"].min()) for f in frames.values() if len(f)]
+    if seen:
+        t0 += max(0, (min(lo, *seen) - t0) // step) * step
     out_shots, out_kills, out_hits = _round_events(demo, lo, hi)
     return {
-        "t0": int(lo),
+        "t0": int(t0),
         "t1": int(hi),
+        "start": int(lo),
         "step": step,
         "tickrate": int(tickrate),
         "round": round_no,
