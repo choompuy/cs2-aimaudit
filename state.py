@@ -23,8 +23,6 @@ import streamlit as st
 # ------------------------------------------------------------ value domains
 NAV_PAGES = ("dashboard", "matches", "settings", "guide")
 MATCH_TABS = ("overview", "shooting", "duels", "map", "replay")
-# single-level page ids a pre-redesign session may still carry
-LEGACY_PAGES = {"overview", "shooting", "duels", "map", "replay", "timeline"}
 
 # --------------------------------------------------------- the shared keys
 PAGE = "page"  # the st.navigation page that is running (shell mirrors

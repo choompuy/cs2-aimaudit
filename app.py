@@ -128,8 +128,6 @@ def main() -> None:
     filters_ui.load_url_state()
     ctx = context.Ctx()
     pg = shell.navigation(ctx, _PAGE_FNS)
-    shell.load_nav_url()
-    shell.migrate_nav()
     # the fmt helpers (ui/format.py) read the run's translator and names
     ui.format.configure(ctx.t, ctx.name_of)
     pg.run()

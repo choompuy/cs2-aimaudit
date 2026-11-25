@@ -11,8 +11,8 @@ written here, so the doc and the guardrails stay honest.
 | --------------------------------- | --------: | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `app.py`                          |       148 | Entry point only: page config, theme injection, the `st.Page` bodies (`_PAGE_FNS`) handed to `shell.navigation`, and `_match` - the only pipeline that loads a demo. |
 | `context.py`                      |       170 | Cached `core` calls (`get_demo`, `get_shots`, `get_duels`, `get_timeline`, `get_round_replay`) and the `Ctx` dataclass every page renders from. |
-| `shell.py`                        |       904 | App shell: `st.navigation` + the `st.page_link` rail + the language box (`navigation`), the URL state (`?m=&tab=`, legacy `?p=`), `go_page`/`go_match`, demo loading, the match header (`st.badge`), the context row (incl. the identity ⋮ menu), the ask card / remember logic, the library panel. |
-| `filters_ui.py`                   |       562 | URL state (`_URL_KEYS`) and link migration, presets, callbacks, the filter summary row + the Edit `st.popover`.                              |
+| `shell.py`                        |       904 | App shell: `st.navigation` + the `st.page_link` rail + the language box (`navigation`), the URL state (`?m=&tab=`), `go_page`/`go_match`, demo loading, the match header (`st.badge`), the context row (incl. the identity ⋮ menu), the ask card / remember logic, the library panel. |
+| `filters_ui.py`                   |       562 | URL state (`_URL_KEYS`), presets, callbacks, the filter summary row + the Edit `st.popover`.                              |
 | `views/matches.py`                |       731 | The Matches page: the unified table (filters, Refresh, Add match, row actions, the single / multi download + on-the-spot analysis flow).                                        |
 | `views/_shared.py`                |        30 | Helpers shared by the pages (`steam_cfg`, `show_error`); started as the Matches/Settings duplicates.                                       |
 | `views/dashboard.py`              |        27 | The Dashboard stub (cross-match aggregates land in a future `core/aggregate.py`).                                                            |
@@ -89,8 +89,7 @@ are widget-OWNED keys (the sidebar selectbox / the player selectbox), so
 the registry only reads them:
 
 - **Page level**: `page` mirrors the `st.Page` that is running -
-  `navigation()` records it before anything else runs, and `_page_runner`
-  re-asserts it when the body executes. `shell.go_page` (the dashboard /
+  `navigation()` records it before anything else runs. `shell.go_page` (the dashboard /
   settings buttons) is the programmatic switch; the rail itself is
   `st.page_link`, whose click clears the query params - so the Matches
   item always lands on the LIST. A fresh session starts on the Matches
@@ -98,21 +97,16 @@ the registry only reads them:
 - **Match view**: inside the `matches` page - `match` (the library demo
   id of the open match, or absent = the list) and `match_tab` ∈ `overview
   | shooting | duels | map | replay`. `shell.go_match(demo_id, tab)` is
-  the ONE way to open a match (a list row, a download, the old links):
-  it sets the registry keys and the shareable `?m=` (a `st.switch_page`
-  from another page, a plain `st.query_params` write on the Matches page
-  itself). `?m=` is the truth about the open match - `apply_match_url`
+  the ONE way to open a match (a list row, a download): it sets the
+  registry keys and the shareable `?m=`. `?m=` is the truth about the open match - `apply_match_url`
   re-reads it on every Matches run, so a rail click (params cleared)
   lands on the list and a reload reopens the match. `state.leave_match`
   is the `← Матчи` button; `state.go_tab` switches tabs inside the open
   match (`?tab=` is applied once per session, then the segmented control
   owns the tab and `sync_nav_url` mirrors it into the URL).
-- **Compatibility**: `shell.migrate_nav` turns old single-level page ids
-  from `?f=` links (and the retired `timeline`) into the match view of
-  the last opened demo, on the right tab; a legacy `?p=` link still
-  switches to its page (`load_nav_url` consumes the param, so it cannot
-  loop). Bad values fall back safely (`parse_nav_params` is pure and
-  unit-checked).
+- **Shared links** are plain query params only: `?m=&tab=` (the open match),
+  the analysis filters (`filters_ui._URL_KEYS`) and the list filters
+  (`?fp&fmap&fkind&fres`). Unknown values fall back to the defaults.
 - Only `app.py::_match` loads a demo. Widget values that must survive a
   page switch (which drops unmounted widget state) carry
   `persist_state="session"`: the analysis sliders, every `flt_*` filter
@@ -312,8 +306,7 @@ A **column** is the recipe above. A **table**:
    the match header picks it up) and the `tab_<id>` label to both
    locales in `i18n.py`.
 3. Dispatch it in `app.py::_match` (one `if tab == "<id>":` line).
-4. Old links keep working: `shell.migrate_nav` maps a legacy top-level
-   page id onto the same-named match tab. Add a smoke scenario.
+4. Add a smoke scenario.
 
 ## How to add a match source (a provider)
 

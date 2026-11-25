@@ -19,7 +19,6 @@ demos, last player) is redirected to a temp dir - the real
 ~/.cs2-aimaudit/state.json is never touched.
 """
 
-import base64
 import json
 import os
 import re
@@ -40,12 +39,14 @@ for _s in (sys.stdout, sys.stderr):
 
 import pandas as pd  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
+from streamlit.util import calc_hash  # noqa: E402
 
 # every file the app stores goes to a throw-away data folder (realpath: on
 # Windows CI the temp dir has an 8.3 short name that realpath expands)
 os.environ["AIMAUDIT_DATA_DIR"] = os.path.realpath(tempfile.mkdtemp(prefix="cs2aa_smoke_data_"))
 import core  # noqa: E402
 import store  # noqa: E402
+from state import MATCH_TABS  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -457,18 +458,24 @@ def pick(at, kind, key, value):
     )
 
 
+def run_page(at, page):
+    """A run on another page, like a rail click or an opened link: AppTest's
+    own switch_page only knows file-based pages."""
+    at._page_hash = calc_hash("" if page == "matches" else page)
+    at.run()
+    at._page_hash = ""  # later runs stay where the app itself navigates
+
+
 def goto(at, page):
     """
     Switch the page: a match tab (overview / shooting / duels / map /
-    replay, plus the retired timeline) opens the current - or last - demo
-    as a match (a list row click: ?m= plus the tab); a top-level id
-    navigates like a rail click (st.page_link: ?p= carries it and the
-    other params are cleared, so Matches means the LIST). Only the active
-    page renders, so switch before interacting with widgets that live on
-    it.
+    replay) opens the current - or last - demo as a match (a list row click:
+    ?m= plus the tab); a top-level id navigates like a rail click
+    (st.page_link clears the query params, so Matches means the LIST). Only
+    the active page renders, so switch before interacting with widgets that
+    live on it.
     """
-    if page in ("overview", "shooting", "duels", "map", "replay", "timeline"):
-        tab = "duels" if page == "timeline" else page
+    if page in MATCH_TABS:
         mid = ss_get(at, "match") or ss_get(at, "demo_id")
         if mid is None:
             mid = core.load_state().get("last_demo")
@@ -478,32 +485,18 @@ def goto(at, page):
                 mid = lib[0]["id"] if lib else None
         if mid is None:
             # nothing to open: stay on the matches list
-            at.query_params["p"] = "matches"
             at.query_params.pop("m", None)
             at.query_params.pop("tab", None)
-            try:
-                del at.session_state["match"]
-            except KeyError:
-                pass
         else:
             at.session_state["match"] = mid
             at.session_state["demo_id"] = mid
-            at.session_state["match_tab"] = tab
+            at.session_state["match_tab"] = page
             at.query_params["m"] = mid
-            at.query_params["tab"] = tab
+            at.query_params["tab"] = page
+        run_page(at, "matches")
     else:
-        # a rail click: the target page goes into ?p= (shell.load_nav_url
-        # consumes it), the rest of the params clear with the navigation
-        for k in ("m", "tab", "f"):
-            at.query_params.pop(k, None)
-        at.query_params["p"] = page
-        if page == "matches":
-            # the rail item means the LIST, like shell.go_page
-            try:
-                del at.session_state["match"]
-            except KeyError:
-                pass
-    at.run()
+        at.query_params.clear()
+        run_page(at, page)
     check(f"page {page} renders", not at.exception, err_of(at))
 
 
@@ -517,7 +510,7 @@ def open_match(at, did, name="open the match again"):
             at.session_state.__setitem__("demo_id", did),
             at.session_state.__setitem__("demo_change", False),
             at.query_params.__setitem__("m", did),
-            at.run(),
+            run_page(at, "matches"),
         ),
     )
 
@@ -563,17 +556,6 @@ _PRESETS_BY_COUNT = {
     5: ("all", "first", "second", "pistols", "custom"),
     6: ("all", "first", "second", "ot", "pistols", "custom"),
 }
-
-
-def _pack_view(d: dict) -> str:
-    """The app's ?f= packing, replicated for old/new link tests."""
-    return (
-        base64.urlsafe_b64encode(
-            json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode()
-        )
-        .decode()
-        .rstrip("=")
-    )
 
 
 def _shots_shown(at):
@@ -724,18 +706,6 @@ def scenario_round_replay():
         lambda: at.session_state.__setitem__("rr_round", 77) or at.run(),
     )
     check("fell back to round 1", ss_get(at, "rr_round") == 1, ss_get(at, "rr_round"))
-    # an old link / saved state that still says "timeline" lands on the
-    # match view's Duels tab (a fresh session: AppTest keeps the live widget
-    # value mid-session)
-    old_link = fresh_at(demo_id=at.session_state["demo_id"], page="timeline")
-    check("old 'timeline' link renders", not old_link.exception, err_of(old_link))
-    check(
-        "old 'timeline' page is migrated to the duels tab of the last match",
-        ss_get(old_link, "page") == "matches"
-        and ss_get(old_link, "match_tab") == "duels"
-        and ss_get(old_link, "match") == at.session_state["demo_id"],
-        (ss_get(old_link, "page"), ss_get(old_link, "match_tab"), ss_get(old_link, "match")),
-    )
     # the duel window's button hands the duel over: page, round, selection
     open_duel(at, 1, "open the round-2 duel")
     act(at, "show it in the 2D replay", lambda: at.button(key="du_to_replay").click().run())
@@ -758,7 +728,7 @@ def scenario_round_replay():
 
 def scenario_nav():
     """The sidebar rail (st.page_link over st.navigation): navigation,
-    old page ids, the ?p&m&tab URL state."""
+    the ?m&tab URL state."""
     print("== sidebar navigation ==")
     at = open_demo(make_match([1, 2]), "nav.dem")
     did = at.session_state["match"]
@@ -771,8 +741,8 @@ def scenario_nav():
         _labels,
     )
     check(
-        "nav: the match view syncs ?m (and no ?p anywhere)",
-        at.query_params.get("m") == did and not at.query_params.get("p"),
+        "nav: the match view syncs ?m",
+        at.query_params.get("m") == did,
         dict(at.query_params),
     )
     # a rail click is a page_link navigation: the page switches and the
@@ -798,29 +768,7 @@ def scenario_nav():
     )
     act(at, "nav: dashboard -> Matches", lambda: at.button(key="dash_go_matches").click().run())
     check("nav: back on the list", ss_get(at, "page") == "matches" and ss_get(at, "match") is None)
-    # old sessions / ?f= links with the single-level page ids land in the
-    # match view of the last opened demo, on the right tab
-    old = fresh_at(demo_id=did, page="overview")
-    check(
-        "nav: old 'overview' opens the last match's overview tab",
-        ss_get(old, "page") == "matches"
-        and ss_get(old, "match") == did
-        and ss_get(old, "match_tab") == "overview"
-        and not old.exception,
-        (ss_get(old, "page"), ss_get(old, "match"), ss_get(old, "match_tab")),
-    )
-    old = fresh_at(demo_id=did, page="duels")
-    check("nav: old 'duels' becomes the duels tab", ss_get(old, "match_tab") == "duels" and ss_get(old, "match") == did)
-    bad = fresh_at(demo_id=did, page="nonsense")
-    check(
-        "nav: an unknown page id falls back to the list",
-        ss_get(bad, "page") == "matches" and ss_get(bad, "match") is None and not bad.exception,
-    )
-    # ?p&m&tab: a copied link reopens the exact screen; garbage is ignored
-    at2 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
-    at2.query_params["p"] = "settings"
-    at2.run()
-    check("nav: ?p=settings opens Settings", ss_get(at2, "page") == "settings" and not at2.exception)
+    # ?m&tab: a copied link reopens the exact screen; garbage is ignored
     at3 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
     at3.query_params["m"] = did
     at3.query_params["tab"] = "duels"
@@ -835,11 +783,10 @@ def scenario_nav():
     )
     at4 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
     at4.query_params["m"] = "zzzz-not-an-id"
-    at4.query_params["p"] = "sugar"
     at4.query_params["tab"] = "nonsense"
     at4.run()
     check(
-        "nav: broken ?p&m&tab values fall back safely",
+        "nav: broken ?m&tab values fall back safely",
         ss_get(at4, "page") == "matches" and ss_get(at4, "match") is None and not at4.exception,
     )
 
@@ -1276,53 +1223,38 @@ def scenario_filter_panel():
         "side filter survives the guide page",
         ss_get(at, "flt_side") == "T",
     )
-    # old link format (res as a multiselect list, preset=all with a
-    # slider-moved range) must open as the equivalent new state
-    at2 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
-    at2.session_state["demo_id"] = _DEMO_IDS["panel.dem"]
-    at2.query_params["f"] = _pack_view(
-        {
-            "lang": "en",
-            "me": None,
-            "weapons": [],
-            "classes": [],
-            "rounds": [2, 2],
-            "preset": "all",
-            "side": "T",
-            "res": ["death"],
-            "page": "overview",
-        }
-    )
-    at2.run()
-    check("old link opens without exception", not at2.exception, err_of(at2))
-    check(
-        "old preset=all + range becomes Custom",
-        ss_get(at2, "flt_preset") == "custom",
-    )
-    check(
-        "old res list ['death'] becomes 'death'",
-        ss_get(at2, "flt_res") == "death",
-    )
-    check("old link keeps the side filter", ss_get(at2, "flt_side") == "T")
-    check(
-        "migrated link shows the custom slider",
-        widget(at2, "slider", "flt_rounds") is not None,
-    )
-    # new link round-trip: filter -> URL -> fresh app
+    # link round-trip: filters -> URL -> fresh app
     at3 = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel3.dem")
     act(
         at3,
         "distance band mid (for the link)",
         lambda: ctl(at3, "segmented_control", "flt_dist").select("mid").run(),
     )
-    link = at3.query_params.get("f")
-    check("filtered view is packed into the URL", bool(link))
+    act(at3, "weapons for the link", lambda: at3.multiselect(key="flt_weapons").set_value(["ak47"]).run())
+    act(at3, "custom rounds for the link", lambda: ctl(at3, "segmented_control", "flt_preset").select("custom").run())
+    act(at3, "round 2 for the link", lambda: at3.slider(key="flt_rounds").set_value((2, 2)).run())
+    link = dict(at3.query_params)
+    check("the filtered view is in the URL", link.get("dist") == ["mid"] or link.get("dist") == "mid", link)
     at4 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
-    at4.session_state["demo_id"] = _DEMO_IDS["panel3.dem"]
-    at4.query_params["f"] = link
+    for k, v in link.items():
+        at4.query_params[k] = v
+    at4.query_params["res"] = "nonsense"
+    at4.query_params["lang"] = "xx"
     at4.run()
     check("link restores without exception", not at4.exception, err_of(at4))
-    check("link restores the distance band", ss_get(at4, "flt_dist") == "mid")
+    check(
+        "link restores the filters, unknown values fall back",
+        (ss_get(at4, "flt_dist"), ss_get(at4, "flt_weapons"), ss_get(at4, "flt_preset"),
+         tuple(ss_get(at4, "flt_rounds")), ss_get(at4, "flt_res"), ss_get(at4, "lang"))
+        == ("mid", ["ak47"], "custom", (2, 2), "both", "en"),
+        {k: ss_get(at4, k) for k in ("flt_dist", "flt_weapons", "flt_preset", "flt_rounds", "flt_res", "lang")},
+    )
+    # a chip click clears exactly its filter
+    goto(at4, "duels")
+    act(at4, "deaths only", lambda: ctl(at4, "segmented_control", "flt_res").select("death").run())
+    chips = [b.key for b in at4.button if (b.key or "").startswith("flt_chip_")]
+    act(at4, "the result chip (the last one) clears it", lambda: at4.button(key=chips[-1]).click().run())
+    check("the result filter is cleared by its chip", ss_get(at4, "flt_res") == "both", ss_get(at4, "flt_res"))
 
 
 def scenario_knife_round():

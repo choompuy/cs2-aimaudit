@@ -67,7 +67,7 @@ def sanity(at, seed: int, step: int, problems: list) -> None:
         problems.append(f"{tag}: st.error {[str(e.value)[:60] for e in at.error]}")
     if ss(at, "page") not in NAV:
         problems.append(f"{tag}: page={ss(at, 'page')!r} not in NAV")
-    if ss(at, "match_tab") not in MATCH_TABS:
+    if ss(at, "match_tab") not in (None, *MATCH_TABS):
         problems.append(f"{tag}: match_tab={ss(at, 'match_tab')!r} not legal")
     for key, legal in (
         ("mflt_period", PERIODS),
@@ -183,8 +183,7 @@ def _do_toggles(at, rng, page: str, tab: str) -> str:
 
 
 def _do_nav(at, rng, page: str, tab: str) -> str:
-    """Click a sidebar nav item (a page_link navigation: ?p= carries the
-    target, the other params clear with the click)."""
+    """Click a sidebar nav item."""
     target = rng.choice(NAV)
     smoke_app.goto(at, target)
     return f"nav->{target}"

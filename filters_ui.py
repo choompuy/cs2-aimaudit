@@ -13,61 +13,38 @@ match view and must survive the other pages); the popover keeps its
 widgets mounted while it is closed, so no keep-alive is needed anywhere.
 """
 
-import base64
-import json
-
 import streamlit as st
 
 import core
+import i18n
 import state
 from ui.format import fmt_result
 
-# The whole view (language, player, filters) is packed into ?f=<b64 json>
-# so a filtered tab can be bookmarked, restored or sent to a teammate.
-_URL_KEYS = (
-    ("lang", "lang"),
-    ("me", "me"),
-    ("weapons", "flt_weapons"),
-    ("classes", "flt_classes"),
-    ("rounds", "flt_rounds"),
-    ("preset", "flt_preset"),
-    ("side", "flt_side"),
-    ("res", "flt_res"),
-    ("dist", "flt_dist"),
-    ("page", state.PAGE),
-)
-
-
-def _url_pack(d: dict) -> str:
-    return (
-        base64.urlsafe_b64encode(
-            json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode()
-        )
-        .decode()
-        .rstrip("=")
-    )
-
-
-def _url_unpack(s: str) -> dict | None:
-    try:
-        pad = "=" * (-len(s) % 4)
-        d = json.loads(base64.urlsafe_b64decode(s + pad).decode())
-        return d if isinstance(d, dict) else None
-    except ValueError:
-        # binascii.Error (bad base64), UnicodeDecodeError and JSONDecodeError
-        # are all ValueError subclasses: a bad link must not break the app
-        return None
+# The filtered view lives in plain query params, so it can be bookmarked or
+# sent to a teammate. Lists are comma-joined.
+_URL_KEYS = {
+    "lang": "lang",
+    "me": "me",
+    "weapons": "flt_weapons",
+    "classes": "flt_classes",
+    "rounds": "flt_rounds",
+    "preset": "flt_preset",
+    "side": "flt_side",
+    "res": "flt_res",
+    "dist": "flt_dist",
+}
+_URL_LISTS = ("weapons", "classes", "rounds")
 
 
 def load_url_state() -> None:
-    """Restore a shared ?f= view into session_state (once per session)."""
-    if "url_state_loaded" not in st.session_state:
-        st.session_state["url_state_loaded"] = True
-        saved = _url_unpack(st.query_params.get("f", ""))
-        if saved:
-            for k, sk in _URL_KEYS:
-                if saved.get(k) is not None:
-                    st.session_state[sk] = saved[k]
+    """Restore a shared view into session_state (once per session)."""
+    if "url_state_loaded" in st.session_state:
+        return
+    st.session_state["url_state_loaded"] = True
+    for k, sk in _URL_KEYS.items():
+        v = st.query_params.get(k)
+        if v and (k != "lang" or v in i18n.LANGS):
+            st.session_state[sk] = v.split(",") if k in _URL_LISTS else v
 
 
 # distance bands reuse the stop-quality thresholds: close is inside
@@ -133,35 +110,14 @@ def _drop_stale_selections(demo_weapons, present_classes):
         ]
 
 
-def _migrate_filter_state(preset_opts, n_rounds):
-    """Old links / old session keys keep working: the res multiselect of
-    the pre-redesign panel maps to the segmented values, unknown values
-    reset to their default, and the round range is clamped to the demo
-    (st.slider raises StreamlitInvalidMinMaxError when min == max, which
-    would kill the whole app on a one-round demo)."""
-    # res arrives as a multiselect list ["kill","death"] -> both/kill/death
-    _res = st.session_state.get("flt_res")
-    if isinstance(_res, (list, tuple, set)):
-        st.session_state["flt_res"] = (
-            "kill"
-            if "kill" in _res and "death" not in _res
-            else "death" if "death" in _res and "kill" not in _res else "both"
-        )
-    elif _res not in ("both", "kill", "death"):
+def _clamp_filter_state(preset_opts, n_rounds):
+    """Unknown values (a hand-edited link, another demo) reset to their
+    default; the round range is clamped to the demo (st.slider raises
+    StreamlitInvalidMinMaxError when min == max)."""
+    if st.session_state.get("flt_res") not in ("both", "kill", "death"):
         st.session_state["flt_res"] = "both"
-    # anything unknown resets to "all"
     if st.session_state.get("flt_dist") not in _DIST_KEYS:
         st.session_state["flt_dist"] = "all"
-    # an old link could carry preset=all with a slider-moved range: that
-    # state maps to Custom (only when the link carried a range - a fresh
-    # session has no flt_rounds yet)
-    if (
-        st.session_state.get("flt_preset", "all") == "all"
-        and st.session_state.get("flt_rounds") is not None
-        and n_rounds >= 2
-        and tuple(st.session_state["flt_rounds"]) != (1, n_rounds)
-    ):
-        st.session_state["flt_preset"] = "custom"
     if st.session_state.get("flt_preset") not in preset_opts:
         st.session_state["flt_preset"] = "all"
     if st.session_state.get("flt_side") not in ("all", "T", "CT"):
@@ -295,7 +251,7 @@ def _active_chips(t, has_sides, show_result, n_rounds, halves):
         )
     if show_result and st.session_state.get("flt_res", "both") != "both":
         _chips.append(
-            (fmt_result(st.session_state["flt_res"]), _clear("flt_flt_res", "both"))
+            (fmt_result(st.session_state["flt_res"]), _clear("flt_res", "both"))
         )
     return _chips
 
@@ -491,32 +447,24 @@ def _render_summary_row(t, chips, counts, demo_weapons, present_classes,
                 )
 
 
-def _sync_filter_url(me, preset, n_rounds):
-    """Keep the shareable ?f= in step (defaults drop off the URL)."""
-    url_view = {
-        "lang": state.get_lang(),
-        "me": me,
-        "weapons": st.session_state.get("flt_weapons") or [],
-        "classes": st.session_state.get("flt_classes") or [],
-        "rounds": list(st.session_state.get("flt_rounds") or ()),
-        "preset": preset,
-        "side": st.session_state.get("flt_side", "all"),
-        "res": st.session_state.get("flt_res", "both"),
-        "dist": st.session_state.get("flt_dist", "all"),
+def _sync_filter_url(me, preset):
+    """Keep the shareable query params in step (defaults drop off the URL)."""
+    want = {
+        k: ",".join(map(str, v)) if k in _URL_LISTS else v
+        for k, sk in _URL_KEYS.items()
+        if (v := st.session_state.get(sk)) and v not in ("all", "both")
     }
-    non_default = (
-        url_view["weapons"]
-        or url_view["classes"]
-        or url_view["res"] != "both"
-        or url_view["dist"] != "all"
-        or url_view["side"] != "all"
-        or url_view["preset"] != "all"
-        or (url_view["rounds"] and tuple(url_view["rounds"]) != (1, n_rounds))
-    )
-    if non_default:
-        st.query_params["f"] = _url_pack(url_view)
-    elif "f" in st.query_params:
-        del st.query_params["f"]
+    if preset != "custom":
+        want.pop("rounds", None)
+    if want.keys() <= {"lang", "me"}:
+        want = {}  # nothing is filtered: a clean URL
+    elif me:
+        want["me"] = str(me)
+    for k in _URL_KEYS:
+        if k not in want:
+            st.query_params.pop(k, None)
+        elif st.query_params.get(k) != want[k]:
+            st.query_params[k] = want[k]
 
 
 def render(ctx) -> None:
@@ -534,7 +482,7 @@ def render(ctx) -> None:
 
     preset_opts = _preset_options(n_rounds, halves)
     _drop_stale_selections(demo_weapons, present_classes)
-    _migrate_filter_state(preset_opts, n_rounds)
+    _clamp_filter_state(preset_opts, n_rounds)
 
     chips = _active_chips(t, has_sides, show_result, n_rounds, halves)
 
@@ -555,7 +503,7 @@ def render(ctx) -> None:
             preset_opts, has_sides, show_result, n_rounds, halves,
         )
 
-    _sync_filter_url(ctx.me, preset, n_rounds)
+    _sync_filter_url(ctx.me, preset)
     ctx.filters = filters
     ctx.shots_f = shots_f
     ctx.duels_f = duels_f
