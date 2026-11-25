@@ -167,10 +167,10 @@ def _show_import_error(t) -> None:
         st.error(t("lib_save_failed", err=st.session_state.pop("mt_import_err")))
 
 
-def _analyze_entry(entry: dict, accounts: dict) -> str | None:
+def _analyze_entry(entry: dict, accounts: dict) -> None:
     """Parse a finished download right away and cache its per-match summary
     for the resolved 'me' - the Matches table's numbers are ready without
-    opening the demo. None when 'me' is unknown (the ask card will show on
+    opening the demo. Skipped when 'me' is unknown (the ask card will show on
     open) or the demo does not parse; never raises (one broken download
     must not take the rest of a multi-download with it)."""
     try:
@@ -178,16 +178,10 @@ def _analyze_entry(entry: dict, accounts: dict) -> str | None:
         path = core.decompressed_demo(store.demo_path(entry), tag=entry["id"][:8])
         demo, _ = core.load_demo_cached(path)
         me_sid = core.matchstats.resolve_me(demo, entry, accounts)
-        if me_sid is None:
-            return None
-        if core.matchstats.read_cached(store.demo_path(entry)) is None:
-            stats = core.matchstats.compute(
-                demo, me_sid, played_at=core.matchstats.played_at_of(entry)
-            )
-            core.matchstats.write_cached(store.demo_path(entry), stats)
-        return me_sid
+        if me_sid is not None:
+            core.matchstats.ensure(demo, entry, me_sid)
     except Exception:  # noqa: BLE001 - a broken demo is reported by open, not here
-        return None
+        pass
 
 
 def _download(t, rec: sm.MatchRecord) -> None:

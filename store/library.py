@@ -9,11 +9,11 @@ adopts files dropped into demos/ by hand, entry metadata and deletion
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import uuid
 
+from store.jsonio import read_json, write_json
 from store.paths import (
     DEMO_EXTS,
     _now,
@@ -35,12 +35,8 @@ __all__ = [
 
 
 def _read_library() -> list[dict]:
-    try:
-        with open(library_path(), encoding="utf-8") as fh:
-            d = json.load(fh)
-    except (OSError, ValueError):
-        return []
-    items = d.get("demos") if isinstance(d, dict) else None
+    d = read_json(library_path())
+    items = d.get("demos")
     if not isinstance(items, list):
         return []
     return [
@@ -51,15 +47,7 @@ def _read_library() -> list[dict]:
 
 
 def _write_library(entries: list[dict]) -> None:
-    try:
-        tmp = library_path() + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(
-                {"version": 1, "demos": entries}, fh, ensure_ascii=False, indent=1
-            )
-        os.replace(tmp, library_path())
-    except OSError:
-        pass
+    write_json(library_path(), {"version": 1, "demos": entries})
 
 
 def _hash_file(path: str) -> str:
@@ -373,7 +361,7 @@ def delete_demo(demo_id: str) -> int:
         for folder, pat in (
             (parsed_dir(), re.compile(rf"^{key}-.*\.pkl(\.part)?$")),
             (unpacked_dir(), re.compile(rf".*__{key}[._].*")),
-            (matchstats_dir(), re.compile(rf"^{key}-.*\.json(\.part)?$")),
+            (matchstats_dir(), re.compile(rf"^{key}-.*\.json(\.tmp)?$")),
         ):
             try:
                 for f in os.listdir(folder):

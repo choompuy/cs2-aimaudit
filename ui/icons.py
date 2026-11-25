@@ -189,14 +189,7 @@ def _manifest_path() -> tuple[str | None, dict]:
     A corrupt file, a missing folder or a missing file all answer
     ({}, None-ish) - never an exception."""
     for root in icon_roots():
-        try:
-            with open(os.path.join(root, "manifest.json"), encoding="utf-8") as fh:
-                import json
-
-                d = json.load(fh)
-        except (OSError, ValueError):
-            continue
-        if isinstance(d, dict) and d:
+        if d := store.read_json(os.path.join(root, "manifest.json")):
             return root, d
     return None, {}
 

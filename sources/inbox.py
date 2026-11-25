@@ -10,11 +10,11 @@ Pure filesystem access: no network, no credentials.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from datetime import datetime, timezone
 
+import store
 from sources.model import DemoState, MatchRecord
 
 _DEMO_EXTS = (".dem", ".bz2", ".gz", ".zst", ".zip")
@@ -88,12 +88,7 @@ def cs2_replays_dirs(override: str = "") -> list[str]:
 
 def _read_info(path: str) -> dict:
     """The .dem.info sidecar written by CS2; unknown shape -> {}."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            d = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    return d if isinstance(d, dict) else {}
+    return store.read_json(path)
 
 
 def _match_id_from_info(info: dict) -> str | None:

@@ -252,14 +252,8 @@ def match_stats(ctx) -> None:
     if me_sid is None:
         _ask_who(t, demo, entry)
         return
-    cached = core.matchstats.read_cached(store.demo_path(entry))
-    if cached is not None and cached.get("me_sid") == me_sid:
-        return  # already summarized for exactly this player
     with st.spinner(t("mt_summarizing")):
-        stats = core.matchstats.compute(
-            demo, me_sid, played_at=core.matchstats.played_at_of(entry)
-        )
-        core.matchstats.write_cached(store.demo_path(entry), stats)
+        core.matchstats.ensure(demo, entry, me_sid)
 
 
 def _remember_me(me_sid: str) -> None:

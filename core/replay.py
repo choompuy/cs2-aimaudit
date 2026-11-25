@@ -5,7 +5,6 @@ round replay data. Owns DemoParser.
 
 from __future__ import annotations
 
-import json
 import os
 import struct
 from typing import TYPE_CHECKING
@@ -127,11 +126,7 @@ def load_radar(map_name: str) -> dict | None:
     if not map_name:
         return None
     for root in radar_roots():
-        try:
-            with open(os.path.join(root, "map_data.json"), encoding="utf-8") as fh:
-                meta = json.load(fh).get(map_name)
-        except (OSError, ValueError, AttributeError):
-            continue
+        meta = store.read_json(os.path.join(root, "map_data.json")).get(map_name)
         if not isinstance(meta, dict):
             continue
         try:

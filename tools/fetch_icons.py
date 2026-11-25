@@ -193,24 +193,11 @@ IMAGE_SHA = {
 
 def present(dest: str) -> bool:
     """The icons are installed: a manifest that covers every pinned key."""
-    try:
-        with open(os.path.join(dest, "manifest.json"), encoding="utf-8") as fh:
-            m = json.load(fh)
-    except (OSError, ValueError):
-        return False
-    if not isinstance(m, dict):
-        return False
-    wanted = set(WEAPON_SHA) | set(IMAGE_SHA)
-    return wanted <= set(m)
+    return set(WEAPON_SHA) | set(IMAGE_SHA) <= set(_read_manifest(dest))
 
 
 def _read_manifest(dest: str) -> dict:
-    try:
-        with open(os.path.join(dest, "manifest.json"), encoding="utf-8") as fh:
-            m = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    return m if isinstance(m, dict) else {}
+    return store.read_json(os.path.join(dest, "manifest.json"))
 
 
 # ------------------------------------------------------------ game source

@@ -9,10 +9,10 @@ files are keyed by store.paths.parse_key (<demo id> or location + size
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import pickle
 
+from store.jsonio import read_json, write_json
 from store.library import _unlink_freed, link_id, list_demos
 from store.paths import (
     PARSED_MAX_BYTES,
@@ -150,30 +150,17 @@ def read_matchstats(path: str, code_ver: str) -> dict | None:
     f = _matchstats_file(path, code_ver)
     if not f or not os.path.isfile(f):
         return None
-    try:
-        with open(f, encoding="utf-8") as fh:
-            d = json.load(fh)
-    except (OSError, ValueError) as e:
-        log_note("cache", f"dropped unreadable match stats: {type(e).__name__}")
+    d = read_json(f)
+    if not d:
+        log_note("cache", "dropped unreadable match stats")
         _unlink_freed(f)
-        return None
-    return d if isinstance(d, dict) else None
+    return d or None
 
 
 def write_matchstats(path: str, code_ver: str, d: dict) -> bool:
     """Cache the match summary (atomic); older code versions are dropped."""
     f = _matchstats_file(path, code_ver)
-    if not f:
-        return False
-    tmp = f + ".part"
-    try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(d, fh, ensure_ascii=False, separators=(",", ":"))
-        os.replace(tmp, f)
-    except (OSError, TypeError, ValueError) as e:
-        # OSError = a full disk; TypeError/ValueError = d no longer JSON-able
-        log_note("cache", f"match stats write failed: {type(e).__name__}")
-        _unlink_freed(tmp)
+    if not f or not write_json(f, d):
         return False
     key = os.path.basename(f).split("-")[0]
     try:

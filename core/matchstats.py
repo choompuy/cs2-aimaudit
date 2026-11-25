@@ -155,6 +155,13 @@ def write_cached(path: str, stats: dict) -> bool:
     return store.write_matchstats(path, PARSE_VERSION, stats)
 
 
+def ensure(demo, entry: dict, me_sid: str) -> None:
+    """Compute and cache the summary unless it is there for this very player."""
+    path = store.demo_path(entry)
+    if (read_cached(path) or {}).get("me_sid") != me_sid:
+        write_cached(path, compute(demo, me_sid, played_at=played_at_of(entry)))
+
+
 def drop_cached(path: str) -> bool:
     """Forget a demo's cached summary (the "me" changed and the numbers
     must be recomputed for the new player); True when a cache file went."""

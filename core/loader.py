@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
-import json
 import os
 import re
 
@@ -41,24 +40,12 @@ __all__ = ["load_demo", "load_demo_cached", "load_state", "save_state"]
 # writable the app does not remember anything.
 def load_state() -> dict:
     """Load the local state file; {} when missing or unreadable."""
-    try:
-        with open(store.state_path(), encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    return store.read_json(store.state_path())
 
 
 def save_state(d: dict) -> None:
     """Atomically save the state file; silent when the data folder is read-only."""
-    try:
-        path = store.state_path()
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, path)
-    except OSError:
-        pass
+    store.write_json(store.state_path(), d)
 
 
 def _parse_round_sides(
