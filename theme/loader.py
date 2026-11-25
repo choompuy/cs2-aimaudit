@@ -138,7 +138,7 @@ def config_theme_dict(theme: str | None = None) -> dict:
     """
     The [theme] values .streamlit/config.toml must carry for a theme.
 
-    tools/sync_theme.py writes them; tests/check_ui.py compares the live
+    tools/sync_theme.py writes them; tests/test_static.py compares the live
     config against the same dict, so "config matches tokens" can never
     drift between the two.
     """

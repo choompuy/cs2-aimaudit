@@ -1,53 +1,13 @@
-"""
-Synthetic tests for CS2-AimAudit core.py with a fake demoparser2.
+"""A fake demoparser2 and the tiny synthetic matches the tests run on."""
 
-Builds a tiny fake match (4 players, warmup shots, a duel, a teamkill,
-a lonely shot) and verifies every core metric without a real .dem file.
-Run from the repo root: python tests/test_core.py
-(The sections live in tests/core_sections/, this module
-is the shared header - env, imports, check(), the fake parser.)
-"""
+import struct
+import zlib
 
-import bz2
-import gzip
-import json
-import os
-import sys
-import tempfile
-import zipfile
-from pathlib import Path
-
-import numpy as np
 import pandas as pd
 
-# parents[2]: this module sits one level deeper than the original test_core.py
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-# Windows consoles default to legacy codepages (cp1252) and the output
-# below prints → and ≈: force UTF-8 so it does not crash. CI sets
-# PYTHONUTF8=1 as well - this covers a local run on a stock console.
-for _s in (sys.stdout, sys.stderr):
-    if hasattr(_s, "reconfigure"):
-        _s.reconfigure(encoding="utf-8", errors="replace")
-# every file the app stores goes to a throw-away data folder in this run
-os.environ["AIMAUDIT_DATA_DIR"] = tempfile.mkdtemp(prefix="cs2aa_data_")
-import core  # noqa: E402
-import store  # noqa: E402
-
-PASS = 0
-FAIL = 0
+import core
 
 
-def check(name, cond, extra=""):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ok  {name}")
-    else:
-        FAIL += 1
-        print(f"  FAIL {name} {extra}")
-
-
-# ---------------------------------------------------------------- fakes
 S1 = "76561111111111111"  # A, T
 S2 = "76561111111111112"  # B, T
 S3 = "76561111111111113"  # C, CT
@@ -412,32 +372,18 @@ class FakeParser:
         return out.reset_index(drop=True)
 
 
+def _tiny_png(path, n):
+    """A valid n x n PNG without any imaging library."""
+    raw = b"".join(b"\x00" + b"\x20\x20\x30" * n for _ in range(n))
 
+    def chunk(tag, data):
+        c = struct.pack(">I", len(data)) + tag + data
+        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
 
-# everything below is part of the section files' namespace
-__all__ = [
-    'FAIL',
-    'FakeParser',
-    'IDS',
-    'PASS',
-    'Path',
-    'S1',
-    'S2',
-    'S3',
-    'S4',
-    'bz2',
-    'check',
-    'core',
-    'f64_sid',
-    'gzip',
-    'json',
-    'make_match',
-    'make_match_sides',
-    'np',
-    'os',
-    'pd',
-    'store',
-    'sys',
-    'tempfile',
-    'zipfile',
-]
+    with open(path, "wb") as fh:
+        fh.write(
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", n, n, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw))
+            + chunk(b"IEND", b"")
+        )

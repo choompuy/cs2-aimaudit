@@ -351,7 +351,7 @@ user_team_name` and warmup filter via `is_warmup_period == False`.
 
 ## 11. Tests
 
-- `tests/test_core.py` — 362 checks on a synthetic demo (mocked demoparser2):
+- `tests/` (pytest) — a synthetic demo with a mocked demoparser2:
   warmup filter, teamkills, SteamID collision+names, REGRESSION of the
   "Heylaurens bug" (rounded floats in object dtype: 1/10 → 10/10), distances
   to living enemies, hit matching with tolerance window, own speeds
@@ -361,8 +361,8 @@ user_team_name` and warmup filter via `is_warmup_period == False`.
   cross-check, impact layer (openings incl. suicide/TK skip, trades with the
   exact +320-tick boundary and the +321 non-trade, same-round rule,
   multi-kills, assists/flash split and NA without the column).
-- `tests/check_ui.py` — cross-checks t() keys in app.py ↔ i18n en/ru,
-  format placeholders, presence of all core.\* and columns.
+- `tests/test_static.py` — cross-checks t() keys ↔ i18n en/ru, format
+  placeholders, presence of all core.\*.
 
 ## 12. Real-demo round encoding — step 2A diagnostics (2026-11-11)
 

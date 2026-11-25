@@ -468,15 +468,6 @@ def library_panel(t, entries: list[dict]) -> None:
         )
 
 
-def _resolve_demo_id(saved: dict, lib: list) -> None:
-    """Defensive: a demo_id this library does not have (deleted in
-    Settings mid-session) falls back to the last opened one."""
-    by_id = {e["id"]: e for e in lib}
-    if lib and (state.DEMO_ID.get() or "") not in by_id:
-        _last = saved.get("last_demo")
-        state.DEMO_ID.set(_last if _last in by_id else lib[0]["id"])
-
-
 def _missing_demo_card(t, entry: dict) -> None:
     """A linked demo whose file is gone: a clear card with the three
     ways out (locate it, drop the entry, back to the list), not a crash."""
@@ -560,9 +551,10 @@ def open_demo(ctx) -> None:
     lib = store.list_demos()
     by_id = {e["id"]: e for e in lib}
     _loaded_id = state.DEMO_LOADED.get()
-    _resolve_demo_id(saved, lib)
-
-    entry = by_id[state.DEMO_ID.get() or ""]
+    entry = by_id.get(state.DEMO_ID.get())
+    if entry is None:  # the demo left the library since the list was drawn
+        state.leave_match()
+        st.rerun()
     if entry["status"] == "missing":
         _missing_demo_card(t, entry)
     src = store.demo_path(entry)
@@ -577,8 +569,8 @@ def open_demo(ctx) -> None:
     fresh_load = entry["id"] != _loaded_id
     demo, status = _load_or_stop(t, path, mtime, fresh_load)
 
-    # remember what this demo is (map, tick rate, players) in the library, mark
-    # it as the latest opened and make it the one that opens next time
+    # remember what this demo is (map, tick rate, players) in the library and
+    # mark it as the latest opened
     if fresh_load:
         store.touch(entry["id"])
         store.mark_analyzed(entry["id"])
@@ -588,9 +580,6 @@ def open_demo(ctx) -> None:
         tickrate=int(demo.tickrate),
         players=[str(n) for n in demo.players["name"]],
     )
-    if saved.get("last_demo") != entry["id"]:
-        saved["last_demo"] = entry["id"]
-        core.save_state(saved)
     # the demo is now loaded: remember it and fold the "Change demo" panel
     state.DEMO_LOADED.set(entry["id"])
     if fresh_load:

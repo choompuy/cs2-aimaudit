@@ -29,7 +29,7 @@
 #   sticky   pin the column while the table scrolls horizontally
 #   tones  badge colour map: raw/display value -> tone token
 #
-# tests/check_ui.py validates this file (i18n keys exist, fmt formats,
+# tests/test_tables.py validates this file (i18n keys exist, fmt formats,
 # grade/best/bar/tone values are legal, basic ⊆ columns, references
 # resolve, colour tokens exist in theme/).
 # ============================================================================

@@ -11,7 +11,7 @@ data - pure functions, no Streamlit at import time. Labels follow the app
 language (the registry key `lang`, read per call so a language switch is
 picked up on the next rerun).
 
-validate() checks every rule the file must hold; tests/check_ui.py runs it
+validate() checks every rule the file must hold; tests/test_tables.py runs it
 and feeds it deliberately broken specs (negative tests).
 """
 

@@ -327,7 +327,7 @@ def fetch_game(dest: str, cs2_dir: str, wanted: dict[str, str], timeout: float) 
     n = 0
     os.makedirs(dest, exist_ok=True)
     # the decompile output lives INSIDE the icons folder (never the system
-    # temp: tests/check_ui.py keeps every module inside the app folder)
+    # temp: tests/test_static.py keeps every module inside the app folder)
     tmp = os.path.join(dest, ".tmp_s2v")
     shutil.rmtree(tmp, ignore_errors=True)
     os.makedirs(tmp, exist_ok=True)

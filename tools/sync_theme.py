@@ -13,7 +13,7 @@ What it owns in .streamlit/config.toml (and rewrites):
 - server.enableStaticServing = true   (required to serve those fonts)
 
 Everything else — comments, [browser], [server] upload limits — is kept
-byte-for-byte. tests/check_ui.py verifies the file matches the tokens, so a
+byte-for-byte. tests/test_static.py verifies the file matches the tokens, so a
 hand edit of the [theme] section is caught instead of silently drifting.
 """
 

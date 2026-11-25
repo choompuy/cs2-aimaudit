@@ -4,8 +4,6 @@ verification, tampering, corrupt files), the weapon-name aliases and every
 fallback. The icon set is a small fixture written into a temp folder with
 AIMAUDIT_ICON_DIR pointing there - the tests never touch the network and
 never read the real data/icons.
-
-Run from the repo root: python tests/test_icons.py
 """
 
 import base64
@@ -14,30 +12,8 @@ import json
 import os
 import sys
 import tempfile
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-for _s in (sys.stdout, sys.stderr):
-    if hasattr(_s, "reconfigure"):
-        _s.reconfigure(encoding="utf-8", errors="replace")
-
-# without it the loader falls back to the icons installed on this machine
-os.environ["AIMAUDIT_DATA_DIR"] = tempfile.mkdtemp(prefix="cs2aa_icons_")
-from ui import icons  # noqa: E402
-
-PASS = 0
-FAIL = 0
-
-
-def check(name, cond, extra=""):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ok  {name}")
-    else:
-        FAIL += 1
-        print(f"  FAIL  {name}  {extra}")
+from ui import icons
 
 
 # ---------------------------------------------------------------- fixture
@@ -141,62 +117,59 @@ def test_sanitizer() -> None:
     clean = icons.sanitize_svg(dirty)
     for gone in ("<script", "foreignObject", "onmouseover", "alert(1)",
                  "evil.example", "<!DOCTYPE", "xlink:href=\"https"):
-        check(f"sanitizer strips {gone!r}", gone not in clean, clean[:120])
+        assert gone not in clean, f"sanitizer strips {gone!r}"
     # local references survive: the gradient and its use stay usable
-    check("sanitizer keeps local #fragment references",
-          'url(#g)' in clean and 'id="g"' in clean, clean)
+    assert 'url(#g)' in clean and 'id="g"' in clean, "sanitizer keeps local #fragment references"
     use_local = icons.sanitize_svg(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4">'
         '<defs><path id="p" d="M0 0h4v4H0z"/></defs>'
         '<use href="#p"/></svg>'
     )
-    check("sanitizer keeps a <use> pointing inside the file", "<use " in use_local, use_local)
+    assert "<use " in use_local, "sanitizer keeps a <use> pointing inside the file"
     use_ext = icons.sanitize_svg(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4">'
         '<use href="other.svg#p"/></svg>'
     )
-    check("sanitizer drops a <use> pointing outside", "<use" not in use_ext, use_ext)
+    assert "<use" not in use_ext, "sanitizer drops a <use> pointing outside"
     # a file without xmlns / viewBox gets them (from width/height)
     patched = icons.sanitize_svg('<svg width="24" height="12"><path d="M0 0"/></svg>')
-    check("sanitizer adds xmlns", 'xmlns="http://www.w3.org/2000/svg"' in patched, patched)
-    check("sanitizer adds viewBox from width/height", 'viewBox="0 0 24 12"' in patched, patched)
+    assert 'xmlns="http://www.w3.org/2000/svg"' in patched, "sanitizer adds xmlns"
+    assert 'viewBox="0 0 24 12"' in patched, "sanitizer adds viewBox from width/height"
     # idempotent: a clean file passes through byte-for-byte
     once = icons.sanitize_svg(SVG_NOFILL)
-    check("sanitizer is idempotent", icons.sanitize_svg(once) == once)
-    check("svg_size reads the viewBox", icons.svg_size(once) == (24, 24))
-    check("svg_size falls back to width/height",
-          icons.svg_size('<svg width="30" height="10"/>') == (30, 10))
-    check("svg_size of garbage is None", icons.svg_size("not an svg") is None)
+    assert icons.sanitize_svg(once) == once, "sanitizer is idempotent"
+    assert icons.svg_size(once) == (24, 24), "svg_size reads the viewBox"
+    assert icons.svg_size('<svg width="30" height="10"/>') == (30, 10), "svg_size falls back to width/height"
+    assert icons.svg_size("not an svg") is None, "svg_size of garbage is None"
 
 
 # ------------------------------------------------------------------ loader
 def test_loader() -> None:
     with _IconDir() as dest:
         all_icons = icons.bundle()
-        check("load() returns the whole fixture", set(all_icons) == set(FIXTURE), set(all_icons))
+        assert set(all_icons) == set(FIXTURE), "load() returns the whole fixture"
         ak = icons.icon("ak47")
-        check("icon() gives a base64 data URI",
-              ak and ak["uri"].startswith("data:image/svg+xml;base64,"))
+        assert ak and ak["uri"].startswith("data:image/svg+xml;base64,"), "icon() gives a base64 data URI"
         body = base64.b64decode(ak["uri"].split(",", 1)[1]).decode("utf-8")
-        check("the data URI decodes to the sanitized file", body == icons.sanitize_svg(SVG_WEAPON))
-        check("icon() carries the intrinsic size", (ak["w"], ak["h"]) == (100, 32), ak)
-        check("icon() of a missing key is None", icons.icon("negev") is None)
-        check("icon() rejects unsafe keys", icons.icon("../ak47") is None)
+        assert body == icons.sanitize_svg(SVG_WEAPON), "the data URI decodes to the sanitized file"
+        assert (ak["w"], ak["h"]) == (100, 32), "icon() carries the intrinsic size"
+        assert icons.icon("negev") is None, "icon() of a missing key is None"
+        assert icons.icon("../ak47") is None, "icon() rejects unsafe keys"
         # a tampered file is "no icon", never an exception
         with open(os.path.join(dest, "awp.svg"), "w", encoding="utf-8") as fh:
             fh.write(SVG_NOFILL)  # different content, manifest pin still the old one
         icons.reset_cache()
-        check("a tampered file answers None", icons.icon("awp") is None)
+        assert icons.icon("awp") is None, "a tampered file answers None"
         # a corrupt manifest disables the whole folder silently
         with open(os.path.join(dest, "manifest.json"), "w", encoding="utf-8") as fh:
             fh.write("{not json")
         icons.reset_cache()
-        check("a corrupt manifest answers None everywhere", icons.icon("ak47") is None)
-        check("a corrupt manifest makes bundle() empty", icons.bundle() == {})
+        assert icons.icon("ak47") is None, "a corrupt manifest answers None everywhere"
+        assert icons.bundle() == {}, "a corrupt manifest makes bundle() empty"
     # an empty folder (icons not installed yet) is the same normal state
     with _IconDir(empty=True):
-        check("an empty folder answers None", icons.icon("ak47") is None)
-        check("an empty folder makes bundle() empty", icons.bundle() == {})
+        assert icons.icon("ak47") is None, "an empty folder answers None"
+        assert icons.bundle() == {}, "an empty folder makes bundle() empty"
 
 
 # ------------------------------------------------------- weapons and cells
@@ -216,33 +189,29 @@ def test_weapons() -> None:
             ("negev", None),               # not in the fixture
         ):
             got = icons.weapon_key(name)
-            check(f"weapon_key({name!r}) == {want!r}", got == want, got)
-        check("weapon_label is localized", icons.weapon_label("weapon_ak47") == "AK-47")
-        check("bundle() is the whole set", set(icons.bundle()) == set(FIXTURE), set(icons.bundle()))
-        check("weapon_labels() names every weapon", icons.weapon_labels()["negev"] == "Negev")
+            assert got == want, f"weapon_key({name!r}) == {want!r}"
+        assert icons.weapon_label("weapon_ak47") == "AK-47", "weapon_label is localized"
+        assert set(icons.bundle()) == set(FIXTURE), "bundle() is the whole set"
+        assert icons.weapon_labels()["negev"] == "Negev", "weapon_labels() names every weapon"
         for name, want in (
             ("weapon_ak47", "ak47"), ("USP-S", "usp_silencer"), ("High Explosive Grenade", "hegrenade"),
             ("C4 Explosive", "c4"), ("Karambit", "knife_karambit"), ("Some New Knife", "knife"),
             ("", ""), (None, ""),
         ):
             got = icons.weapon_id(name)
-            check(f"weapon_id({name!r}) == {want!r}", got == want, got)
+            assert got == want, f"weapon_id({name!r}) == {want!r}"
         vals, labels, ic = icons.weapon_cells(["ak47", "usp", "world", None])
-        check("weapon_cells values are icon keys where they exist",
-              vals == ["ak47", "usp_silencer", "world", ""], vals)
-        check("weapon_cells labels are localized", labels == ["AK-47", "USP-S", "World", "N/A"], labels)
-        check("weapon_cells icons cover exactly the resolved keys",
-              set(ic) == {"ak47", "usp_silencer"}, set(ic))
+        assert vals == ["ak47", "usp_silencer", "world", ""], "weapon_cells values are icon keys where they exist"
+        assert labels == ["AK-47", "USP-S", "World", "N/A"], "weapon_cells labels are localized"
+        assert set(ic) == {"ak47", "usp_silencer"}, "weapon_cells icons cover exactly the resolved keys"
         p = icons.payload(["ak47", "negev", "headshot"])
-        check("payload() keeps only the keys that exist", set(p) == {"ak47", "headshot"}, set(p))
-        check("payload() entries are [uri, w, h]",
-              p["ak47"][1:] == [100, 32], p["ak47"])
+        assert set(p) == {"ak47", "headshot"}, "payload() keeps only the keys that exist"
+        assert p["ak47"][1:] == [100, 32], "payload() entries are [uri, w, h]"
     # without the icon set: keys empty, labels still resolve (tooltips / text)
     with _IconDir(empty=True):
         vals, labels, ic = icons.weapon_cells(["ak47", "usp"])
-        check("weapon_cells without the set: names as values, no icons",
-              vals == ["ak47", "usp_silencer"] and ic == {}, (vals, ic))
-        check("labels without the set still localize", labels == ["AK-47", "USP-S"], labels)
+        assert vals == ["ak47", "usp_silencer"] and ic == {}, "weapon_cells without the set: names as values, no icons"
+        assert labels == ["AK-47", "USP-S"], "labels without the set still localize"
 
 
 # ------------------------------------------------------------- fetch glue
@@ -250,52 +219,31 @@ def test_fetcher_pins() -> None:
     """The mirror pins must stay consistent with the sanitizer: every pin
     is the hash of SANITIZED content, so re-sanitizing a fetched file must
     not change it (idempotence is what makes the loader stable)."""
-    sys.path.insert(0, str(ROOT / "tools"))
     try:
         import fetch_icons  # noqa: E402
     finally:
         sys.path.pop(0)
     wanted = set(fetch_icons.WEAPON_SHA) | set(fetch_icons.IMAGE_SHA)
     keys = set(FIXTURE)
-    check("the fetcher pins cover every key the app can ask for",
-          keys <= wanted, keys - wanted)
+    assert keys <= wanted, "the fetcher pins cover every key the app can ask for"
     for key, fname in fetch_icons.IMAGE_FILE.items():
-        check(f"IMAGE_FILE[{key!r}] is pinned", key in fetch_icons.IMAGE_SHA, fname)
-    check("every pin is a sha256 hex digest",
-          all(len(h) == 64 and set(h) <= set("0123456789abcdef")
-              for h in list(fetch_icons.WEAPON_SHA.values()) + list(fetch_icons.IMAGE_SHA.values())))
-    check("the fetcher's mirror commit is pinned",
-          fetch_icons.COMMIT and len(fetch_icons.COMMIT) == 40, fetch_icons.COMMIT)
+        assert key in fetch_icons.IMAGE_SHA, f"IMAGE_FILE[{key!r}] is pinned"
+    assert all(len(h) == 64 and set(h) <= set("0123456789abcdef")
+              for h in list(fetch_icons.WEAPON_SHA.values()) + list(fetch_icons.IMAGE_SHA.values())), "every pin is a sha256 hex digest"
+    assert fetch_icons.COMMIT and len(fetch_icons.COMMIT) == 40, "the fetcher's mirror commit is pinned"
     # present(): the launcher's instant no-op check - true only when the
     # manifest covers EVERY pinned key (patched down to the fixture subset
     # so this needs no network)
     with _IconDir() as dest:
-        sys.path.insert(0, str(ROOT / "tools"))
         try:
             old_w, old_i = fetch_icons.WEAPON_SHA, fetch_icons.IMAGE_SHA
             try:
                 fetch_icons.WEAPON_SHA = {"ak47": old_w["ak47"]}
                 fetch_icons.IMAGE_SHA = {"headshot": old_i["headshot"], "bomb": old_i["bomb"]}
-                check("present() is true when every pinned key is there",
-                      fetch_icons.present(dest))
+                assert fetch_icons.present(dest), "present() is true when every pinned key is there"
                 fetch_icons.WEAPON_SHA = dict(old_w)  # more pins than the fixture has
-                check("present() is false while pins are missing",
-                      not fetch_icons.present(dest))
+                assert not fetch_icons.present(dest), "present() is false while pins are missing"
             finally:
                 fetch_icons.WEAPON_SHA, fetch_icons.IMAGE_SHA = old_w, old_i
         finally:
             sys.path.pop(0)
-
-
-def main() -> None:
-    print("ui/icons.py")
-    test_sanitizer()
-    test_loader()
-    test_weapons()
-    test_fetcher_pins()
-    print(f"\n{PASS} passed, {FAIL} failed")
-    sys.exit(1 if FAIL else 0)
-
-
-if __name__ == "__main__":
-    main()

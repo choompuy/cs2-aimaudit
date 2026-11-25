@@ -3,15 +3,12 @@ Unit tests for the sources/ package (match import): the HTTP transport,
 the Steam provider, protobuf parsing, share codes, downloads and privacy.
 No real network and no real Steam: urllib and the helper process are faked,
 every check runs against fixtures built in-memory.
-
-Run from the repo root: python tests/test_sources.py
 """
 
 import datetime
 import io
 import json
 import os
-import re
 import socket
 import sys
 import tempfile
@@ -20,28 +17,13 @@ import urllib.request
 from email.message import Message
 from pathlib import Path
 
+import pytest
+
+import store
+from sources import http as shttp, model as sm
+
+
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-for _s in (sys.stdout, sys.stderr):
-    if hasattr(_s, "reconfigure"):
-        _s.reconfigure(encoding="utf-8", errors="replace")
-
-import store  # noqa: E402
-from sources import http as shttp  # noqa: E402
-from sources import model as sm  # noqa: E402
-
-PASS = 0
-FAIL = 0
-
-
-def check(name, cond, extra=""):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ok  {name}")
-    else:
-        FAIL += 1
-        print(f"  FAIL {name} {extra}")
 
 
 class _DataDir:
@@ -159,7 +141,6 @@ class _UrwlibPatch:
 
 # ------------------------------------------------------------ http tests
 def test_offline_gate():
-    print("== sources: AIMAUDIT_OFFLINE ==")
     old = os.environ.get("AIMAUDIT_OFFLINE")
     os.environ["AIMAUDIT_OFFLINE"] = "1"
     try:
@@ -167,16 +148,10 @@ def test_offline_gate():
         for fn in (
             lambda: t.get_json("https://api.steampowered.com/x"),
         ):
-            try:
+            with pytest.raises(sm.OfflineError):
                 fn()
-                check("offline blocks json calls", False)
-            except sm.OfflineError:
-                check("offline blocks json calls", True)
-        try:
+        with pytest.raises(sm.OfflineError):
             t.download("https://replay1.valve.net/730/1_2.dem.bz2", os.path.join(tempfile.mkdtemp(), "x"))
-            check("offline blocks downloads", False)
-        except sm.OfflineError:
-            check("offline blocks downloads", True)
     finally:
         if old is None:
             os.environ.pop("AIMAUDIT_OFFLINE", None)
@@ -185,73 +160,53 @@ def test_offline_gate():
 
 
 def test_scheme_gate():
-    print("== sources: https enforcement ==")
     for url in ("http://example.com/x", "ftp://x", "http://replay1.valve.net/730/a_b.dem.bz2"):
-        try:
+        with pytest.raises(sm.NetworkError):
             shttp._scheme_ok(url, demo=False)
-            check(f"json refuses {url}", False)
-        except sm.NetworkError:
-            check(f"json refuses {url}", True)
-    check(
-        "demo allows the valve replay pattern",
+    assert (
         shttp._scheme_ok("http://replay129.valve.net/730/003638895521671676017_1102521424.dem.bz2", demo=True)
-        and shttp._scheme_ok("https://github.com/akiver/boiler-writter/releases/download/v1.7.0/bw.zip", demo=True),
-    )
-    try:
+        and shttp._scheme_ok("https://github.com/akiver/boiler-writter/releases/download/v1.7.0/bw.zip", demo=True)
+    ), "demo allows the valve replay pattern"
+    with pytest.raises(sm.NetworkError):
         shttp._scheme_ok("http://evil.valve.net/730/1_2.dem.bz2", demo=True)
-        check("demo refuses a wrong valve host", False)
-    except sm.NetworkError:
-        check("demo refuses a wrong valve host", True)
 
 
 def test_json_retries():
-    print("== sources: retries, rate limit, errors ==")
     fake = FakeUrllib()
     t = shttp.HttpTransport(sleeper=fake.sleeps.append)
     with _UrwlibPatch(fake):
         url = "https://api.steampowered.com/ICSGOPlayers_730/GetNextMatchSharingCode/v1"
         fake.add("GET", url, _http_error(429, b"{}", {"Retry-After": "7"}))
-        try:
+        with pytest.raises(sm.RateLimitError) as exc_info:
             t.get_json(url)
-            check("429 after 3 attempts raises RateLimitError", False)
-        except sm.RateLimitError as e:
-            check(
-                "429 after 3 attempts raises RateLimitError",
-                len(fake.hits) == 3 and e.retry_after == 7.0,
-                (len(fake.hits), e.retry_after),
-            )
-            check("429 backoff honours Retry-After", fake.sleeps == [7.0, 7.0], fake.sleeps)
+        e = exc_info.value
+        assert len(fake.hits) == 3 and e.retry_after == 7.0, "429 after 3 attempts raises RateLimitError"
+        assert fake.sleeps == [7.0, 7.0], "429 backoff honours Retry-After"
 
         fake.hits.clear()
         fake.sleeps.clear()
         fake.add("GET", url, _http_error(503, b"{}"))
-        try:
+        with pytest.raises(sm.NetworkError):
             t.get_json(url)
-            check("5xx after 3 attempts raises NetworkError", False)
-        except sm.NetworkError:
-            check("5xx after 3 attempts raises NetworkError", len(fake.hits) == 3, len(fake.hits))
-            check("5xx backoff is exponential", fake.sleeps == [1.0, 2.0], fake.sleeps)
+        assert len(fake.hits) == 3, "5xx after 3 attempts raises NetworkError"
+        assert fake.sleeps == [1.0, 2.0], "5xx backoff is exponential"
 
         for code, exc in ((401, sm.AuthError), (403, sm.AuthError), (404, sm.NotFoundError)):
             fake.hits.clear()
             fake.add("GET", url, _http_error(code, _json_body({"message": "nope"})))
-            try:
+            with pytest.raises(exc) as exc_info:
                 t.get_json(url)
-                check(f"{code} raises {exc.__name__}", False)
-            except exc as e:
-                check(f"{code} raises {exc.__name__}", "nope" in str(e))
+            e = exc_info.value
+            assert "nope" in str(e), f"{code} raises {exc.__name__}"
 
         fake.hits.clear()
         fake.add("GET", url, FakeResponse(_json_body({"player_id": "p1"})))
-        check("200 returns parsed json", t.get_json(url) == {"player_id": "p1"})
+        assert t.get_json(url) == {"player_id": "p1"}, "200 returns parsed json"
 
         fake.hits.clear()
         fake.add("GET", url, FakeResponse(b"not json"))
-        try:
+        with pytest.raises(sm.NetworkError):
             t.get_json(url)
-            check("garbage json raises NetworkError", False)
-        except sm.NetworkError:
-            check("garbage json raises NetworkError", True)
 
         # the User-Agent is the app name and the key rides in a header
         seen = {}
@@ -263,17 +218,14 @@ def test_json_retries():
 
         fake.add("GET", "https://api.steampowered.com/x", _capture)
         t.get_json("https://api.steampowered.com/x", headers={"Authorization": "Bearer KEY"})
-        check(
-            "UA + bearer header, no key in the URL",
+        assert (
             seen["ua"] == "cs2-aimaudit"
             and seen["auth"] == "Bearer KEY"
-            and "KEY" not in fake.hits[-1][1],
-            seen,
-        )
+            and "KEY" not in fake.hits[-1][1]
+        ), "UA + bearer header, no key in the URL"
 
 
 def test_download_stream():
-    print("== sources: streaming download ==")
     payload = os.urandom(3 * 1024 * 1024 + 17)  # > 3 chunks
     fake = FakeUrllib()
     t = shttp.HttpTransport(sleeper=fake.sleeps.append)
@@ -290,12 +242,12 @@ def test_download_stream():
             dest,
             progress=lambda done, total: seen.append((done, total)),
         )
-        check("downloaded size matches", size == len(payload))
+        assert size == len(payload), "downloaded size matches"
         with open(dest, "rb") as fh:
-            check("downloaded bytes match", fh.read() == payload)
-        check("no .part left behind", not os.path.exists(dest + ".part"))
-        check("progress fired per 1 MiB chunk", len(seen) == 4 and seen[-1][0] == len(payload) and seen[-1][1] == len(payload), seen)
-        check("progress is monotonic", [d for d, _ in seen] == sorted(d for d, _ in seen))
+            assert fh.read() == payload, "downloaded bytes match"
+        assert not os.path.exists(dest + ".part"), "no .part left behind"
+        assert len(seen) == 4 and seen[-1][0] == len(payload) and seen[-1][1] == len(payload), "progress fired per 1 MiB chunk"
+        assert [d for d, _ in seen] == sorted(d for d, _ in seen), "progress is monotonic"
 
         # cancel between chunks: .part removed, DownloadCancelled raised
         fake.add(
@@ -310,12 +262,9 @@ def test_download_stream():
             return calls["n"] > 2
 
         dest2 = os.path.join(tempfile.mkdtemp(), "y.dem.gz")
-        try:
+        with pytest.raises(sm.DownloadCancelled):
             t.download("https://replay129.valve.net/730/1_y.dem.bz2", dest2, cancel=_cancel)
-            check("cancel raises DownloadCancelled", False)
-        except sm.DownloadCancelled:
-            check("cancel raises DownloadCancelled", True)
-        check("cancelled download leaves no file", not os.path.exists(dest2) and not os.path.exists(dest2 + ".part"))
+        assert not os.path.exists(dest2) and not os.path.exists(dest2 + ".part"), "cancelled download leaves no file"
 
         # size guard
         fake.add(
@@ -324,34 +273,28 @@ def test_download_stream():
             FakeResponse(b"x" * 1024, headers={"Content-Length": "999999999999"}),
         )
         dest3 = os.path.join(tempfile.mkdtemp(), "z.dem.gz")
-        try:
+        with pytest.raises(sm.NetworkError):
             t.download("https://replay129.valve.net/730/1_z.dem.bz2", dest3)
-            check("oversized file refused", False)
-        except sm.NetworkError:
-            check("oversized file refused", not os.path.exists(dest3) and not os.path.exists(dest3 + ".part"))
+        assert not os.path.exists(dest3) and not os.path.exists(dest3 + ".part"), "oversized file refused"
 
         # empty body
         fake.add("GET", "https://replay129.valve.net/730/1_e.dem.bz2", FakeResponse(b""))
         dest4 = os.path.join(tempfile.mkdtemp(), "e.dem.gz")
-        try:
+        with pytest.raises(sm.NetworkError):
             t.download("https://replay129.valve.net/730/1_e.dem.bz2", dest4)
-            check("empty download refused", False)
-        except sm.NetworkError:
-            check("empty download refused", True)
 
 
 def test_store_files():
-    print("== sources: data files (accounts/secrets/cache) ==")
     with _DataDir():
-        check("accounts empty by default", store.read_accounts() == {})
+        assert store.read_accounts() == {}, "accounts empty by default"
         store.write_accounts({"version": 1, "replays_dir": "C:/replays"})
-        check("accounts round-trip", store.read_accounts()["replays_dir"] == "C:/replays")
+        assert store.read_accounts()["replays_dir"] == "C:/replays", "accounts round-trip"
         with open(store.accounts_path(), "w", encoding="utf-8") as fh:
             fh.write("{corrupt")
-        check("corrupt accounts count as empty", store.read_accounts() == {})
+        assert store.read_accounts() == {}, "corrupt accounts count as empty"
         with open(store.matches_cache_path(), "w", encoding="utf-8") as fh:
             fh.write("[1, 2]")
-        check("non-dict cache counts as empty", store.read_matches_cache() == {})
+        assert store.read_matches_cache() == {}, "non-dict cache counts as empty"
         rec = sm.MatchRecord(
             provider="steam",
             match_id="m1",
@@ -362,11 +305,10 @@ def test_store_files():
         store.write_matches_cache({"version": 1, "providers": {"steam": [rec.to_dict()]}})
         back = store.read_matches_cache()
         r2 = sm.MatchRecord.from_dict(back["providers"]["steam"][0])
-        check("MatchRecord round-trips through json", r2 == rec, (r2, rec))
+        assert r2 == rec, "MatchRecord round-trips through json"
 
 
 def test_no_sockets_on_import():
-    print("== sources: privacy (no sockets) ==")
     calls = []
 
     class _NoSocket(socket.socket):
@@ -388,7 +330,7 @@ def test_no_sockets_on_import():
     try:
         import sources  # noqa: F401
 
-        check("importing sources opens no sockets", not calls, calls)
+        assert not calls, "importing sources opens no sockets"
     finally:
         socket.socket = orig_socket
         urllib.request.urlopen = orig_urlopen
@@ -548,7 +490,6 @@ def _fake_install_helper():
 
 
 def test_steam_gc_parse():
-    print("== steam: gc protobuf ==")
     from sources import steam_gc
 
     accounts = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -557,32 +498,29 @@ def test_steam_gc_parse():
         _enc_match(7002, 1730000100, accounts, match_result=2, team_scores=(16, 14), b_switched_last=True),
     ])
     matches = steam_gc.parse_matchlist(data)
-    check("two matches parsed", len(matches) == 2)
+    assert len(matches) == 2, "two matches parsed"
     m1 = matches[0]
-    check("matchid/time", m1.match_id == 7001 and m1.matchtime == 1730000000)
-    check("map from watchable", m1.game_map == "de_mirage" and m1.tv_port == 27020)
-    check("demo url sits in the last roundstats map", m1.last_round().map == "http://replay129.valve.net/730/1_2.dem.bz2")
-    check("accounts parsed (packed)", m1.last_round().account_ids == accounts)
-    check("team scores parsed", m1.last_round().team_scores == [13, 5])
-    check("match result parsed", m1.last_round().match_result == 1)
-    check("winners group is the match_result index",
-          steam_gc.winners_group(1) == 0 and steam_gc.winners_group(2) == 1 and steam_gc.winners_group(0) is None)
+    assert m1.match_id == 7001 and m1.matchtime == 1730000000, "matchid/time"
+    assert m1.game_map == "de_mirage" and m1.tv_port == 27020, "map from watchable"
+    assert m1.last_round().map == "http://replay129.valve.net/730/1_2.dem.bz2", "demo url sits in the last roundstats map"
+    assert m1.last_round().account_ids == accounts, "accounts parsed (packed)"
+    assert m1.last_round().team_scores == [13, 5], "team scores parsed"
+    assert m1.last_round().match_result == 1, "match result parsed"
+    assert steam_gc.winners_group(1) == 0 and steam_gc.winners_group(2) == 1 and steam_gc.winners_group(0) is None, "winners group is the match_result index"
 
     # unpacked repeated (one field per varint) must parse the same
     unpacked = _enc_field(1, 1) + _enc_field(1, 2) + _enc_field(1, 3)
     rs = steam_gc._parse_roundstats(_enc_field(2, unpacked + _enc_field(2, 8)))
-    check("unpacked repeated accepted", rs.account_ids == [1, 2, 3] and rs.game_type == 8)
+    assert rs.account_ids == [1, 2, 3] and rs.game_type == 8, "unpacked repeated accepted"
 
     for bad, why in ((b"", "empty"), (b"\x08", "truncated"), (b"\xff" * 9, "varint too long"), (b"\x0f", "wire type 7")):
-        try:
+        with pytest.raises(sm.ProviderError) as exc_info:
             steam_gc.parse_matchlist(bad)
-            check(f"garbage ({why}) -> ProviderError", False)
-        except sm.ProviderError as e:
-            check(f"garbage ({why}) -> ProviderError", e.key == "src_err_gc")
+        e = exc_info.value
+        assert e.key == "src_err_gc", f"garbage ({why}) -> ProviderError"
 
 
 def test_steam_records():
-    print("== steam: records, win/loss ==")
     accounts = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     import time as _time
 
@@ -607,65 +545,59 @@ def test_steam_records():
         ])
         prov, runner, _ = _steam_provider(file_bytes=data)
         recs = prov.list_matches(10)
-        check("six steam records", len(recs) == 6, len(recs))
+        assert len(recs) == 6, "six steam records"
         r1, r2, r3, r4, r5, r6 = recs
-        check("group0 wins with match_result=1", r1.result == "win" and r1.score == (13, 5), (r1.result, r1.score))
-        check("match_result=2 -> my loss", r2.result == "loss" and r2.score == (7, 13), (r2.result, r2.score))
-        check("premier detected by the first roundstats flag", r2.mode == "Premier", r2.mode)
-        check("draw -> tie", r3.result == "tie" and r3.score == (12, 12))
-        check("wingman mode for <= 4 players", r4.mode == "Wingman", r4.mode)
-        check("competitive default", r1.mode == "Competitive")
-        check("old match -> expired", r5.demo == sm.DemoState.EXPIRED)
-        check("fresh match with url -> ready", r1.demo == sm.DemoState.READY)
-        check("map carried", r1.map_name == "de_mirage")
-        check("map from the reservation game_type", r6.map_name == "de_inferno", r6.map_name)
-        check("share code in extra", r1.extra.get("share_code", "").startswith("CSGO-"))
-        check("runner got [exe, out]", len(runner.calls) == 1 and runner.calls[0][0][1].endswith("matches.info"))
+        assert r1.result == "win" and r1.score == (13, 5), "group0 wins with match_result=1"
+        assert r2.result == "loss" and r2.score == (7, 13), "match_result=2 -> my loss"
+        assert r2.mode == "Premier", "premier detected by the first roundstats flag"
+        assert r3.result == "tie" and r3.score == (12, 12), "draw -> tie"
+        assert r4.mode == "Wingman", "wingman mode for <= 4 players"
+        assert r1.mode == "Competitive", "competitive default"
+        assert r5.demo == sm.DemoState.EXPIRED, "old match -> expired"
+        assert r1.demo == sm.DemoState.READY, "fresh match with url -> ready"
+        assert r1.map_name == "de_mirage", "map carried"
+        assert r6.map_name == "de_inferno", "map from the reservation game_type"
+        assert r1.extra.get("share_code", "").startswith("CSGO-"), "share code in extra"
+        assert len(runner.calls) == 1 and runner.calls[0][0][1].endswith("matches.info"), "runner got [exe, out]"
 
         # my account unknown -> result/score None but the list still shows
         data2 = _enc_matchlist([_enc_match(7001, now, accounts, match_result=1, team_scores=(13, 5))])
         prov2, _, _ = _steam_provider(file_bytes=data2, stdout="")
         rec = prov2.list_matches(10)[0]
-        check("no steamid -> no result, raw scores in extra", rec.result is None and rec.score is None and rec.extra["team_scores"] == [13, 5])
+        assert rec.result is None and rec.score is None and rec.extra["team_scores"] == [13, 5], "no steamid -> no result, raw scores in extra"
 
         # steamid from the config when the helper did not report one
         prov3, _, _ = _steam_provider(file_bytes=data2, stdout="", steam_id64=MY_SID)
         rec3 = prov3.list_matches(10)[0]
-        check("steamid from the config works", rec3.result == "win", rec3.result)
+        assert rec3.result == "win", "steamid from the config works"
 
 
 def test_steam_helper_errors():
-    print("== steam: helper errors ==")
     with _DataDir():
         _fake_install_helper()
         prov, _, _ = _steam_provider(exit_code=6)
-        try:
+        with pytest.raises(sm.HelperError) as exc_info:
             prov.list_matches(5)
-            check("exit 6 -> Steam not running", False)
-        except sm.HelperError as e:
-            check("exit 6 -> Steam not running", e.key == "src_err_helper_steam")
+        e = exc_info.value
+        assert e.key == "src_err_helper_steam", "exit 6 -> Steam not running"
         prov2, _, _ = _steam_provider(exit_code=8)
-        try:
+        with pytest.raises(sm.HelperError) as exc_info:
             prov2.list_matches(5)
-            check("exit 8 -> no matches", False)
-        except sm.HelperError as e:
-            check("exit 8 -> no matches", e.key == "src_err_helper_none")
+        e = exc_info.value
+        assert e.key == "src_err_helper_none", "exit 8 -> no matches"
         prov3, _, _ = _steam_provider(file_bytes=b"", exit_code=0)
-        try:
+        with pytest.raises(sm.ProviderError) as exc_info:
             prov3.list_matches(5)
-            check("empty file -> ProviderError", False)
-        except sm.ProviderError as e:
-            check("empty file -> ProviderError", e.key == "src_err_gc")
+        e = exc_info.value
+        assert e.key == "src_err_gc", "empty file -> ProviderError"
         prov4, _, _ = _steam_provider(hang=True)
-        try:
+        with pytest.raises(sm.ProviderError) as exc_info:
             prov4.list_matches(5)
-            check("timeout -> friendly error", False)
-        except sm.ProviderError as e:
-            check("timeout -> friendly error", e.key == "src_err_helper_comm")
+        e = exc_info.value
+        assert e.key == "src_err_helper_comm", "timeout -> friendly error"
 
 
 def test_steam_sharecode():
-    print("== steam: share codes ==")
     from sources import steam as ssteam
 
     # reference: ValvePython/csgo sharecode.py, verbatim semantics
@@ -698,15 +630,12 @@ def test_steam_sharecode():
         if _vp_decode(code) != {"matchid": mid, "outcomeid": oid, "token": tv}:
             ok_reference = False
             break
-    check("share code round-trip (200 random)", ok_roundtrip)
-    check("share code matches the ValvePython reference", ok_reference)
+    assert ok_roundtrip, "share code round-trip (200 random)"
+    assert ok_reference, "share code matches the ValvePython reference"
 
     for bad in ("", "CSGO-aaaaa-aaaaa-aaaaa-aaaaa-aaaa", "CSGO-bMGEk-GdDzw-bTO2R-hbGti-bdOe", "XXXX-bMGEk-GdDzw-bTO2R-hbGti-bdOeO"):
-        try:
+        with pytest.raises(sm.ShareCodeError):
             ssteam.decode_share_code(bad)
-            check(f"rejects {bad[:20]!r}", False)
-        except sm.ShareCodeError:
-            check(f"rejects {bad[:20]!r}", True)
 
     # match_by_share_code feeds the decoded ids to the helper
     with _DataDir():
@@ -716,13 +645,12 @@ def test_steam_sharecode():
         code = ssteam.encode_share_code(987654321, 101, 27020)
         prov, runner, _ = _steam_provider(file_bytes=data)
         rec = prov.match_by_share_code(code)
-        check("share code match decoded", rec.match_id == "987654321")
+        assert rec.match_id == "987654321", "share code match decoded"
         args = runner.calls[0][0][2:]
-        check("helper got matchId outcomeId tokenId", args == ["987654321", "101", "27020"], args)
+        assert args == ["987654321", "101", "27020"], "helper got matchId outcomeId tokenId"
 
 
 def test_steam_helper_install():
-    print("== steam: helper install ==")
     import zipfile as _zf
 
     from sources import steam as ssteam
@@ -745,42 +673,38 @@ def test_steam_helper_install():
         try:
             # wrong pinned hash -> nothing installed
             ssteam.HELPER_SHA256 = "0" * 64
-            try:
+            with pytest.raises(sm.ProviderError) as exc_info:
                 ssteam.install_helper(tr)
-                check("hash mismatch refuses to install", False)
-            except sm.ProviderError as e:
-                check("hash mismatch refuses to install", e.key == "mt_helper_bad_hash")
-            check("nothing extracted on mismatch", not os.path.exists(ssteam.helper_path()) and not ssteam.helper_installed())
+            e = exc_info.value
+            assert e.key == "mt_helper_bad_hash", "hash mismatch refuses to install"
+            assert not os.path.exists(ssteam.helper_path()) and not ssteam.helper_installed(), "nothing extracted on mismatch"
 
             # correct hash -> exe + dll + marker
             ssteam.HELPER_SHA256 = good_sha
             path = ssteam.install_helper(tr)
-            check("exe extracted next to its dll", os.path.isfile(path) and os.path.isfile(os.path.join(store.tools_dir(), "steam_api64.dll")))
-            check("installed marker matches version+sha", ssteam.helper_installed())
+            assert os.path.isfile(path) and os.path.isfile(os.path.join(store.tools_dir(), "steam_api64.dll")), "exe extracted next to its dll"
+            assert ssteam.helper_installed(), "installed marker matches version+sha"
             with open(ssteam.helper_path(), "rb") as fh:
-                check("exe bytes intact", fh.read() == b"MZFAKEEXE")
+                assert fh.read() == b"MZFAKEEXE", "exe bytes intact"
         finally:
             ssteam.HELPER_SHA256 = orig_sha
 
         # the pinned upstream hash is the real v1.7.0 zip hash (verified
         # against the release page when the pin was made)
-        check(
-            "pinned helper constants",
+        assert (
             ssteam.HELPER_VERSION == "1.7.0"
-            and ssteam.HELPER_URL.startswith("https://github.com/akiver/boiler-writter/releases/download/v1.7.0/"),
-        )
+            and ssteam.HELPER_URL.startswith("https://github.com/akiver/boiler-writter/releases/download/v1.7.0/")
+        ), "pinned helper constants"
 
         # provider refuses to run without the helper
         prov, _, _ = _steam_provider(file_bytes=b"x")
-        try:
+        with pytest.raises(sm.ProviderError) as exc_info:
             prov.list_matches(5)
-            check("provider requires the helper", False)
-        except sm.ProviderError as e:
-            check("provider requires the helper", e.key == "src_err_no_helper")
+        e = exc_info.value
+        assert e.key == "src_err_no_helper", "provider requires the helper"
 
 
 def test_steam_download():
-    print("== steam: demo download ==")
     with _DataDir():
         import hashlib as _hl
         import zipfile as _zf
@@ -815,16 +739,15 @@ def test_steam_download():
         recs = prov.list_matches(5)
         seen = []
         entry = prov.fetch_demo(recs[0], progress=lambda d, t: seen.append((d, t)))
-        check("demo downloaded into the library", store.get_demo(entry["id"]) is not None)
-        check("file named steam_<matchid>.dem.bz2", entry["file"].startswith("steam_7001") and entry["file"].endswith(".dem.bz2"), entry["file"])
-        check("the valve replay url was used", tr2.downloads == ["http://replay129.valve.net/730/1_2.dem.bz2"], tr2.downloads)
-        check("progress fired", seen and seen[-1][0] == 9000, seen)
+        assert store.get_demo(entry["id"]) is not None, "demo downloaded into the library"
+        assert entry["file"].startswith("steam_7001") and entry["file"].endswith(".dem.bz2"), "file named steam_<matchid>.dem.bz2"
+        assert tr2.downloads == ["http://replay129.valve.net/730/1_2.dem.bz2"], "the valve replay url was used"
+        assert seen and seen[-1][0] == 9000, "progress fired"
         ssteam.HELPER_SHA256 = "eda6ce361215c4c0427332e55811ffd621755b264ae7df0f5385ef5916331141"
 
 
 # ------------------------------------------------------------- inbox tests
 def test_inbox():
-    print("== inbox: replays folder ==")
     import time as _time
 
     from sources import inbox
@@ -839,32 +762,32 @@ def test_inbox():
         with open(dem + ".info", "w", encoding="utf-8") as fh:
             json.dump({"demo": {"url": "http://replay128.valve.net/730/003699338391708905193_1528262269.dem.bz2"}}, fh)
         recs = inbox.replays_records(replays_dir=rep)
-        check("one replays record", len(recs) == 1, [r.match_id for r in recs])
+        assert len(recs) == 1, "one replays record"
         r = recs[0]
-        check("match id from the replay url", r.match_id == "003699338391708905193", r.match_id)
-        check("state is on-disk, path carried", r.demo == sm.DemoState.MANUAL and r.demo_ref == dem)
-        check("mtime became played_at", r.played_at is not None and r.played_at.tzinfo is not None)
+        assert r.match_id == "003699338391708905193", "match id from the replay url"
+        assert r.demo == sm.DemoState.MANUAL and r.demo_ref == dem, "state is on-disk, path carried"
+        assert r.played_at is not None and r.played_at.tzinfo is not None, "mtime became played_at"
 
         # a .dem without a parseable sidecar keeps a stable pseudo id
         os.remove(dem + ".info")
         with open(dem + ".info", "w", encoding="utf-8") as fh:
             fh.write("{broken json")
         recs2 = inbox.replays_records(replays_dir=rep)
-        check("broken sidecar -> pseudo id, no crash", len(recs2) == 1 and recs2[0].match_id.startswith("replays:"), [r.match_id for r in recs2])
+        assert len(recs2) == 1 and recs2[0].match_id.startswith("replays:"), "broken sidecar -> pseudo id, no crash"
 
         # info carrying an explicit match id
         with open(dem + ".info", "w", encoding="utf-8") as fh:
             json.dump({"match": {"matchId": 42}, "demo": {}}, fh)
         recs3 = inbox.replays_records(replays_dir=rep)
-        check("explicit matchId wins", len(recs3) == 1 and recs3[0].match_id == "42")
+        assert len(recs3) == 1 and recs3[0].match_id == "42", "explicit matchId wins"
 
-        check("override folder must exist", inbox.cs2_replays_dirs(override=rep) == [rep])
-        check("non-windows default scan stays empty here", inbox.cs2_replays_dirs() == [] or os.name == "nt")
+        assert inbox.cs2_replays_dirs(override=rep) == [rep], "override folder must exist"
+        assert inbox.cs2_replays_dirs() == [] or os.name == "nt", "non-windows default scan stays empty here"
 
         # a folder the user emptied of demos yields no records
         empty = os.path.join(store.data_dir(), "empty-replays")
         os.makedirs(empty, exist_ok=True)
-        check("empty folder -> no records", inbox.replays_records(replays_dir=empty) == [])
+        assert inbox.replays_records(replays_dir=empty) == [], "empty folder -> no records"
 
 
 def test_no_sockets_in_app():
@@ -878,7 +801,6 @@ def test_no_sockets_in_app():
     talking to the network, so socketpair() runs with the recorder off;
     every other internet socket still fails the test.
     """
-    print("== sources: privacy (app start) ==")
     calls = []
     quiet = [False]
 
@@ -922,32 +844,9 @@ def test_no_sockets_in_app():
             at.session_state["page"] = "matches"
             at.run()
             clean = not at.exception
-        check("the Matches page renders without exceptions", clean)
-        check("no network sockets while the app runs", not calls, calls)
+        assert clean, "the Matches page renders without exceptions"
+        assert not calls, "no network sockets while the app runs"
     finally:
         socket.socket = orig_socket
         socket.socketpair = orig_socketpair
         urllib.request.urlopen = orig_urlopen
-
-
-def main():
-    test_offline_gate()
-    test_scheme_gate()
-    test_json_retries()
-    test_download_stream()
-    test_store_files()
-    test_no_sockets_on_import()
-    test_steam_gc_parse()
-    test_steam_records()
-    test_steam_helper_errors()
-    test_steam_sharecode()
-    test_steam_helper_install()
-    test_steam_download()
-    test_inbox()
-    test_no_sockets_in_app()
-    print(f"\n{PASS} passed, {FAIL} failed")
-    sys.exit(1 if FAIL else 0)
-
-
-if __name__ == "__main__":
-    main()

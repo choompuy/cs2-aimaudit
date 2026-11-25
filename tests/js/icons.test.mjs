@@ -1,4 +1,4 @@
-// The canvas half of the icon rendering (run through check_roundrep_js.py,
+// The canvas half of the icon rendering (run through test_roundrep_js.py,
 // argv[2] = the fixture icon folder with manifest.json):
 //
 // The silhouettes are TINTED through the alpha mask, never through the

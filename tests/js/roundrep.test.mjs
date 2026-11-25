@@ -1,5 +1,5 @@
 // Headless behaviour check of ui/roundrep.js (jsdom + a real canvas).
-// Run through `python tests/check_roundrep_js.py`, which builds the payload
+// Run through `pytest`, which builds the payload
 // with the real round_payload and passes its path as the first argument.
 //   RR_SHOT_DIR=/some/dir  -> also writes PNG screenshots of the canvas
 import { JSDOM } from "jsdom";

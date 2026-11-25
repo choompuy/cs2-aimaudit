@@ -22,7 +22,7 @@ Where CS2-AimAudit keeps its own files: ONE folder next to the launcher.
         matches.json   the cached match lists of the Matches tab
 
 The `store` package is the ONE place that knows these locations; every
-other module asks it (tests/check_ui.py enforces that). The folder can
+other module asks it (tests/test_static.py enforces that). The folder can
 be moved with AIMAUDIT_DATA_DIR; when the app folder is read-only the
 data goes to %LOCALAPPDATA%\\CS2-AimAudit instead, and the app says so.
 Plain Python only (no Streamlit, no demo parsing) so it can be tested

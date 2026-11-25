@@ -47,7 +47,7 @@ def tok(path: str, theme: str | None = None) -> str:
 
 # Design constants that are not palette tokens. Plotly needs a real colour
 # string for "transparent" (charts sit directly on the app surface); keeping
-# the literal here keeps rgba() out of UI sources (see tests/check_ui.py).
+# the literal here keeps rgba() out of UI sources (see tests/test_static.py).
 TRANSPARENT = "rgba(0,0,0,0)"
 
 
