@@ -26,6 +26,8 @@ from core.impact import impact_stats
 from core.openings import openings_table
 from core.summary import player_summary
 
+__all__ = ["data_checks", "debug_report"]
+
 
 # ---------------------------------------------------------- data quality
 def _lvl(frac: float, warn: float, anom: float) -> str:

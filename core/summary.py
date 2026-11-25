@@ -25,6 +25,8 @@ from core.duels import duels_for
 from core.impact import impact_stats
 from core.openings import _enemy_kill_rows, _round_side_keep, _top_weapon
 
+__all__ = ["hitgroup_counts", "player_summary", "weapon_stats"]
+
 
 def _hurts_of(demo: Demo, me: str, hurts: pd.DataFrame | None = None) -> pd.DataFrame:
     """

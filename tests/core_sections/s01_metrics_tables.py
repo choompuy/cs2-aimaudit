@@ -34,7 +34,7 @@ FakeParser.demos["match.dem"] = make_match()
 # monkeypatch: DemoParser is used by core.loader (load_demo) and
 # core.replay (timeline_data / replay_data); the facade copy is patched
 # too for direct core.DemoParser(...) calls.
-core.DemoParser = core.loader.DemoParser = core.replay.DemoParser = FakeParser
+core.loader.DemoParser = core.replay.DemoParser = FakeParser
 demo = core.load_demo("match.dem")
 check("warmup fires dropped", len(demo.fires) == 6, f"got {len(demo.fires)}")
 check("warmup excluded", demo.excluded.get("warmup") == 1, demo.excluded)

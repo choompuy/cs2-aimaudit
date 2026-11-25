@@ -17,6 +17,8 @@ import zipfile
 
 import store
 
+__all__ = ["decompressed_demo"]
+
 
 COMPRESSED_EXTS = {".bz2", ".gz", ".zst", ".zip"}
 

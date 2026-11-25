@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 
 from sources.model import DemoState, MatchRecord
 
+__all__ = ["KINDS", "MatchRow", "build_rows", "kind_of", "manual_demo_ready"]
+
 # the Source column's two values today (a provider id or your own file)
 SOURCE_FILE = "file"
 

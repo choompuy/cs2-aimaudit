@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 from core.model import TRADE_S, Demo
 from core.openings import _enemy_kill_rows, _round_side_keep
 
+__all__ = ["impact_stats"]
+
 
 def _keep_ok(keep, round_idx, sid) -> bool:
     """The _round_side_keep predicate: no filter -> everything counts."""

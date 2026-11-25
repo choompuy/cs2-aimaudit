@@ -38,11 +38,11 @@ def row(x, y, z, pitch=0.0, yaw=0.0, duck=None, punch=None):
     return r
 
 
-check("duck missing -> 0", core._duck_amount(row(0, 0, 0)) == 0.0)
-check("duck 0.5", core._duck_amount(row(0, 0, 0, duck=0.5)) == 0.5)
-check("duck clamped hi", core._duck_amount(row(0, 0, 0, duck=1.7)) == 1.0)
-check("duck clamped lo", core._duck_amount(row(0, 0, 0, duck=-0.2)) == 0.0)
-check("duck nan -> 0", core._duck_amount(row(0, 0, 0, duck=np.nan)) == 0.0)
+check("duck missing -> 0", core.model._duck_amount(row(0, 0, 0)) == 0.0)
+check("duck 0.5", core.model._duck_amount(row(0, 0, 0, duck=0.5)) == 0.5)
+check("duck clamped hi", core.model._duck_amount(row(0, 0, 0, duck=1.7)) == 1.0)
+check("duck clamped lo", core.model._duck_amount(row(0, 0, 0, duck=-0.2)) == 0.0)
+check("duck nan -> 0", core.model._duck_amount(row(0, 0, 0, duck=np.nan)) == 0.0)
 
 shooter = row(0, 0, 0)
 target_stand = row(1000, 0, 0)

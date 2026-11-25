@@ -28,6 +28,12 @@ from store.paths import (
     unpacked_dir,
 )
 
+__all__ = [
+    "clear_cache", "clear_icons", "drop_matchstats", "parse_key", "prune_parsed",
+    "read_matchstats", "read_parsed", "storage_report", "write_matchstats",
+    "write_parsed",
+]
+
 
 def parse_key(path: str) -> str | None:
     """

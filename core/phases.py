@@ -47,6 +47,8 @@ from core.model import (
     norm_weapon,
 )
 
+__all__ = ["tickrate_from_header"]
+
 
 def tickrate_from_header(header: dict) -> int:
     """

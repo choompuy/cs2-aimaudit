@@ -26,6 +26,8 @@ from core.model import (
     weapon_class,
 )
 
+__all__ = ["build_duels", "duels_for"]
+
 
 class _DuelCtx:
     """Per-demo context the duel helpers share: fires, enemies, aim rule."""

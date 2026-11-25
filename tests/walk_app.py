@@ -317,9 +317,8 @@ def main() -> int:
     os.environ["AIMAUDIT_DATA_DIR"] = os.path.realpath(
         tempfile.mkdtemp(prefix="cs2aa_walk_")
     )
-    smoke_app.core.DemoParser = (
-        smoke_app.core.loader.DemoParser
-    ) = smoke_app.core.replay.DemoParser = smoke_app.FakeParser
+    smoke_app.core.loader.DemoParser = smoke_app.FakeParser
+    smoke_app.core.replay.DemoParser = smoke_app.FakeParser
 
     failures = 0
     for seed in seeds:

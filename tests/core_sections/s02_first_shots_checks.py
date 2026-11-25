@@ -29,14 +29,14 @@ from .s01_metrics_tables import demo, duels, shots  # noqa: F401
 print("== first shots / mouse flick ==")
 # gap semantics: > ENGAGE_GAP_TICKS since the same sid's
 # previous shot = fresh aim event; the array is order-independent
-_g = core._first_shot_arr([122, 100, 123], ["a", "a", "a"])
+_g = core.model._first_shot_arr([122, 100, 123], ["a", "a", "a"])
 check(
     "gap boundary: 22 -> follow-up, 23 -> first, any row order",
     _g.tolist() == [False, True, False],
     _g.tolist(),
 )
 # the mouse sample covers the window BEFORE each first shot, clipped at 0
-_w = core._first_shot_windows(
+_w = core.model._first_shot_windows(
     pd.DataFrame({"tick": [5, 700], "user_steamid": ["a", "a"]})
 )
 check(

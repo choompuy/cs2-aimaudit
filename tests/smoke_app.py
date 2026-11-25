@@ -2131,7 +2131,7 @@ def run_real(path):
     # formatted label ("Name (T)" -> "Name (T) (?)"), so players are
     # selected by their RAW sid from a light parse_player_info() call
     # (DemoParser needs the decompressed file, like the app itself)
-    info = core.DemoParser(core.decompressed_demo(path)).parse_player_info()
+    info = core.loader.DemoParser(core.decompressed_demo(path)).parse_player_info()
     sids = sorted({str(int(s)) for s in pd.Series(info["steamid"]).dropna()})
     for sid in (s for s in sids if s != "0"):
         act(
@@ -2801,7 +2801,7 @@ def main():
         # patch BEFORE any app run: DemoParser is used by core.loader
         # (load_demo) and core.replay (timeline/replay data); the facade
         # name is patched too for direct core.DemoParser calls.
-        core.DemoParser = core.loader.DemoParser = core.replay.DemoParser = FakeParser
+        core.loader.DemoParser = core.replay.DemoParser = FakeParser
         scenario_one_round()
         scenario_nav()
         scenario_settings()

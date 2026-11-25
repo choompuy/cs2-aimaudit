@@ -38,6 +38,13 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 
+__all__ = [
+    "LOG_MAX_LINES", "accounts_path", "data_dir", "data_dir_is_fallback", "demo_key",
+    "demos_dir", "human_size", "icons_dir", "log_note", "logs_dir",
+    "matches_cache_path", "matchstats_dir", "parsed_dir", "radars_dir", "state_path",
+    "tools_dir", "unpacked_dir",
+]
+
 def _app_dir() -> str:
     """
     The folder of the launcher. For a frozen exe (PyInstaller, Nuitka) that is

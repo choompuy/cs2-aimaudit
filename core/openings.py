@@ -28,6 +28,8 @@ from core.model import (
     weapon_class,
 )
 
+__all__ = ["openings_table", "round_outcomes", "round_winners"]
+
 
 def _top_weapon(de: pd.DataFrame, ok: np.ndarray, who: str) -> dict[str, str]:
     """sid -> the weapon carried by the most of this player's rows in

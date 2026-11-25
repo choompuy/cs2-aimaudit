@@ -28,6 +28,11 @@ from store.paths import (
     unpacked_dir,
 )
 
+__all__ = [
+    "add_demo", "add_link", "delete_all_demos", "delete_demo", "demo_path", "get_demo",
+    "link_id", "list_demos", "relink", "touch", "update_meta",
+]
+
 
 def _read_library() -> list[dict]:
     try:

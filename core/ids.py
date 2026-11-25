@@ -18,6 +18,8 @@ import pandas as pd
 
 from core.model import NA, TICKRATE, _speed_from_positions
 
+__all__ = ["build_id_lookup", "fix_ids"]
+
 
 def build_id_lookup(info: pd.DataFrame):
     """

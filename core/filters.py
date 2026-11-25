@@ -7,6 +7,11 @@ import pandas as pd
 
 from core.model import weapon_class
 
+__all__ = [
+    "Filters", "ROUNDS_PER_HALF", "apply_filters", "halves_from_sides", "pistol_rounds",
+    "round_bounds",
+]
+
 
 @dataclass
 class Filters:

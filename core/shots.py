@@ -29,6 +29,8 @@ from core.model import (
     weapon_class,
 )
 
+__all__ = ["add_risk", "add_stop_quality", "shots_table"]
+
 
 def _nearest_enemy_dist(demo: Demo, shots: pd.DataFrame) -> pd.Series:
     """

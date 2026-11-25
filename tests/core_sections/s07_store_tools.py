@@ -68,14 +68,14 @@ try:
     sys.executable = os.path.join(tempfile.gettempdir(), "aimaudit_app", "CS2-AimAudit.exe")
     check(
         "frozen exe: the data folder is next to the .exe, not in the unpack folder",
-        store._app_dir() == os.path.dirname(sys.executable),
-        store._app_dir(),
+        store.paths._app_dir() == os.path.dirname(sys.executable),
+        store.paths._app_dir(),
     )
 finally:
     sys.executable = _old_exe
     if not _had_frozen:
         del sys.frozen
-check("not frozen: next to the sources", store._app_dir() == os.path.dirname(os.path.dirname(os.path.abspath(store.__file__))))
+check("not frozen: next to the sources", store.paths._app_dir() == os.path.dirname(os.path.dirname(os.path.abspath(store.__file__))))
 
 print("== store: demo library ==")
 check("empty library lists nothing", store.list_demos() == [])
@@ -271,19 +271,19 @@ check(
     "second open comes from the disk cache, identical",
     _hit2 is True and _d2.players.equals(_d1.players) and _d2.deaths.equals(_d1.deaths) and _d2.sides == _d1.sides,
 )
-check("parse version names parser + code", core.PARSE_VERSION.startswith("f1-") and len(core.PARSE_VERSION) > 8)
-_other = core.PARSE_VERSION
+check("parse version names parser + code", core.loader.PARSE_VERSION.startswith("f1-") and len(core.loader.PARSE_VERSION) > 8)
+_other = core.loader.PARSE_VERSION
 try:
     # patch the loader module too: load_demo_cached reads PARSE_VERSION
     # from its own module globals
-    core.PARSE_VERSION = core.loader.PARSE_VERSION = "f1-other"
+    core.loader.PARSE_VERSION = "f1-other"
     try:
         core.load_demo_cached(_cached_path)
         check("changed parser/code version -> cache not used", False)
     except Exception:  # noqa: BLE001 - the fake parser is gone, so a miss raises
         check("changed parser/code version -> cache not used", True)
 finally:
-    core.PARSE_VERSION = core.loader.PARSE_VERSION = _other
+    core.loader.PARSE_VERSION = _other
 check("state file lives in the data folder", os.path.dirname(store.state_path()) == store.data_dir())
 core.save_state({"last_demo": "abc"})
 check("state round trip", core.load_state() == {"last_demo": "abc"})
@@ -792,7 +792,7 @@ _ms_key = store.parse_key(_ms_file)
 _ms.write_cached(_ms_file, dict(_ms_sum, score=[16, 14], result="win"))
 check(
     "matchstats: write_cached lands <parse_key>-<version>.json",
-    os.path.isfile(os.path.join(store.matchstats_dir(), f"{_ms_key}-{core.PARSE_VERSION}.json")),
+    os.path.isfile(os.path.join(store.matchstats_dir(), f"{_ms_key}-{core.loader.PARSE_VERSION}.json")),
     sorted(os.listdir(store.matchstats_dir())),
 )
 _back = _ms.read_cached(_ms_file)

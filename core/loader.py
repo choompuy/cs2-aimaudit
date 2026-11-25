@@ -32,6 +32,8 @@ from core.phases import (
     _parse_totals,
 )
 
+__all__ = ["load_demo", "load_demo_cached", "load_state", "save_state"]
+
 
 # ------------------------------------------------------------ app state
 # Small local state next to the demo library (store.state_path): the last

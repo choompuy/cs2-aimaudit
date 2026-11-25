@@ -12,6 +12,11 @@ import os
 from store.library import _read_library, _update
 from store.paths import _now, accounts_path, matches_cache_path
 
+__all__ = [
+    "find_by_match", "mark_analyzed", "read_accounts", "read_matches_cache",
+    "write_accounts", "write_matches_cache",
+]
+
 
 # accounts.json (no secrets - the Steam import needs none) and matches.json
 # (the cached match lists) follow the same rules as library.json: atomic
