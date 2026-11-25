@@ -708,11 +708,11 @@ except Exception as exc:  # noqa: BLE001
 # ---- 12b. navigation: every sidebar item and match tab has its i18n label
 # in BOTH locales (the sidebar renders nav_<id>, the match tabs tab_<id>)
 try:
-    import shell  # noqa: E402
+    import state  # noqa: E402
 
     _nav_missing = [
         f"nav_{p}"
-        for p in shell.NAV_PAGES
+        for p in state.NAV_PAGES
         if f"nav_{p}" not in i18n.STR["en"] or f"nav_{p}" not in i18n.STR["ru"]
     ]
     bad(
@@ -722,7 +722,7 @@ try:
     )
     _tab_missing = [
         f"tab_{p}"
-        for p in shell.MATCH_TABS
+        for p in state.MATCH_TABS
         if f"tab_{p}" not in i18n.STR["en"] or f"tab_{p}" not in i18n.STR["ru"]
     ]
     bad(
@@ -732,11 +732,11 @@ try:
     )
     bad(
         "navigation: sidebar ids and match tabs do not collide",
-        not set(shell.NAV_PAGES) & set(shell.MATCH_TABS),
-        sorted(set(shell.NAV_PAGES) & set(shell.MATCH_TABS)),
+        not set(state.NAV_PAGES) & set(state.MATCH_TABS),
+        sorted(set(state.NAV_PAGES) & set(state.MATCH_TABS)),
     )
 except Exception as exc:  # noqa: BLE001
-    bad("navigation: shell loads", False, repr(exc))
+    bad("navigation: state loads", False, repr(exc))
 
 # ---- 12c. docs/ARCHITECTURE.md stays honest: the new modules and the
 # two-level navigation must be in the map (a stale doc is a broken doc)

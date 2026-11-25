@@ -61,7 +61,7 @@ written here, so the doc and the guardrails stay honest.
 | `store/library.py`                |       388 | The demo library: copies AND linked demos, add / relink / delete, the disk sync that adopts dropped files.                                  |
 | `store/caches.py`                 |       242 | Parsed / matchstats caches (parse keys, LRU pruning, drop_matchstats), the storage report and the clear actions.                                             |
 | `store/importdata.py`             |        66 | accounts.json / matches.json: atomic writes, a corrupt file counts as empty.                                                                |
-| `state.py`                        |       151 | The `session_state` registry: key-name constants, typed get_*/set_* for the keys shared by 2+ modules, and the match-level mutators (`go_tab`/`leave_match`; `go_page`/`go_match` live in `shell` - they need the `st.Page` registry). |
+| `state.py`                        |       151 | The `session_state` registry: `Key` objects for the keys shared by 2+ modules, and the match-level mutators (`go_tab`/`leave_match`). |
 | `nativedialog.py`                 |        95 | Native Windows file dialogs (tkinter in a child process): gives the real path a browser upload never reveals.                       |
 
 Support: `tests/test_core.py` (synthetic-match unit tests),
@@ -83,7 +83,7 @@ through `st.navigation` (position `"hidden"` - the rail is the app's own
 and the page itself lives in the URL path (`/dashboard`, `/matches`, ...).
 `app.py` owns the page bodies (`_PAGE_FNS`); `shell` never imports `views`,
 so the import graph stays one-way. The shared keys are a REGISTRY
-(`state.py`): key-name constants and typed get_*/set_* accessors; a module
+(`state.py`): `Key` objects with get / set / pop; a module
 never touches another module's key by a string literal. `lang` and `me`
 are widget-OWNED keys (the sidebar selectbox / the player selectbox), so
 the registry only reads them:
@@ -287,7 +287,7 @@ A **column** is the recipe above. A **table**:
 1. Create `views/<name>.py` with a single `render(ctx)` function. It must
    open on an empty library (no demo needed) - only `app.py::_match`
    loads demos.
-2. Add the id to `NAV_PAGES` in `shell.py` and an icon to `NAV_ICONS`;
+2. Add the id to `NAV_PAGES` in `state.py` and an icon to `NAV_ICONS` in `shell.py`;
    `shell.navigation` derives the `st.Page` (url path, title) and the
    `st.page_link` rail entry from that one loop - no CSS, no per-item
    markup (Streamlit marks the active item itself).
@@ -302,7 +302,7 @@ A **column** is the recipe above. A **table**:
 1. Create `views/<name>.py` with a single `render(ctx)` function (unpack
    what you need from `ctx` into locals first). `@st.fragment` helpers
    stay top-level functions of that module.
-2. Add the id to `MATCH_TABS` in `shell.py` (the segmented control of
+2. Add the id to `MATCH_TABS` in `state.py` (the segmented control of
    the match header picks it up) and the `tab_<id>` label to both
    locales in `i18n.py`.
 3. Dispatch it in `app.py::_match` (one `if tab == "<id>":` line).

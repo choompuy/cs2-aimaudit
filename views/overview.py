@@ -77,7 +77,7 @@ def render(ctx) -> None:
     def _pick_player_row(i):
         """Grid row click -> select that player (callback, runs before widgets)."""
         if 0 <= i < len(ov_sids):
-            state.set_me(ov_sids[i])
+            state.ME.set(ov_sids[i])
 
     schema.table(
         "overview",

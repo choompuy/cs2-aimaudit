@@ -389,7 +389,7 @@ def weapon_label(name) -> str:
     try:
         import state
 
-        lang = state.get_lang()
+        lang = state.LANG.get()
     except Exception:  # noqa: BLE001 - bare mode (unit tests): en
         lang = None
     t = i18n.make_t(lang or next(iter(i18n.LANGS)))

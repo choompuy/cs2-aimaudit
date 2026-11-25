@@ -76,8 +76,8 @@ def _duels_grid(ctx) -> None:
         views/replay.open_duel_dialog; it is called at the bottom of
         the run)."""
         if 0 <= i < len(ctx.my_duels):
-            state.set_tl_duel(i)
-            state.set_du_open(True)
+            state.TL_DUEL.set(i)
+            state.DU_OPEN.set(True)
 
     schema.table(
         "duels",

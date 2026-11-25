@@ -130,23 +130,19 @@ def _persist_accounts() -> dict:
     return accounts
 
 
-_steam_cfg = _shared.steam_cfg
-_show_error = _shared.show_error
-
-
 def _add_by_share_code(t) -> None:
     code = (st.session_state.get("mt_share_code") or "").strip()
     if not code:
         return
     accounts = _persist_accounts()
-    cfg = _steam_cfg(accounts)
+    cfg = _shared.steam_cfg(accounts)
     try:
         with st.spinner(t("mt_share_add")):
             rec = sources.steam.SteamProvider(
                 cfg, transport=sources.http.HttpTransport()
             ).match_by_share_code(code)
     except sm.ProviderError as e:
-        _show_error(t, (e.key, e.kw))
+        _shared.show_error(t, (e.key, e.kw))
         return
     records = [r for r in sources.read_cache("steam") if r.match_id != rec.match_id]
     records.insert(0, rec)
@@ -180,7 +176,7 @@ def _install_helper(t) -> None:
         with status:
             sources.steam.install_helper(sources.http.HttpTransport())
     except sm.ProviderError as e:
-        _show_error(t, (e.key, e.kw))
+        _shared.show_error(t, (e.key, e.kw))
         status.update(label=t("mt_helper_installing"), state="error")
         return
     status.update(label=t("mt_helper_done"), state="complete")

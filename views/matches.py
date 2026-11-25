@@ -34,11 +34,6 @@ _RESULTS = ("all", "win", "loss", "tie")
 PAGE_ROWS = 25
 
 
-# ------------------------------------------------------------- shared bits
-_steam_cfg = _shared.steam_cfg
-_show_error = _shared.show_error
-
-
 def _all_records() -> list[sm.MatchRecord]:
     """Every cached provider list (Steam today), newest first."""
     out: list[sm.MatchRecord] = []
@@ -90,7 +85,7 @@ def _after_pick(paths, t) -> None:
     """Link the chosen files (a native dialog gave their real paths) and
     open the last one as the match."""
     if paths is None:
-        state.set_pick_err(t("lib_no_dialog"))
+        state.PICK_ERR.set(t("lib_no_dialog"))
         return
     added, errs = [], []
     for p in paths:
@@ -104,7 +99,7 @@ def _after_pick(paths, t) -> None:
             added[-1]["name"] if len(added) == 1 else t("lib_n_added", n=len(added))
         )
     if errs:
-        state.set_pick_err("  ".join(errs))
+        state.PICK_ERR.set("  ".join(errs))
 
 
 def _pick_file(t) -> None:
@@ -134,7 +129,7 @@ def _add_match(t) -> None:
 def _refresh(t, n: int) -> None:
     accounts = store.read_accounts()
     errs = {}
-    cfg = _steam_cfg(accounts)
+    cfg = _shared.steam_cfg(accounts)
     try:
         records = sources.list_matches("steam", cfg, n)
         known = {r.match_id for r in records}
@@ -190,7 +185,7 @@ def _download(t, rec: sm.MatchRecord) -> None:
     progress line underneath tracks the real numbers. The finished demo is
     analyzed on the spot, then opened (the summary is cached already)."""
     accounts = store.read_accounts()
-    cfg = _steam_cfg(accounts)
+    cfg = _shared.steam_cfg(accounts)
     status = st.status(t("mt_dl_status"))
     bar = st.progress(0.0)
 
@@ -259,7 +254,7 @@ def _run_flagged_downloads(t, rows: list[core.MatchRow]) -> None:
         return
     st.session_state.pop(CHECKED, None)  # the rows flip to in-library anyway
     accounts = store.read_accounts()
-    cfg = _steam_cfg(accounts)
+    cfg = _shared.steam_cfg(accounts)
     status = st.status(t("mt_dl_multi_status", n=len(sel)))
     bar = st.progress(0.0)
     ok, skipped, errs, first = 0, 0, [], None
@@ -602,12 +597,12 @@ def _notices(t) -> None:
     errors, freed space, pick warnings, added/downloaded toasts."""
     _show_import_error(t)
     errs = st.session_state.pop("mt_errs", None) or {}
-    _show_error(t, errs.get("steam"))
+    _shared.show_error(t, errs.get("steam"))
     if "mt_freed" in st.session_state:
         st.success(
             t("lib_freed", size=store.human_size(st.session_state.pop("mt_freed")))
         )
-    _pe = state.pop_pick_err()
+    _pe = state.PICK_ERR.pop()
     if _pe is not None:
         st.warning(_pe)
     if "_added" in st.session_state:
@@ -618,12 +613,12 @@ def _notices(t) -> None:
         ok, n = st.session_state.pop("_dl_multi_done")
         st.toast(t("mt_dl_multi_done", ok=ok, n=n))
     if "_dl_err" in st.session_state:
-        _show_error(t, st.session_state.pop("_dl_err"))
+        _shared.show_error(t, st.session_state.pop("_dl_err"))
     if "_dl_errs" in st.session_state:
         errs = st.session_state.pop("_dl_errs")
         st.error(t("mt_dl_multi_errs", ids=", ".join(str(m) for m, _k, _w in errs)))
         for _m, k, kw in errs[:3]:
-            _show_error(t, (k, kw))
+            _shared.show_error(t, (k, kw))
 
 
 def _title_row(t) -> None:

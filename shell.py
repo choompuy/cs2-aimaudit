@@ -33,12 +33,7 @@ from context import _status, get_demo, get_duels, get_shots
 # The two-level model lives in state.py (the registry): `page` mirrors the
 # st.navigation page that is running; `match` (a library demo id) and
 # `match_tab` live inside the Matches page - a match is always opened FROM
-# the list, never from the sidebar. Re-exported here: tests and the
-# sidebar read shell.NAV_*.
-NAV_PAGES = state.NAV_PAGES
-MATCH_TABS = state.MATCH_TABS
-go_tab = state.go_tab
-leave_match = state.leave_match
+# the list, never from the sidebar.
 
 # The st.Page registry of the running app, filled by navigation() before
 # anything can switch pages (st.switch_page and the rail's st.page_link
@@ -71,27 +66,27 @@ def apply_match_url() -> None:
     tab switches that have not reached the URL yet."""
     m = st.query_params.get("m", "")
     if re.fullmatch(r"[0-9a-f]{16}", m or "") and store.get_demo(m) is not None:
-        state.set_match(m)
-        state.set_demo_id(m)
+        state.MATCH.set(m)
+        state.DEMO_ID.set(m)
         if not st.session_state.get("_url_tab_done"):
             st.session_state["_url_tab_done"] = True
             tab = st.query_params.get("tab")
-            if tab in MATCH_TABS:
-                state.set_match_tab(tab)
+            if tab in state.MATCH_TABS:
+                state.MATCH_TAB.set(tab)
     else:
         if m:
             del st.query_params["m"]  # a dead link must not come back
-        state.clear_match()
+        state.MATCH.pop()
 
 
 def sync_nav_url() -> None:
     """Keep `?m=&tab` in step with the session (bookmark / share / reload).
     The page is the URL path; other pages keep the URL clean."""
     want: dict[str, str] = {}
-    if state.get_page() == "matches" and state.get_match():
-        want["m"] = state.get_match()
-        if state.get_match_tab() != "overview":
-            want["tab"] = state.get_match_tab()
+    if state.PAGE.get() == "matches" and state.MATCH.get():
+        want["m"] = state.MATCH.get()
+        if state.MATCH_TAB.get() != "overview":
+            want["tab"] = state.MATCH_TAB.get()
     for k in ("m", "tab"):
         if k not in want and k in st.query_params:
             del st.query_params[k]
@@ -105,16 +100,16 @@ def go_page(page: str) -> None:
     'matches' means the LIST: an open match is left behind, exactly like a
     rail click - the back button of the match view is the other way out."""
     if page == "matches":
-        state.clear_match()
+        state.MATCH.pop()
     st.switch_page(_PAGES[page])
 
 
 def go_match(demo_id: str, tab: str = "overview") -> None:
     """The one way to open a match: a list row, a fresh download. Sets the
     registry keys and the shareable ?m=; the caller reruns."""
-    state.set_match(demo_id)
-    state.set_demo_id(demo_id)
-    state.set_match_tab(tab)
+    state.MATCH.set(demo_id)
+    state.DEMO_ID.set(demo_id)
+    state.MATCH_TAB.set(tab)
     sync_nav_url()
 
 
@@ -124,10 +119,10 @@ def navigation(ctx, page_fns: dict) -> "st.navigation":
     and fill the run context. Returns the nav object whose .run() draws
     the active page (app.py owns the page bodies; shell never imports
     views, keeping the import graph one-way)."""
-    t = i18n.make_t(state.get_lang() or next(iter(i18n.LANGS)))
+    t = i18n.make_t(state.LANG.get() or next(iter(i18n.LANGS)))
     context.set_t(t)
     pages = []
-    for pid in NAV_PAGES:
+    for pid in state.NAV_PAGES:
         page = st.Page(
             lambda fn=page_fns[pid]: fn(ctx),
             title=t(f"nav_{pid}"),
@@ -138,9 +133,9 @@ def navigation(ctx, page_fns: dict) -> "st.navigation":
         _PAGES[pid] = page
         pages.append(page)
     pg = st.navigation(pages, position="hidden")
-    state.set_page(next(pid for pid, page in _PAGES.items() if page is pg))
+    state.PAGE.set(next(pid for pid, page in _PAGES.items() if page is pg))
     with st.sidebar:
-        for pid in NAV_PAGES:
+        for pid in state.NAV_PAGES:
             st.page_link(_PAGES[pid], label=t(f"nav_{pid}"), icon=NAV_ICONS[pid])
         st.divider()
         st.selectbox(
@@ -167,7 +162,7 @@ def match_shell(ctx) -> None:
     badges and the match tabs - plain flow, nothing pinned (the filter
     summary row of filters_ui.render follows right below)."""
     t = ctx.t
-    entry = store.get_demo(state.get_match()) or {}
+    entry = store.get_demo(state.MATCH.get()) or {}
     m = entry.get("match") or {}
     score = m.get("score") if isinstance(m.get("score"), (list, tuple)) else None
     result = m.get("result")
@@ -185,7 +180,7 @@ def match_shell(ctx) -> None:
             t("back_to_matches"),
             key="mt_back",
             icon=":material/arrow_back:",
-            on_click=leave_match,
+            on_click=state.leave_match,
             width="content",
         )
         st.markdown(f"**{html.escape(str(title))}**")
@@ -196,11 +191,11 @@ def match_shell(ctx) -> None:
     # only the active one, and code can switch it (the duel window's
     # "show in 2D replay" button does). persist_state="session" keeps
     # the tab alive across the pages that do not render the match view.
-    state.set_match_tab(state.get_match_tab())  # a deselect means the default tab
+    state.MATCH_TAB.set(state.MATCH_TAB.get())  # a deselect means the default tab
     ctx.tab = (
         st.segmented_control(
             t("nav_pages"),
-            MATCH_TABS,
+            state.MATCH_TABS,
             format_func=lambda p: t(f"tab_{p}"),
             label_visibility="collapsed",
             key="match_tab",
@@ -309,7 +304,7 @@ def _set_me(demo_id: str, me_sid: str, remember: bool) -> None:
         _remember_me(me_sid)
     else:
         store.update_meta(demo_id, me_sid=me_sid)
-    state.set_me(me_sid)
+    state.ME.set(me_sid)
 
 
 def _change_me(demo_id: str, me_sid: str, remember: bool) -> None:
@@ -324,7 +319,7 @@ def _change_me(demo_id: str, me_sid: str, remember: bool) -> None:
     else:
         store.update_meta(demo_id, me_sid=me_sid)
     core.matchstats.drop_cached(store.demo_path(entry))
-    state.set_me(me_sid)
+    state.ME.set(me_sid)
 
 
 # ----------------------------------------------------- library actions
@@ -343,11 +338,9 @@ def confirm_delete(did: str) -> None:
     closes back to the Matches list."""
     freed = store.delete_demo(did)
     st.session_state.pop("del_pending", None)
-    for k in ("demo_id", "demo_loaded"):
-        if st.session_state.get(k) == did:
-            st.session_state.pop(k, None)
-    if state.get_match() == did:
-        state.clear_match()
+    for key in (state.DEMO_ID, state.DEMO_LOADED, state.MATCH):
+        if key.get() == did:
+            key.pop()
     st.session_state["_freed"] = freed
 
 
@@ -369,14 +362,14 @@ def locate_demo(t, did: str) -> None:
         t("lib_locate"), t("lib_dialog_demos"), t("lib_dialog_all")
     )
     if chosen is None:
-        state.set_pick_err(t("lib_no_dialog"))
+        state.PICK_ERR.set(t("lib_no_dialog"))
     elif chosen:
         try:
             store.relink(did, chosen[0])
         except (ValueError, OSError) as e:
-            state.set_pick_err(str(e))
+            state.PICK_ERR.set(str(e))
             return
-        if state.get_demo_loaded() == did:
+        if state.DEMO_LOADED.get() == did:
             st.session_state.pop(state.DEMO_LOADED)  # load it again from the new place
 
 
@@ -479,9 +472,9 @@ def _resolve_demo_id(saved: dict, lib: list) -> None:
     """Defensive: a demo_id this library does not have (deleted in
     Settings mid-session) falls back to the last opened one."""
     by_id = {e["id"]: e for e in lib}
-    if lib and (state.get_demo_id() or "") not in by_id:
+    if lib and (state.DEMO_ID.get() or "") not in by_id:
         _last = saved.get("last_demo")
-        state.set_demo_id(_last if _last in by_id else lib[0]["id"])
+        state.DEMO_ID.set(_last if _last in by_id else lib[0]["id"])
 
 
 def _missing_demo_card(t, entry: dict) -> None:
@@ -507,7 +500,7 @@ def _missing_demo_card(t, entry: dict) -> None:
             t("back_to_matches"),
             key="mt_back_missing",
             icon=":material/arrow_back:",
-            on_click=leave_match,
+            on_click=state.leave_match,
         )
     st.stop()
 
@@ -566,10 +559,10 @@ def open_demo(ctx) -> None:
     saved = core.load_state()
     lib = store.list_demos()
     by_id = {e["id"]: e for e in lib}
-    _loaded_id = state.get_demo_loaded()
+    _loaded_id = state.DEMO_LOADED.get()
     _resolve_demo_id(saved, lib)
 
-    entry = by_id[state.get_demo_id() or ""]
+    entry = by_id[state.DEMO_ID.get() or ""]
     if entry["status"] == "missing":
         _missing_demo_card(t, entry)
     src = store.demo_path(entry)
@@ -599,7 +592,7 @@ def open_demo(ctx) -> None:
         saved["last_demo"] = entry["id"]
         core.save_state(saved)
     # the demo is now loaded: remember it and fold the "Change demo" panel
-    state.set_demo_loaded(entry["id"])
+    state.DEMO_LOADED.set(entry["id"])
     if fresh_load:
         # fold the loading UI into the compact header immediately: without
         # this the loading state stays on screen until the next interaction
@@ -667,18 +660,18 @@ def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
     ).sort_values(["team", "_n"])
     me_opts = plist["sid"].tolist()
     # preselect the remembered player (and drop a stale pick from another demo)
-    if state.get_me() not in me_opts:
+    if state.ME.get() not in me_opts:
         last = saved.get("last_player")
-        state.set_me(last if last in me_opts else me_opts[0])
+        state.ME.set(last if last in me_opts else me_opts[0])
 
     def _me_step(delta: int):
         """Buttons/hotkeys cycle the player selectbox (wraps around)."""
-        cur = state.get_me()
+        cur = state.ME.get()
         if cur in me_opts:
             i = (me_opts.index(cur) + delta) % len(me_opts)
         else:
             i = 0 if delta > 0 else len(me_opts) - 1
-        state.set_me(me_opts[i])
+        state.ME.set(me_opts[i])
 
     with st.container(horizontal=True, gap="small", vertical_alignment="center"):
         st.caption(t("player"))
@@ -723,7 +716,7 @@ def _who_menu(t, demo, me_opts: list, name_of: dict) -> None:
     another player and the whole match (the summary of the Matches table
     included) is recomputed for the new one. The pick lands in Settings
     (every match) or only in this match, exactly like the ask card."""
-    entry = store.get_demo(state.get_match()) or {}
+    entry = store.get_demo(state.MATCH.get()) or {}
     accounts = store.read_accounts()
     cur = core.matchstats.resolve_me(demo, entry, accounts)
     cur_name = name_of.get(cur, cur) if cur else None

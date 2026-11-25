@@ -71,7 +71,7 @@ def _filter_data(ctx):
     # which controls a tab needs: the panel renders above the tabs, but the
     # tab is already known from session_state (the segmented control only
     # re-binds it on the next run)
-    tab_now = state.get_match_tab()
+    tab_now = state.MATCH_TAB.get()
     show_result = tab_now == "duels"
     # the replay shows the whole round, so none of the analysis filters apply
     show_panel = tab_now != "replay"

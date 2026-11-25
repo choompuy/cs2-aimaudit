@@ -13,7 +13,6 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import core
-import shell
 import state
 import theme
 from context import get_round_outcomes, get_round_replay, get_timeline
@@ -313,7 +312,7 @@ def _open_in_replay(rnd: int, tick: int, victim: str) -> None:
     """Button callback: show this duel in the 2D replay (selected, locked)."""
     st.session_state["rr_round"] = int(rnd)
     st.session_state["rr_sel"] = (int(rnd), int(tick), str(victim))
-    shell.go_tab("replay")
+    state.go_tab("replay")
 
 
 def _duel_strip(ctx) -> pd.Series:
@@ -323,7 +322,7 @@ def _duel_strip(ctx) -> pd.Series:
     my_duels = ctx.my_duels
 
     def _pick(i: int):
-        state.set_tl_duel(i)
+        state.TL_DUEL.set(i)
 
     labels = [duel_label(my_duels.iloc[i]) for i in range(len(my_duels))]
     duel_strip(
@@ -331,7 +330,7 @@ def _duel_strip(ctx) -> pd.Series:
             {"round": rd, "result": w, "tip": lab}
             for rd, w, lab in zip(my_duels["round"], my_duels["result"], labels, strict=True)
         ],
-        state.get_tl_duel(),
+        state.TL_DUEL.get(),
         key="tl_strip",
         on_select=_pick,
         round_label=lambda rd, n: t("tl_strip_round", r=(rd if rd is not None else "?"), n=n),
@@ -346,7 +345,7 @@ def _duel_strip(ctx) -> pd.Series:
         },
     )
     st.caption(t("tl_strip_hint"))
-    return my_duels.iloc[state.get_tl_duel()]
+    return my_duels.iloc[state.TL_DUEL.get()]
 
 
 def _duel_summary_card(ctx, r) -> None:
@@ -402,8 +401,8 @@ def _duel_dialog(ctx) -> None:
     if not len(my_duels):
         st.info(t("du_none"))
         return
-    if state.get_tl_duel() is None or not (0 <= state.get_tl_duel() < len(my_duels)):
-        state.set_tl_duel(0)
+    if state.TL_DUEL.get() is None or not (0 <= state.TL_DUEL.get() < len(my_duels)):
+        state.TL_DUEL.set(0)
 
     r = _duel_strip(ctx)
     tick = int(r["tick"])

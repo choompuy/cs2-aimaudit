@@ -75,11 +75,11 @@ def _page_guide(ctx) -> None:
 def _page_matches(ctx) -> None:
     """The Matches page: the open match's view, or the list (?m decides)."""
     shell.apply_match_url()
-    if state.has_match():
-        if store.get_demo(state.get_match()) is None:
+    if state.MATCH.get():
+        if store.get_demo(state.MATCH.get()) is None:
             # the match's demo left the library (deleted in Settings or by
             # hand): show the list instead of blowing up
-            state.clear_match()
+            state.MATCH.pop()
         else:
             _match(ctx)
             return
@@ -118,7 +118,7 @@ def _match(ctx) -> None:
     if tab == "replay":
         views.replay.render(ctx)
     # a Duels row click asks for the duel window: it is a modal over the page
-    if tab == "duels" and state.pop_du_open():
+    if tab == "duels" and state.DU_OPEN.pop():
         views.replay.open_duel_dialog(ctx)
     views.extras.debug(ctx)
 
