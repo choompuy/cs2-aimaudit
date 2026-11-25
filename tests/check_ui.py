@@ -77,18 +77,25 @@ used |= {
         "sides",
     ]
 }
-for lang in ("en", "ru"):
-    missing = sorted(used - set(i18n.STR[lang]))
-    bad(f"all t() keys exist in {lang}", not missing, missing)
+missing = sorted(used - set(i18n.STR["en"]))
+bad("all t() keys exist in en", not missing, missing)
 
-# ---- 2. en/ru key sets identical
-diff_en = sorted(set(i18n.STR["en"]) - set(i18n.STR["ru"]))
-diff_ru = sorted(set(i18n.STR["ru"]) - set(i18n.STR["en"]))
-bad(
-    "en/ru key sets identical",
-    not diff_en and not diff_ru,
-    f"en-only={diff_en} ru-only={diff_ru}",
+# ---- 2. every English string has a Russian one. Weapon names may be left
+# out (i18n falls back to English); a string equal to the English one is
+# untranslated unless it is on the list.
+SAME_IN_RU = {
+    "col_hs", "first_none", "k_BACK", "k_FORWARD", "k_LEFT", "k_RIGHT", "kind_faceit",
+    "none_val", "rr_pt_hp", "rr_pt_money", "rr_u_s", "tl_ax_speed", "tl_label", "weapon_none",
+}
+_en, _ru = i18n.STR["en"], i18n.STR["ru"]
+diff_ru = sorted(set(_ru) - set(_en))
+bad("ru has no keys unknown to en", not diff_ru, diff_ru)
+_untranslated = sorted(
+    k for k, v in _en.items()
+    if (k not in _ru and not k.startswith("weapon_"))
+    or (_ru.get(k) == v and k not in SAME_IN_RU)
 )
+bad("every en string is translated to ru", not _untranslated, _untranslated)
 
 # ---- 2b. no dead i18n keys: every defined key must be reachable from the
 # app's own code - either its exact literal appears there (t("key"),

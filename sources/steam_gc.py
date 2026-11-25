@@ -136,7 +136,6 @@ class RoundStats:
     team_scores: list[int] = field(default_factory=list)
     match_duration: int = 0
     b_switched_teams: bool = False
-    max_rounds: int = 0
     account_ids: list[int] = field(default_factory=list)
     game_type: int = 0
 
@@ -146,9 +145,7 @@ class GcMatch:
     match_id: int = 0
     matchtime: int = 0
     game_map: str = ""
-    game_mapgroup: str = ""
     game_type: int = 0
-    server_ip: int = 0
     tv_port: int = 0
     roundstatsall: list[RoundStats] = field(default_factory=list)
     roundstats_legacy: RoundStats | None = None
@@ -199,21 +196,15 @@ def _parse_roundstats(buf: bytes) -> RoundStats:
             rs.match_duration = _signed32(value)
         elif fno == 27 and wt == _WT_VARINT:
             rs.b_switched_teams = bool(value)
-        elif fno == 31 and wt == _WT_VARINT:
-            rs.max_rounds = value
     return rs
 
 
 def _parse_watchable(buf: bytes, m: GcMatch) -> None:
     for fno, wt, value in _fields(buf):
-        if fno == 1 and wt == _WT_VARINT:
-            m.server_ip = value
-        elif fno == 2 and wt == _WT_VARINT:
+        if fno == 2 and wt == _WT_VARINT:
             m.tv_port = value
         elif fno == 8 and wt == _WT_VARINT:
             m.game_type = value
-        elif fno == 9 and wt == _WT_LEN:
-            m.game_mapgroup = _str(value)
         elif fno == 10 and wt == _WT_LEN:
             m.game_map = _str(value)
 

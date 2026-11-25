@@ -14,10 +14,9 @@ No Streamlit at import time (a plain leaf library over ``store`` and
 
     load()                     the manifest, read once and cached
     icon(key)                  {"uri": data-uri, "w": int, "h": int} | None
-    weapon_icon(name)          the same for a demo weapon name (aliases!)
     weapon_key(name)           demo weapon name -> icon key | None
     weapon_label(name)         the display name for tooltips (i18n)
-    payload(names) / badge_payload(keys)   {key: data-uri} for JS payloads
+    payload(keys)              {key: [data-uri, w, h]} for JS payloads
 
 Security: icon files are never inlined as raw SVG. ``sanitize_svg``
 strips scripts, event handlers, foreign objects and external references
@@ -362,12 +361,6 @@ def weapon_key(name) -> str | None:
     return None
 
 
-def weapon_icon(name) -> dict | None:
-    """{"uri", "w", "h"} of the weapon's silhouette, or None."""
-    k = weapon_key(name)
-    return icon(k) if k else None
-
-
 def weapon_info(name) -> dict:
     """
     Everything a renderer needs for one weapon in one call: {"key", "uri",
@@ -411,11 +404,6 @@ def weapon_label(name) -> str:
         if k in i18n.STR.get(lang or "en", {}) or k in i18n.STR["en"]:
             return t(k)
     return w
-
-
-def badge_payload(keys) -> dict[str, list]:
-    """payload() under its intent-revealing name for status icons."""
-    return payload(keys)
 
 
 def weapon_cells(names) -> tuple[list[str], list[str], dict[str, list]]:

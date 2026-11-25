@@ -61,7 +61,6 @@ _write = fetchutil.write
 REPO = "lexogrine/cs2-react-hud"
 COMMIT = "7874750c97fcecd8f72eb3fad382917e035ec651"
 URL = "https://raw.githubusercontent.com/{repo}/{commit}/src/assets/{folder}/{name}.svg"
-SAFE_KEY = re.compile(r"^[a-z0-9_]+$")  # keys double as file names
 TIMEOUT_AUTO, TIMEOUT_FULL = 12.0, 60.0
 
 # --------------------------------------------------------------- the pins

@@ -22,6 +22,8 @@ for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")
 
+# without it the loader falls back to the icons installed on this machine
+os.environ["AIMAUDIT_DATA_DIR"] = tempfile.mkdtemp(prefix="cs2aa_icons_")
 from ui import icons  # noqa: E402
 
 PASS = 0
@@ -229,8 +231,6 @@ def test_weapons() -> None:
         check("payload() keeps only the keys that exist", set(p) == {"ak47", "headshot"}, set(p))
         check("payload() entries are [uri, w, h]",
               p["ak47"][1:] == [100, 32], p["ak47"])
-        check("badge_payload is payload under its own name",
-              set(icons.badge_payload(["bomb", "nope"])) == {"bomb"})
     # without the icon set: keys empty, labels still resolve (tooltips / text)
     with _IconDir(empty=True):
         info = icons.weapon_info("weapon_ak47")

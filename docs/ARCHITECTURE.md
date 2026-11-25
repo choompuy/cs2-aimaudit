@@ -54,7 +54,6 @@ written here, so the doc and the guardrails stay honest.
 | `sources/steam.py`                |       365 | boiler-writter runner + hash-pinned install, the share-code codec, Valve demo downloads.                                                          |
 | `sources/inbox.py`                |       162 | The CS2 replays folder (Watch -> Your Matches) as a match source (registry + libraryfolders.vdf).                                            |
 | `sources/__init__.py`             |       169 | Facade: `list_matches`, `fetch_demo`, `import_local` - the only calls the Matches page makes into the package - plus the `matches.json` cache glue (`read_cache` / `write_cache` / `cache_time`). |
-| `theme/`                          |         — | Design tokens (`tokens.toml`), `overrides.css`, the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |
 | `i18n.py`                         |        45 | Thin loader: `STR`/`LANGS`/`make_t` built from the `i18n/<lang>.toml` files; fails fast on a missing `en.toml`, a non-flat file or a file/LANGS mismatch. |
 | `i18n/en.toml` + `i18n/ru.toml`   | 666 + 666 | The UI strings themselves (651 keys each), one flat table per language; every UI text goes through `t("key")` literals, missing keys fall back to `en.toml`. |
 | `store/` (package)                |       102 | The ONE place that knows where files live; the facade re-exports everything so `store.X` is unchanged.                                       |
@@ -248,8 +247,7 @@ including what could not be verified against a real install).
 - `weapon_key()` / `weapon_info()` / `weapon_cells()` map demo weapon
   names to icon keys (with aliases: `usp` → `usp_silencer`, `p2000` →
   `hkp2000`, `knife_*` → `knife`) plus the localized label.
-- `payload(keys)` / `badge_payload(keys)` build the `{key: [data-uri, w,
-  h]}` dicts for the grid and replay payloads — only the keys asked for,
+- `payload(keys)` builds the `{key: [data-uri, w, h]}` dicts for the grid and replay payloads — only the keys asked for,
   only the ones that exist, so payloads stay small.
 
 Rendering rule: an icon is NEVER inlined as raw SVG. It enters the DOM as

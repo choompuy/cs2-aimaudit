@@ -268,7 +268,7 @@ def _metric_tone_errs(mid: str, m: dict, kind: str, errs: list[str]) -> None:
                 errs.append(f"{where}: tones[{val!r}] unknown tone {tone!r}")
 
 
-def _validate_metric(mid: str, m: dict, errs: list[str], en: set, ru: set) -> None:
+def _validate_metric(mid: str, m: dict, errs: list[str], en: set) -> None:
     """Rules a single [metric.*] entry must hold (appends to errs)."""
     where = f"[metric.{mid}]"
     for attr in m:
@@ -276,13 +276,13 @@ def _validate_metric(mid: str, m: dict, errs: list[str], en: set, ru: set) -> No
             errs.append(f"{where}: unknown attr {attr!r}")
 
     def i18n_ok(k):
-        return k in en and k in ru
+        return k in en
 
     label = m.get("label", f"col_{mid}")
     if not i18n_ok(label):
-        errs.append(f"{where}: label key {label!r} missing in en/ru")
+        errs.append(f"{where}: label key {label!r} missing in en")
     if m.get("help") and not i18n_ok(m["help"]):
-        errs.append(f"{where}: help key {m['help']!r} missing in en/ru")
+        errs.append(f"{where}: help key {m['help']!r} missing in en")
     kind = m.get("kind", "num")
     if kind not in _KINDS:
         errs.append(f"{where}: kind must be one of {_KINDS}")
@@ -380,9 +380,9 @@ def validate(spec: dict | None = None) -> list[str]:
         spec = _load()
     metrics = spec.get("metric", {})
     tables = spec.get("table", {})
-    en, ru = _keys("en"), _keys("ru")
+    en = _keys("en")
     for mid, m in metrics.items():
-        _validate_metric(mid, m, errs, en, ru)
+        _validate_metric(mid, m, errs, en)
     for tid, tbl in tables.items():
         _validate_table(tid, tbl, metrics, errs)
     return errs
