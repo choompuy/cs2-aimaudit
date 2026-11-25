@@ -1,22 +1,8 @@
-"""
-Universal data table: one component for every table in the app.
+"""Universal data table: one component for every table in the app.
 
-    data_table(rows, cols, key="ov_grid", selected=2, stripe=[...], on_click=cb)
-
-- bars are the *background* of a cell (not a slider inside it): a column opts
-  in with Col(bar="pct" | "rel");
-- clicking a header sorts "best value first", then reversed, then resets to
-  the original order (Col.best = "high" | "low" decides what "best" means);
-- a row click calls on_click(row_index) before the next script run (same
-  contract as the old st.dataframe on_select callbacks);
-- Col(grade=...) colours the value itself by quality, red -> text -> green,
-  from the tier tokens ("auto" = position inside the column, or fixed
-  thresholds); one mechanism for every column;
-- colours are CSS variables from theme/ (var(--accent) ...), never literals.
-
-Python builds the cell model (raw value, display text, bar fraction, tone);
-the JS below only sorts and draws it. Streamlit components v2 (>=1.51).
-"""
+Python builds the cell model (raw value, text, bar fraction, tone, grade), ui/table.js
+sorts and draws it. A header click sorts best first, then reversed, then resets; a row
+click calls on_click(row_index)."""
 
 from __future__ import annotations
 
@@ -43,16 +29,13 @@ class Col:
     sort: str | None = None  # rows[sort] -> raw value used for sorting
     tones: Mapping[str, str] | None = None  # badge colour by raw/display text
     sticky: bool = False
-    # rows[title_by] -> the label of an icon cell: its tooltip AND its text
-    # fallback when the icon set is not installed ("N/A" for no weapon)
+    # rows[title_by]: an icon cell's tooltip and text fallback
     title_by: str | None = None
-    # colour of the VALUE by quality, from tier tokens (bad -> poor -> mid -> text -> good -> elite):
-    #   None                  no colouring
-    #   "auto"                position inside this column (best value = greenest);
-    #                         "best" decides the direction, needs >= 3 distinct values
-    #   (bad, good)           linear between two fixed values; their order sets the direction
-    #   (bad, ok, good)       like above, but `ok` is the neutral text colour:
-    #                         below it the colour slides to red, above it to green
+    # colour of the VALUE by quality (tier tokens):
+    #   None            no colouring
+    #   "auto"          position inside this column (>= 3 distinct values)
+    #   (bad, good)     linear; the order sets the direction
+    #   (bad, ok, good) `ok` is the neutral text colour
     grade: str | tuple[float, ...] | None = None
 
 
@@ -150,9 +133,7 @@ def _num_cell(c: Col, src, col_max, col_rng) -> list:
 
 
 def _icon_cell(c: Col, rows: Mapping[str, Sequence], i: int, src) -> list:
-    """An icon cell: raw is the icon key (or the plain name when no icon
-    exists), disp is the localized name - the tooltip, and the visible
-    text when the icon set is missing ("N/A" for no weapon)."""
+    """An icon cell: raw is the icon key (or the name), disp the localized name."""
     name = "" if src is None else str(src)
     disp = (
         str(rows[c.title_by][i])
@@ -191,18 +172,11 @@ def table_payload(
     row_keys: Sequence[str] | None = None,
     checked: Collection[str] | None = None,
 ) -> dict:
-    """JSON-ready model of the table (pure function: unit-testable).
+    """JSON-ready model of the table.
 
-    ``icons`` is {icon key: [data-uri, w, h]} for every icon the icon-kind
-    cells of THIS table reference (ui/icons.py builds it); it travels with
-    the payload so the renderer can deduplicate and the SVG never lands
-    in the DOM as anything but an <img>/mask source.
-
-    ``checkable`` (one bool per row) adds the checkbox column: the rows
-    marked True get a checkbox, the header one toggles all of them at
-    once. Every checkable row needs a stable ``row_keys`` entry; the
-    current selection is ``checked`` (a set of those keys), and each
-    change reports the whole selection back through the "checked" event."""
+    ``icons``: {key: [data-uri, w, h]} the icon cells reference. ``checkable`` (one bool
+    per row) adds the checkbox column: ``row_keys`` identify the rows, ``checked`` is
+    the selection, reported back whole."""
     n = len(next(iter(rows.values()))) if rows else 0
     col_max = _rel_maxima(rows, cols)
     col_rng = _auto_ranges(rows, cols)
@@ -271,305 +245,6 @@ def data_table(
     if on_check is not None:
         events["checked"] = component.event_callback_set(key, "checked", on_check)
     component.render(
-        "aimaudit_table", _CSS, _JS, key=key, data=payload,
+        "table", key=key, data=payload,
         trigger="clicked", handler=on_click, events=events,
     )
-
-
-_CSS = """
-:host { display: block; font-family: inherit; }
-.aa-wrap {
-  overflow: auto;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--surface-1);
-}
-.aa-t {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-family: inherit;
-  font-size: var(--font-size-md);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
-}
-.aa-t th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border-strong);
-  padding: 0.5rem 0.75rem;
-  text-align: start;
-  white-space: nowrap;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  cursor: pointer;
-  user-select: none;
-}
-.aa-t th:not(:last-child) { border-right: 1px solid var(--border-strong); }
-.aa-t th:hover, .aa-t th[aria-sort] { color: var(--text-primary); }
-.aa-t th:focus-visible, .aa-t tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.aa-t th .arrow { display: inline-block; width: 1em; margin-left: 0.25rem; color: var(--accent); visibility: hidden; }
-.aa-t th[aria-sort] .arrow { visibility: visible; }
-.aa-t td { padding: 0; white-space: nowrap; }
-.aa-t td:not(:last-child) { border-right: 1px solid var(--border-subtle); }
-.aa-t tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border-subtle); }
-.aa-t .cell { display: flex; position: relative; padding: 0.5rem 0.75rem; }
-.aa-t th.bar, .aa-t td.bar { min-width: 5rem; }
-.aa-t .val { position: relative; z-index: 1; }
-.aa-t .bar-fill {
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  background: color-mix(in srgb, var(--tone) 20%, transparent);
-}
-.aa-t .badge {
-  position: relative; z-index: 1;
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--tone, var(--text-primary));
-  background: color-mix(in srgb, var(--tone, var(--text-secondary)) 16%, transparent);
-}
-/* an icon cell: the silhouette is the mask of a text-coloured box, so the
-   file's own fill never matters (grenades would stay black otherwise) */
-.aa-t .ic {
-  display: inline-block;
-  height: 1.2em;
-  width: calc(1.2em * var(--ar, 3));
-  vertical-align: text-bottom;
-  background-color: var(--text-primary);
-  -webkit-mask: var(--ico) center / contain no-repeat;
-  mask: var(--ico) center / contain no-repeat;
-}
-.aa-t tbody tr:hover td { background: var(--surface-2); }
-.aa-t tbody tr.clk { cursor: pointer; }
-/* the checkbox column: narrow, centred, its own accent; a click must not
-   trigger the row underneath (the row still opens on the rest of it) */
-.aa-t th.chk, .aa-t td.chk { width: 2.25rem; text-align: center; }
-.aa-t th.chk { padding: 0.35rem 0.25rem; }
-.aa-t .cell.chk { justify-content: center; padding: 0.35rem 0.5rem; }
-.aa-t input[type="checkbox"] {
-  width: 1rem; height: 1rem; margin: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-.aa-t tbody tr.sel td { background: var(--surface-selected); }
-.aa-t tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-.aa-t tbody tr.stripe td:first-child { box-shadow: inset 3px 0 0 var(--stripe); }
-.aa-t tbody tr.sel.stripe td:first-child { box-shadow: inset 3px 0 0 var(--stripe); }
-.aa-t th.stick, .aa-t td.stick { position: sticky; left: 0; z-index: 2; background: var(--surface-1); }
-.aa-t th.stick { z-index: 3; background: var(--surface-2); }
-.aa-t tbody tr:hover td.stick { background: var(--surface-2); }
-.aa-t tbody tr.sel td.stick { background: var(--surface-selected); }
-.aa-empty { padding: 18px; color: var(--text-muted); }
-.tone-accent { --tone: var(--accent); }
-.tone-opponent { --tone: var(--opponent); }
-.tone-positive { --tone: var(--positive); }
-.tone-negative { --tone: var(--negative); }
-.tone-info { --tone: var(--info); }
-.tone-warning { --tone: var(--warning); }
-.tone-context { --tone: var(--context); }
-.stripe-accent { --stripe: var(--accent); }
-.stripe-opponent { --stripe: var(--opponent); }
-.stripe-positive { --stripe: var(--positive); }
-.stripe-negative { --stripe: var(--negative); }
-.stripe-info { --stripe: var(--info); }
-.stripe-warning { --stripe: var(--warning); }
-.stripe-context { --stripe: var(--context); }
-"""
-
-_JS = """
-export default function (component) {
-  const { data, parentElement, setTriggerValue } = component;
-  const root = parentElement;
-  const S = root.__aa || (root.__aa = { sig: "", col: -1, dir: 0, top: 0, left: 0 });
-  let host = root.querySelector(".aa-host");
-  if (!host) {
-    host = document.createElement("div");
-    host.className = "aa-host";
-    root.appendChild(host);
-  }
-  const sig = data.cols.map((c) => c.k).join("|") + "#" + (data.chk ? "1" : "0");
-  if (sig !== S.sig) { S.sig = sig; S.col = -1; S.dir = 0; S.top = 0; S.left = 0; }
-  // the checkbox selection: S.checked is the live set, re-synced from the
-  // payload whenever the app-side state changed behind our back (a rerun
-  // the JS toggle itself triggered lands here with the same set - no reset)
-  const checkedSig = (data.checked || []).join("\\n");
-  if (S.checkedSig !== checkedSig) {
-    S.checkedSig = checkedSig;
-    S.checked = new Set(data.checked || []);
-  } else if (!S.checked) {
-    S.checked = new Set(data.checked || []);
-  }
-  const reportChecked = () => setTriggerValue("checked", Array.from(S.checked).join("\\n"));
-
-  const el = (tag, cls, text) => {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text != null) n.textContent = text;
-    return n;
-  };
-  const firstDir = (c) => (c.f === "asc" ? 1 : -1);
-  // quality 0..1 -> colour: tier tokens, evenly spaced, mixed between neighbours
-  const STOPS = ["--tier-bad", "--tier-poor", "--tier-mid", "--text-primary", "--tier-good", "--tier-elite"];
-  const gradeColor = (q) => {
-    const pos = Math.min(Math.max(q, 0), 1) * (STOPS.length - 1);
-    const i = Math.min(Math.floor(pos), STOPS.length - 2);
-    const f = Math.round((pos - i) * 100);
-    return f === 0
-      ? "var(" + STOPS[i] + ")"
-      : "color-mix(in oklab, var(" + STOPS[i + 1] + ") " + f + "%, var(" + STOPS[i] + "))";
-  };
-
-  function ordered() {
-    const rows = data.rows.slice();
-    if (S.col < 0) return rows;
-    const ci = S.col, dir = S.dir;
-    rows.sort((a, b) => {
-      const x = a.c[ci][0], y = b.c[ci][0];
-      if (x == null && y == null) return a.i - b.i;
-      if (x == null) return 1;
-      if (y == null) return -1;
-      const r = typeof x === "number" && typeof y === "number"
-        ? x - y
-        : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
-      return r === 0 ? a.i - b.i : r * dir;
-    });
-    return rows;
-  }
-
-  function onHeader(ci) {
-    const c = data.cols[ci];
-    if (S.col !== ci) { S.col = ci; S.dir = firstDir(c); }
-    else if (S.dir === firstDir(c)) { S.dir = -S.dir; }
-    else { S.col = -1; S.dir = 0; }
-    draw();
-  }
-
-  function draw() {
-    const prev = host.querySelector(".aa-wrap");
-    if (prev) { S.top = prev.scrollTop; S.left = prev.scrollLeft; }
-    const wrap = el("div", "aa-wrap");
-    wrap.style.maxHeight = data.maxh + "px";
-    if (!data.rows.length) {
-      wrap.appendChild(el("div", "aa-empty", data.empty || ""));
-      host.replaceChildren(wrap);
-      return;
-    }
-    const table = el("table", "aa-t");
-    const trh = el("tr");
-    if (data.chk) {
-      // the header checkbox toggles every checkable row at once; the
-      // dash marks the in-between state
-      const th = el("th", "chk");
-      const all = el("input");
-      all.type = "checkbox";
-      const keys = data.rows.filter((r) => r.ck).map((r) => r.k);
-      const on = keys.filter((k) => S.checked.has(k)).length;
-      all.checked = keys.length > 0 && on === keys.length;
-      all.indeterminate = on > 0 && on < keys.length;
-      all.addEventListener("click", (e) => e.stopPropagation());
-      all.addEventListener("change", () => {
-        if (all.checked) keys.forEach((k) => S.checked.add(k));
-        else keys.forEach((k) => S.checked.delete(k));
-        reportChecked();
-        draw();
-      });
-      th.appendChild(all);
-      trh.appendChild(th);
-    }
-    data.cols.forEach((c, ci) => {
-      const th = el("th", [c.b ? "bar" : "", c.s ? "stick" : ""].join(" ").trim());
-      th.appendChild(el("span", "lbl", c.l));
-      const active = S.col === ci;
-      th.appendChild(el("span", "arrow", active && S.dir === 1 ? "\\u25B2" : "\\u25BC"));
-      if (active) th.setAttribute("aria-sort", S.dir === 1 ? "ascending" : "descending");
-      if (c.h) th.title = c.h;
-      th.tabIndex = 0;
-      th.addEventListener("click", () => onHeader(ci));
-      th.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onHeader(ci); }
-      });
-      trh.appendChild(th);
-    });
-    const thead = el("thead");
-    thead.appendChild(trh);
-    const tbody = el("tbody");
-    ordered().forEach((r) => {
-      const cls = [];
-      if (r.s) cls.push("stripe", "stripe-" + r.s);
-      if (r.i === data.sel) cls.push("sel");
-      if (data.click) cls.push("clk");
-      const tr = el("tr", cls.join(" "));
-      if (data.click) {
-        tr.tabIndex = 0;
-        const go = () => setTriggerValue("clicked", r.i);
-        tr.addEventListener("click", go);
-        tr.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
-      }
-      if (data.chk) {
-        const td = el("td", "chk");
-        if (r.ck) {
-          const box = el("div", "cell chk");
-          const cb = el("input");
-          cb.type = "checkbox";
-          cb.checked = S.checked.has(r.k);
-          cb.addEventListener("click", (e) => e.stopPropagation());
-          cb.addEventListener("change", () => {
-            if (cb.checked) S.checked.add(r.k); else S.checked.delete(r.k);
-            reportChecked();
-            draw();
-          });
-          box.appendChild(cb);
-          td.appendChild(box);
-        }
-        tr.appendChild(td);
-      }
-      r.c.forEach((cell, ci) => {
-        const c = data.cols[ci];
-        const td = el("td", [c.b ? "bar" : "", c.s ? "stick" : ""].join(" ").trim());
-        const box = el("div", "cell tone-" + c.tn);
-        if (cell[2] != null && cell[2] > 0.004) {
-          const fill = el("div", "bar-fill");
-          fill.style.width = (cell[2] * 100).toFixed(1) + "%";
-          box.appendChild(fill);
-        }
-        const ico = c.t === "icon" && cell[0] && data.icons && data.icons[cell[0]];
-        if (ico) {
-          // icon only: the name is the tooltip (title + aria-label), never
-          // visible text next to the silhouette
-          const im = el("span", "ic");
-          im.style.setProperty("--ico", 'url("' + ico[0] + '")');
-          im.style.setProperty("--ar", String(ico[1] && ico[2] ? (ico[1] / ico[2]) : 3));
-          im.title = cell[1];
-          im.setAttribute("aria-label", cell[1]);
-          im.setAttribute("role", "img");
-          box.appendChild(im);
-        } else if (c.t === "badge" && cell[1] !== "") {
-          box.appendChild(el("span", "badge" + (cell[3] ? " tone-" + cell[3] : ""), cell[1]));
-        } else {
-          const val = el("span", "val", cell[1]);
-          if (cell[4] != null) val.style.color = gradeColor(cell[4]);
-          box.appendChild(val);
-        }
-        td.appendChild(box);
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    });
-    table.appendChild(thead);
-    table.appendChild(tbody);
-    wrap.appendChild(table);
-    host.replaceChildren(wrap);
-    wrap.scrollTop = S.top;
-    wrap.scrollLeft = S.left;
-  }
-  draw();
-}
-"""

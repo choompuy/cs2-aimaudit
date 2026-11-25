@@ -23,7 +23,7 @@ set "PYTHONPYCACHEPREFIX=%AIMAUDIT_DATA_DIR%\cache\pycache"
 
 echo [1/4] Checking Python 3.13 (the version this project is tested with)...
 rem The Python pin (3, 13) / py -3.13 must match ci.yml, README and requirements.txt
-rem (tests/check_ui.py compares it with ci.yml).
+rem (tests/test_static.py compares it with ci.yml).
 set "PY="
 python -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 13) else 1)" >nul 2>nul
 if not errorlevel 1 set "PY=python"

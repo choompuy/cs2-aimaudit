@@ -26,6 +26,8 @@ from core.impact import impact_stats
 from core.openings import openings_table
 from core.summary import player_summary
 
+__all__ = ["data_checks", "debug_report"]
+
 
 # ---------------------------------------------------------- data quality
 def _lvl(frac: float, warn: float, anom: float) -> str:
@@ -111,17 +113,9 @@ def _hitgroups_check(demo: Demo) -> dict:
 
 
 def _scoreboard_check(demo: Demo) -> dict:
-    """Scoreboard cross-check: the game's own
-    kills_total / deaths_total at the last event tick vs our tables.
-    Verified on all three real demos, every player:
-      kills_total  == our enemy kills (knife/grenade kills included)
-      deaths_total == our raw death rows (suicides and world deaths
-                      included; pre-live knife/warmup rows excluded by
-                      both sides - both aggregates reset at
-                      begin_new_match)
-    Non-gun kills and teamkills get slack in the kills rule: the three
-    probed demos count both, but other servers/versions may not.
-    game > ours (kills) is always a red flag: we dropped something."""
+    """Scoreboard cross-check: the game's own kills_total / deaths_total at the last event
+    tick vs our tables. Non-gun kills and teamkills get slack (servers differ); game >
+    ours is always a red flag: we dropped something."""
     tot = getattr(demo, "totals", None)
     if tot is None or not len(tot) or not len(demo.players):
         return {"id": "scoreboard", "level": "ok", "n": 0, "vals": []}
@@ -182,10 +176,7 @@ def _scoreboard_check(demo: Demo) -> dict:
 
 
 def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[dict]:
-    """
-    Heuristic checks for data anomalies. Each dict: id, level
-    ('ok'|'warn'|'anomaly'), n, pct (+ extras). The UI translates ids.
-    """
+    """Heuristic data checks: dicts with id, level ('ok'|'warn'|'anomaly'), n, pct."""
     checks: list[dict] = [_na_ids_check(demo)]
 
     # 2. shots from players outside the player table (bots / parse hiccup)
@@ -200,8 +191,7 @@ def data_checks(demo: Demo, shots: pd.DataFrame, duels: pd.DataFrame) -> list[di
     )
     _frac_check(checks, "missing_pos", n, len(shots), 0.001, 0.10)
 
-    # 4. shots with unknown speed (no t-1 tick / death / teleport right
-    # before the shot). NaN, not a garbage number.
+    # 4. unknown speed (no t-1 tick / death / teleport right before the shot)
     n = int(shots["speed"].isna().sum()) if len(shots) else 0
     _frac_check(checks, "no_speed", n, len(shots), 0.05, 0.20)
 
@@ -317,11 +307,7 @@ def debug_report(
     params: dict,
     shots_cap: int = 20000,
 ) -> dict:
-    """
-    Everything needed to debug a suspicious demo offline: raw counts,
-    data-quality checks, per-shot rows of the selected player (speed, dist,
-    allowed speed, hit), their duels and the all-player summary.
-    """
+    """Everything needed to debug a suspicious demo offline."""
 
     import importlib.metadata as im
 

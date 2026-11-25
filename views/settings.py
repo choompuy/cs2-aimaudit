@@ -1,15 +1,5 @@
-"""
-The Settings page: analysis sliders, accounts (Steam helper included),
-library and storage, privacy.
-
-Everything here moved from other places (the sidebar's analysis expander,
-the Matches page's accounts block and helper card, shell's library panel):
-the widget keys stayed the same (thr, mt_steamid, lib_clear, del_* ...) so
-the smoke scenarios keep working. The values live in session_state /
-accounts.json / library.json, never only in widget state - the sliders
-carry persist_state="session" so they survive the Settings -> Matches ->
-match trip while rendering nowhere else.
-"""
+"""The Settings page: analysis sliders, accounts and the Steam helper, library and storage,
+privacy."""
 
 from __future__ import annotations
 
@@ -37,10 +27,7 @@ def render(ctx) -> None:
 
 
 def _analysis(t) -> None:
-    """The advanced tuning sliders (moved from the sidebar unchanged:
-    same ranges, same help texts, same keys - so nothing is lost).
-    persist_state="session" carries the values across page switches
-    (the widgets render nowhere else)."""
+    """The advanced tuning sliders."""
     with st.container(border=True):
         st.markdown(f"**{t('settings_box')}**")
         st.slider(
@@ -77,16 +64,14 @@ def _analysis(t) -> None:
 
 
 def _reset_analysis() -> None:
-    # pop, don't assign: a value written via the Session State API on a
-    # keyed widget with a default trips Streamlit's duplication warning;
-    # absent keys simply fall back to the slider defaults
+    # pop, don't assign: a session value next to a widget default trips a warning
     for k in shell.ANALYSIS_DEFAULTS:
         st.session_state.pop(k, None)
 
 
 def _accounts(t) -> None:
     """SteamID64, the replays folder, the share-code import and the Steam
-    helper - everything account-related (moved from the Matches page)."""
+    helper - everything account-related."""
     with st.container(border=True):
         st.markdown(f"**{t('set_accounts')}**")
         accounts = store.read_accounts()
@@ -130,23 +115,19 @@ def _persist_accounts() -> dict:
     return accounts
 
 
-_steam_cfg = _shared.steam_cfg
-_show_error = _shared.show_error
-
-
 def _add_by_share_code(t) -> None:
     code = (st.session_state.get("mt_share_code") or "").strip()
     if not code:
         return
     accounts = _persist_accounts()
-    cfg = _steam_cfg(accounts)
+    cfg = _shared.steam_cfg(accounts)
     try:
         with st.spinner(t("mt_share_add")):
             rec = sources.steam.SteamProvider(
                 cfg, transport=sources.http.HttpTransport()
             ).match_by_share_code(code)
     except sm.ProviderError as e:
-        _show_error(t, (e.key, e.kw))
+        _shared.show_error(t, (e.key, e.kw))
         return
     records = [r for r in sources.read_cache("steam") if r.match_id != rec.match_id]
     records.insert(0, rec)
@@ -180,7 +161,7 @@ def _install_helper(t) -> None:
         with status:
             sources.steam.install_helper(sources.http.HttpTransport())
     except sm.ProviderError as e:
-        _show_error(t, (e.key, e.kw))
+        _shared.show_error(t, (e.key, e.kw))
         status.update(label=t("mt_helper_installing"), state="error")
         return
     status.update(label=t("mt_helper_done"), state="complete")
@@ -188,7 +169,7 @@ def _install_helper(t) -> None:
 
 
 def _library(t) -> None:
-    """The storage panel (moved from the demo-change block unchanged)."""
+    """The storage panel."""
     with st.container(border=True):
         st.markdown(f"**{t('lib_manage')}**")
         shell.library_panel(t, store.list_demos())

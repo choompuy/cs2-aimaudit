@@ -1,7 +1,4 @@
-"""
-Per-player round impact: opening duels, trades, multi-kills and assists,
-all from the enemy-kill deaths (round structure, not a per-shot metric).
-"""
+"""Per-player round impact: opening duels, trades, multi-kills and assists."""
 
 from __future__ import annotations
 
@@ -15,6 +12,8 @@ if TYPE_CHECKING:
 
 from core.model import TRADE_S, Demo
 from core.openings import _enemy_kill_rows, _round_side_keep
+
+__all__ = ["impact_stats"]
 
 
 def _keep_ok(keep, round_idx, sid) -> bool:
@@ -51,10 +50,8 @@ def _impact_multikills(de: pd.DataFrame, res: dict, keep) -> None:
 def _impact_trades(
     demo: Demo, de: pd.DataFrame, res: dict, keep, trade_s: float
 ) -> None:
-    """Trades: for each death, did a teammate kill its attacker within the
-    window (same round)? death_of maps (round, VICTIM) -> (tick, killer):
-    the attacker's own death row is the candidate avenging kill. The
-    attacker dies at most once per round, so one candidate row is enough."""
+    """A death is traded when a teammate kills its attacker within the window (same round).
+    death_of maps (round, VICTIM) -> (tick, killer)."""
     teams = demo.teams
     win = int(trade_s * demo.tickrate)
     death_of: dict[tuple[int, str], tuple[int, object]] = {}
@@ -110,25 +107,9 @@ def _impact_assists(de: pd.DataFrame, res: dict, keep, names) -> None:
 def impact_stats(
     demo: Demo, trade_s: float = TRADE_S, f: "Filters | None" = None
 ) -> pd.DataFrame:
-    """
-    Per-player round-impact numbers, all from the enemy-kill deaths:
-
-    - opening duels: attempts (killer OR victim of the round's first enemy
-      kill) and wins (the killer); `open_rate` is the win rate in %
-    - trades: `trade_kills` - killed the attacker of a teammate's death
-      within `trade_s` seconds, same round (the avenging definition);
-      `traded_deaths` - own deaths avenged that way, `traded_pct` their
-      share of enemy deaths (a teammate stat, labelled as such in the UI)
-    - multi-kills: `k2`..`k5` - rounds with exactly that many enemy kills
-    - assists: `assists` (assister of an enemy kill, any form) and
-      `flash_assists` (the subset flagged assistedflash); NaN when the
-      demo/parser has no assister column
-
-    Round structure, not a per-shot metric: only the round range and the
-    side filter apply (`f`), through _round_side_keep - a player's numbers
-    then count only the rounds he played on that side. Weapon / distance
-    filters do not apply. Without a filter it is the whole match.
-    """
+    """Per-player round impact from the enemy-kill deaths: openings (attempts / wins),
+    trades, multi-kills k2..k5, assists (NaN without the assister column). Only the
+    round range and the side of `f` apply."""
     keep = _round_side_keep(demo, f)
     names = demo.names
     res = {

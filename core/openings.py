@@ -1,9 +1,5 @@
-"""
-Round-structure metrics: how every round ended (round_outcomes /
-round_winners, from the demo's own events or inferred from them), the
-openings table (the round's first enemy kill), and the round/side
-keep-predicate + enemy-kill rows the impact and summary tables share.
-"""
+"""Round structure: how rounds ended, the openings table and the shared round/side
+predicate + enemy-kill rows."""
 
 from __future__ import annotations
 
@@ -13,8 +9,7 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
-    # annotation-only (F821): the `f: "Filters | None"` hints below resolve
-    # without importing core.filters at runtime here
+    # for the annotations only
     from core.filters import Filters
 
 from core.model import (
@@ -27,6 +22,8 @@ from core.model import (
     norm_weapon,
     weapon_class,
 )
+
+__all__ = ["openings_table", "round_outcomes", "round_winners"]
 
 
 def _top_weapon(de: pd.DataFrame, ok: np.ndarray, who: str) -> dict[str, str]:
@@ -50,13 +47,7 @@ def _top_weapon(de: pd.DataFrame, ok: np.ndarray, who: str) -> dict[str, str]:
 
 
 def _enemy_kill_rows(demo: Demo) -> pd.DataFrame:
-    """
-    Deaths with a known attacker of the ENEMY team (suicides / world /
-    teamkills out), with a 0-based `round_idx` column. The same enemy rule
-    as the scoreboard K/D in player_summary. The column name must stay a
-    valid namedtuple field (no leading underscore) because both consumers
-    iterate with itertuples().
-    """
+    """Deaths by an ENEMY (the scoreboard K/D rule) with a 0-based `round_idx`."""
     d = demo.deaths
     if (
         not len(d)
@@ -87,17 +78,8 @@ def _enemy_kill_rows(demo: Demo) -> pd.DataFrame:
 
 
 def _round_side_keep(demo: Demo, f: "Filters | None"):
-    """
-    keep(round_no, sid) -> bool for the round-structure metrics (K/D,
-    openings, trades, multi-kills, assists), or None when no filter applies.
-
-    Only the filters that mean something for a PLAYER in a ROUND are used:
-    the round range / pistol preset and the side the player had in that
-    round (Demo.side_at, so a halftime swap is handled per round). Weapon,
-    class and distance are shot-level filters and stay out of it. None is
-    also returned when the deaths carry no round counter - guessing rounds
-    would drop or keep the wrong kills.
-    """
+    """keep(round_no, sid) -> bool by round range and the side of that round; None when no
+    filter applies or the deaths carry no round counter."""
     if f is None or not (f.rounds or f.rounds_set or f.side):
         return None
     if "total_rounds_played" not in demo.deaths.columns:
@@ -116,24 +98,11 @@ def _round_side_keep(demo: Demo, f: "Filters | None"):
 
 
 def round_outcomes(demo: Demo) -> dict[int, dict]:
-    """
-    How every round of the replay ended: {"winner": 'CT'/'T'/'', "reason":
-    one of core.ROUND_REASONS or '', "end": tick | None, "inferred": bool}.
+    """How every round ended: {"winner", "reason", "end", "inferred"}.
 
-    The demo's own ``round_end`` event is the source whenever it is there
-    (Demo.round_info). Many demos do not carry it, so a round without one is
-    INFERRED from what the demo does tell, in this order:
-
-    1. the bomb exploded -> T won by the bomb (even if every T died after the
-       plant: the explosion decides the round);
-    2. the bomb was defused -> CT won by the defuse;
-    3. a side lost every player -> the other side won by elimination;
-    4. the demo reports bomb events but this round had no plant and nobody
-       was eliminated -> CT won on time.
-
-    Anything else stays blank (winner '') and the UI shows no result for it.
-    ``inferred`` marks 1-4 so the UI can say it is a reading of the events.
-    """
+    The demo's ``round_end`` when it has one, else inferred in this order: the bomb
+    exploded -> T; defused -> CT; a side lost every player -> the other; bomb events
+    known but no plant and nobody eliminated -> CT on time. Anything else stays blank."""
     guessed = _guess_round_winners(demo)
     out: dict[int, dict] = {}
     for n in sorted(demo.round_windows or {}):
@@ -168,11 +137,7 @@ def round_outcomes(demo: Demo) -> dict[int, dict]:
 
 
 def round_winners(demo: Demo) -> dict[int, str]:
-    """
-    Round winners ('CT'/'T') for the replay's round bar (see round_outcomes:
-    the demo's own round_end first, then the bomb events and the kills).
-    A round whose result cannot be told stays absent from the dict.
-    """
+    """{round: 'CT'/'T'}; rounds whose result cannot be told are absent."""
     return {n: o["winner"] for n, o in round_outcomes(demo).items() if o["winner"]}
 
 
@@ -189,24 +154,16 @@ def _round_fielded(sides: dict, r: int) -> dict[str, int] | None:
 
 
 def _round_death_rows(d, dr, warm, r: int, win) -> pd.DataFrame:
-    """The round's death rows: its own tick window when known, else the
-    round column (a death after the round ended carries the NEXT round's
-    number but belongs to this one)."""
+    """The round's deaths by its tick window when known (a post-round death carries the
+    NEXT round's number), else by the round column."""
     if win is not None:
         return d[d["tick"].between(win[0], win[1]) & ~warm]
     return d[(dr == r - 1) & ~warm]
 
 
 def _guess_round_winners(demo: Demo) -> dict[int, str]:
-    """
-    The elimination-based guess behind round_outcomes: "a side lost every
-    player in that round" - then the other side won it. Every death counts
-    towards the VICTIM's side loss count (kills, teamkills, suicides/world,
-    the bomb), because the team did lose that player either way. Halftime
-    swaps are per round (demo.sides), a missing side for a round skips it.
-    Known wrong edge case, accepted: T eliminated post-plant while the bomb
-    still explodes - round_outcomes decides that one by the explosion first.
-    """
+    """Elimination guess behind round_outcomes: a side that lost every player lost the
+    round. T eliminated post-plant is decided by the explosion first."""
     d = demo.deaths
     if d is None or not len(d) or "user_steamid" not in d.columns:
         return {}
@@ -241,17 +198,7 @@ def _guess_round_winners(demo: Demo) -> dict[int, str]:
 
 
 def openings_table(demo: Demo) -> pd.DataFrame:
-    """
-    The first enemy kill of every round - both teams, match context.
-
-    An 'opening duel' is the round's first death caused by an enemy:
-    suicides / world damage / teamkill rows are skipped and the next valid
-    death of that round becomes the opening (on the real demos 2-3 rounds
-    per match start with such a row). ANY weapon counts,
-    knife and grenades included - this is 'how the round started', not a
-    gun-duel metric; the Duels page table marks rows with the selected
-    player. Returns an empty frame when the demo has no enemy kills.
-    """
+    """The first enemy kill of every round, any weapon (suicides / teamkills skipped)."""
     de = _enemy_kill_rows(demo)
     if not len(de):
         return pd.DataFrame()

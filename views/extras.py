@@ -12,8 +12,7 @@ def guide(ctx) -> None:
     """Draw the Guide page."""
     t = ctx.t
     st.markdown(t("guide"))
-    # every metric tooltip also reachable without hover (touch
-    # devices have none) - one list, reused from the i18n help texts
+    # every metric tooltip without hover (touch devices have none)
     with st.expander(t("glossary_title")):
         for _mk, _hk in (
             ("m_acc", "m_acc_help"),

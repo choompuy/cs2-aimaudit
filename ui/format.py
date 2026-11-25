@@ -1,9 +1,4 @@
-"""
-Value formatters shared by the pages and the filter bar.
-
-They read the translator (and the sid->name map for duel_label) through
-module globals set once per run via configure().
-"""
+"""Value formatters shared by the pages; configure() sets the translator once per run."""
 
 import pandas as pd
 

@@ -6,64 +6,18 @@ on:
   pull_request:
   schedule:
     # Weekly (Mondays) upstream check: direct dependencies are pinned
-    # exactly in requirements.txt, but transitive dependencies still
-    # float, so scheduled runs catch their breakage (and runner image
-    # updates) early.
+    # exactly in requirements.txt, transitive ones float.
     - cron: "23 5 * * 1"
   workflow_dispatch:
 
 env:
-  # Windows runners default to cp1252 for consoles/pipes, while the test
-  # output contains →, ≈ and Cyrillic: UTF-8 mode keeps the prints from
-  # UnicodeEncodeError. The test scripts reconfigure stdout/stderr as a
-  # belt-and-suspenders fallback for local Windows runs.
+  # Windows runners default to cp1252 for consoles/pipes
   PYTHONUTF8: "1"
 
 jobs:
   tests:
-    strategy:
-      fail-fast: false
-      matrix:
-        # CS2-AimAudit supports Windows only (the launcher is start.bat),
-        # so the tests run on Windows only. The matrix is about OSes only:
-        # Python is pinned to a single version, matching the exact
-        # dependency pins in requirements.txt - the suite is only
-        # guaranteed on this interpreter. Bump the pin (here + README +
-        # requirements + start.bat) deliberately, like any other dependency.
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Byte-compile sources
-        run: python tools/compile_all.py
-      - name: Core tests (synthetic demo, no .dem needed)
-        run: python tests/test_core.py
-      - name: Match import tests (fake transports, no network)
-        run: python tests/test_sources.py
-      - name: Icon tests (sanitizer, aliases, fallbacks)
-        run: python tests/test_icons.py
-      - name: UI consistency checks
-        run: python tests/check_ui.py
-      - name: Docs numbers machine-checked (±15%)
-        run: python tests/check_docs.py
-      - name: UI smoke test (real app.py on synthetic demos)
-        run: python tests/smoke_app.py --fast
-      - name: Random-walk smoke (3 seeds x 60 actions)
-        run: python tests/walk_app.py
-      - name: JS front-end tests (roundrep.js, icons)
-        run: |
-          cd tests/js
-          npm ci
-          cd ../..
-          python tests/check_roundrep_js.py
-
-  smoke-all:
-    # One full run (every page and locale) per commit is enough.
+    # Windows only, one Python: the same as start.bat supports. Bump the pin
+    # together with README, requirements and start.bat.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -71,8 +25,8 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Byte-compile sources
-        run: python tools/compile_all.py
-      - name: Full UI smoke test
-        run: python tests/smoke_app.py --all
+        run: pip install -r requirements-dev.txt
+      - name: Install the JS test dependencies
+        run: npm ci --prefix tests/js
+      - name: Tests (every page and locale, deep random walk)
+        run: pytest --full

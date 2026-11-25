@@ -1,33 +1,11 @@
-"""
-Weapon and status icons (flat white silhouettes, CS2 kill-feed style).
+"""Weapon and status icons (flat silhouettes, CS2 kill-feed style).
 
-The art is Valve's; it is NOT part of this repository. It lives on the
-user's machine in the data folder (next to the radars) after
-``tools/fetch_icons.py`` downloaded it - the same position as the radar
-images: the repo ships only the script, the loader and the tests (see
-docs/ASSETS.md and NOTICE). ``AIMAUDIT_NO_ICONS=1`` opts out of the
-download; an empty, missing or broken icons folder changes nothing here -
-every call simply answers "no icon" and the UI falls back to text.
+The art is Valve's and lives in the data folder (tools/fetch_icons.py, docs/ASSETS.md);
+without it every call answers "no icon" and the UI shows text. No Streamlit at import
+time.
 
-No Streamlit at import time (a plain leaf library over ``store`` and
-``core``):
-
-    load()                     the manifest, read once and cached
-    icon(key)                  {"uri": data-uri, "w": int, "h": int} | None
-    weapon_icon(name)          the same for a demo weapon name (aliases!)
-    weapon_key(name)           demo weapon name -> icon key | None
-    weapon_label(name)         the display name for tooltips (i18n)
-    payload(names) / badge_payload(keys)   {key: data-uri} for JS payloads
-
-Security: icon files are never inlined as raw SVG. ``sanitize_svg``
-strips scripts, event handlers, foreign objects and external references
-and is applied both when the fetcher saves a file and again here when a
-file is loaded; ``icon()`` hands out ``<img>``-safe base64 data URIs
-only. Colouring happens through the alpha mask (CSS ``mask-image`` /
-canvas ``source-in``), never through the file's own ``fill`` - part of
-the art (grenades, the bomb, the defuse kit, the timer) carries no
-``fill="white"`` and would stay black otherwise.
-"""
+An icon is never inlined as raw SVG: sanitized on save and on load, handed out as a data
+URI, coloured through its alpha mask (part of the art has no fill)."""
 
 from __future__ import annotations
 
@@ -36,12 +14,11 @@ import os
 import re
 from functools import lru_cache
 
+import i18n
 import store
 
 # --------------------------------------------------------------- sanitizer
-# Runs on every icon before it is saved (tools/fetch_icons.py) and again
-# when it is loaded here. Idempotent: an already clean file passes through
-# byte-for-byte (the fetcher pins the hash of the sanitized content).
+# idempotent: the fetcher pins the hash of the sanitized content
 _RE_SCRIPT = re.compile(r"<script\b[^>]*>.*?</script\s*>", re.I | re.S)
 _RE_FOREIGN = re.compile(r"<foreignObject\b[^>]*>.*?</foreignObject\s*>", re.I | re.S)
 _RE_DOCTYPE = re.compile(r"<!DOCTYPE\b[^>]*>", re.I)
@@ -98,13 +75,8 @@ def _size_attrs(svg_tag: str) -> tuple[int, int] | None:
 
 
 def sanitize_svg(data: bytes | str) -> str:
-    """
-    Strip everything an SVG must not carry to be inlined as an image:
-    ``<script>`` blocks, ``on*`` event attributes, ``<foreignObject>``,
-    external ``href``/``xlink:href`` and ``<use>`` pointing outside the
-    file. Adds the ``xmlns`` (and a ``viewBox`` from width/height) when
-    missing, so the file renders everywhere. Returns UTF-8 text.
-    """
+    """Strip scripts, event handlers, <foreignObject> and external references; add a
+    missing xmlns / viewBox."""
     s = data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data)
     s = _RE_SCRIPT.sub("", s)
     s = _RE_FOREIGN.sub("", s)
@@ -136,15 +108,8 @@ def svg_size(text: str) -> tuple[int, int] | None:
 
 
 def _ensure_size(text: str, w: int, h: int) -> str:
-    """Give the <svg> tag explicit width/height when they are missing.
-
-    A viewBox-only SVG has no intrinsic size: browsers that lean on it
-    (Firefox, and any canvas consumer) cannot rasterize the image at all -
-    the 2D replay tints icons through a canvas, so those would silently
-    never appear. CSS masks do not care, which is why the kill feed looked
-    fine while the map did not. Runs AFTER the sha256 check in
-    ``_load_icon``: the pinned hash still validates the file on disk, this
-    only rewrites the emitted data URI."""
+    """Give the <svg> tag explicit width/height: a viewBox-only SVG cannot be rasterized on
+    a canvas. Runs AFTER the sha256 check."""
     m = _RE_SVG_TAG.search(text)
     if not m:
         return text
@@ -186,18 +151,9 @@ _SAFE_KEY = re.compile(r"^[a-z0-9_]+$")
 
 @lru_cache(maxsize=1)
 def _manifest_path() -> tuple[str | None, dict]:
-    """(the first folder with a readable manifest.json, its content).
-    A corrupt file, a missing folder or a missing file all answer
-    ({}, None-ish) - never an exception."""
+    """(the first folder with a readable manifest.json, its content) or (None, {})."""
     for root in icon_roots():
-        try:
-            with open(os.path.join(root, "manifest.json"), encoding="utf-8") as fh:
-                import json
-
-                d = json.load(fh)
-        except (OSError, ValueError):
-            continue
-        if isinstance(d, dict) and d:
+        if d := store.read_json(os.path.join(root, "manifest.json")):
             return root, d
     return None, {}
 
@@ -244,12 +200,6 @@ def _load_icon(key: str) -> dict | None:
     return {"uri": uri, "w": w, "h": h}
 
 
-def load() -> dict[str, dict]:
-    """The whole installed set, {key: {"uri", "w", "h"}} (cached, pure read)."""
-    _, manifest = _manifest_path()
-    return {k: ic for k in manifest if (ic := _load_icon(k))}
-
-
 def reset_cache() -> None:
     """Drop the caches (tests switch folders through AIMAUDIT_ICON_DIR)."""
     _manifest_path.cache_clear()
@@ -262,10 +212,7 @@ def icon(key: str) -> dict | None:
 
 
 def payload(keys) -> dict[str, list]:
-    """{key: [data-uri, w, h]} for JS payloads - only the keys asked for,
-    only the ones that exist. Payloads stay small: one entry per distinct
-    icon; w/h give the DOM (aspect-ratio + mask) and the canvas their
-    geometry without loading the image first."""
+    """{key: [data-uri, w, h]} for JS payloads, only the keys that exist."""
     out = {}
     for k in keys:
         ic = icon(k)
@@ -274,26 +221,21 @@ def payload(keys) -> dict[str, list]:
     return out
 
 
+def bundle() -> dict[str, list]:
+    """payload() of the whole installed set."""
+    return payload(_manifest_path()[1])
+
+
 # ------------------------------------------------------------- weapons
-# Demo / GSI weapon name -> icon key (the file stem). norm_weapon already
-# strips the "weapon_" prefix and lowercases; these aliases cover the
-# names that differ from the HUD file names (old CS:GO names, GSI names,
-# non-weapon entries the kill feed still shows an icon for).
+# norm_weapon() form of a name -> icon key, where they differ
 WEAPON_ALIASES = {
     "usp": "usp_silencer",
     "usp9": "usp_silencer",
     "p2000": "hkp2000",
     "m4a1s": "m4a1_silencer",
     "mp5": "mp5sd",
-    "revolver": "revolver",
     "planted_c4": "c4",
-    "c4": "c4",
-    "bumpmine": None,  # no silhouette exists: the text name stays
-    # ---------------------------------------------------------------
-    # CS2 DISPLAY names: parse_ticks' active_weapon_name / inventory give
-    # the item's display name ("AK-47", "USP-S", "Falchion Knife"), not the
-    # schema name the kill feed uses. Keys below are norm_weapon()'s form
-    # of those display names (lowercased, "weapon_" stripped).
+    # CS2 DISPLAY names (active_weapon_name / inventory): "AK-47", "Falchion Knife"
     # guns
     "ak-47": "ak47",
     "m4a4": "m4a1",
@@ -322,9 +264,11 @@ WEAPON_ALIASES = {
     "incendiary grenade": "incgrenade",
     "decoy grenade": "decoy",
     "c4 explosive": "c4",
+    "defuser": "defuse",
+    "item_defuser": "defuse",
+    "defuse kit": "defuse",
     "zeus x27": "taser",
-    # knives (display name -> the HUD's knife_* key; knife_kukri has no
-    # silhouette, so it takes the generic knife like an unknown one would)
+    # knives (knife_kukri has no silhouette)
     "m9 bayonet": "knife_m9_bayonet",
     "karambit": "knife_karambit",
     "huntsman knife": "knife_tactical",
@@ -347,95 +291,56 @@ WEAPON_ALIASES = {
 }
 
 
-def weapon_key(name) -> str | None:
-    """A demo weapon name -> the icon key, or None when no icon exists."""
+def weapon_id(name) -> str:
+    """The canonical key of a demo weapon name ("" for no weapon)."""
     import core
 
     w = core.norm_weapon(name or "")
     w = WEAPON_ALIASES.get(w, w)
-    if not w or w == str(core.NA):  # an alias may explicitly mean "no icon"
-        return None
+    if not w or w == str(core.NA):
+        return ""
+    return "knife" if w.endswith(" knife") else w  # an exotic knife
+
+
+def weapon_key(name) -> str | None:
+    """A demo weapon name -> the icon key, or None when no icon exists."""
+    w = weapon_id(name)
     if icon(w):
         return w
-    if w.startswith("knife") or w.endswith(" knife"):  # an exotic knife: at least the plain one
-        return "knife" if icon("knife") else None
-    return None
+    # an exotic knife: at least the plain one
+    return "knife" if w.startswith("knife") and icon("knife") else None
 
 
-def weapon_icon(name) -> dict | None:
-    """{"uri", "w", "h"} of the weapon's silhouette, or None."""
-    k = weapon_key(name)
-    return icon(k) if k else None
+def _translator():
+    from ui.schema import translator  # lazy: no Streamlit at import time
 
-
-def weapon_info(name) -> dict:
-    """
-    Everything a renderer needs for one weapon in one call: {"key", "uri",
-    "w", "h", "label"}. key/uri are empty when no icon exists (the label
-    still resolves, so tooltips and text fallbacks keep working). Never
-    raises - a missing icon set is a normal state, not an error.
-    """
-    k = weapon_key(name)
-    ic = icon(k) if k else None
-    return {
-        "key": k or "",
-        "uri": (ic or {}).get("uri", ""),
-        "w": int((ic or {}).get("w") or 0),
-        "h": int((ic or {}).get("h") or 0),
-        "label": weapon_label(name),
-    }
+    return translator()
 
 
 def weapon_label(name) -> str:
-    """
-    The display name for tooltips / fallback text: t("weapon_<key>") when
-    the locale has it, else the normalized name as the demo spells it.
-    Reads the language like ui/schema.py does (no Streamlit at import).
-    """
-    import core
-    import i18n
-
-    w = core.norm_weapon(name or "")
-    key = WEAPON_ALIASES.get(w, w) or ""
-    if not w or w == str(core.NA):
+    """The display name for tooltips / fallback text: t("weapon_<key>") when
+    it exists, else the normalized name as the demo spells it."""
+    w = weapon_id(name)
+    if not w:
         return "N/A"
-    lang = None
-    try:
-        import state
-
-        lang = state.get_lang()
-    except Exception:  # noqa: BLE001 - bare mode (unit tests): en
-        lang = None
-    t = i18n.make_t(lang or next(iter(i18n.LANGS)))
-    for k in (f"weapon_{key}", f"weapon_{w}"):
-        if k in i18n.STR.get(lang or "en", {}) or k in i18n.STR["en"]:
-            return t(k)
-    return w
+    return _translator()(f"weapon_{w}") if f"weapon_{w}" in i18n.STR["en"] else w
 
 
-def badge_payload(keys) -> dict[str, list]:
-    """payload() under its intent-revealing name for status icons."""
-    return payload(keys)
+def weapon_labels() -> dict[str, str]:
+    """{weapon key: display name} of every weapon the locale names."""
+    t = _translator()
+    return {k.removeprefix("weapon_"): t(k) for k in i18n.STR["en"] if k.startswith("weapon_")}
 
 
 def weapon_cells(names) -> tuple[list[str], list[str], dict[str, list]]:
-    """
-    (values, labels, icons) for a column of demo weapon names - the one
-    call a table page makes. ``values`` hold the icon key where an icon
-    exists (else the normalized name, so sorting still works), ``labels``
-    the display names (the tooltip AND the text shown without the icon
-    set; "N/A" for no weapon) and ``icons`` the {value: [uri, w, h]} dict
-    the payload needs.
-    """
-    import core
-
+    """(values, labels, icons) of a weapon column: icon keys (else names), display names
+    (tooltip and text fallback) and the payload of the icons used."""
     vals: list[str] = []
     labels: list[str] = []
     keys: list[str] = []
     for n in names:
-        w = core.norm_weapon(n or "")
         k = weapon_key(n)
-        vals.append((k or w) or "")
+        vals.append(k or weapon_id(n))
         labels.append(weapon_label(n))
         if k:
             keys.append(k)

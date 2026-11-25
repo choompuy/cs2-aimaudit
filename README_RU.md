@@ -160,16 +160,11 @@ data/
 ## Разработка
 
 ```bat
-python tests/test_core.py        # синтетический матч, .dem не нужен
-python tests/test_sources.py     # импорт матчей (Steam), без сети
-python tests/test_icons.py       # санитайзер / алиасы / запасные варианты иконок
-python tests/check_ui.py         # проверки i18n / схемы таблиц / слоёв
-python tests/smoke_app.py --fast # сквозные AppTest-сценарии (фейковый парсер)
-cd tests/js && npm ci && cd ../.. && python tests/check_roundrep_js.py
+pip install -r requirements-dev.txt
+npm ci --prefix tests/js         # один раз, нужен Node; без него JS-тесты пропускаются
+pytest                           # .dem и сеть не нужны
+pytest --full                    # то, что запускает CI: все страницы и языки
 ```
-
-JS-строке нужен один раз Node (`npm ci` в `tests/js`); без него
-`check_roundrep_js.py` пропускается. CI запускает и то, и другое.
 
 - `core/` — парсинг и все метрики (demoparser2), без UI.
 - `sources/` — импорт матчей из Steam: провайдер, HTTP-транспорт,

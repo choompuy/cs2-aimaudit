@@ -1,0 +1,105 @@
+:host { display: block; font-family: inherit; }
+.aa-wrap {
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.aa-t {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.aa-t th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 0.5rem 0.75rem;
+  text-align: start;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.aa-t th:not(:last-child) { border-right: 1px solid var(--border-strong); }
+.aa-t th:hover, .aa-t th[aria-sort] { color: var(--text-primary); }
+.aa-t th:focus-visible, .aa-t tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.aa-t th .arrow { display: inline-block; width: 1em; margin-left: 0.25rem; color: var(--accent); visibility: hidden; }
+.aa-t th[aria-sort] .arrow { visibility: visible; }
+.aa-t td { padding: 0; white-space: nowrap; }
+.aa-t td:not(:last-child) { border-right: 1px solid var(--border-subtle); }
+.aa-t tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border-subtle); }
+.aa-t .cell { display: flex; position: relative; padding: 0.5rem 0.75rem; }
+.aa-t th.bar, .aa-t td.bar { min-width: 5rem; }
+.aa-t .val { position: relative; z-index: 1; }
+.aa-t .bar-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: color-mix(in srgb, var(--tone) 20%, transparent);
+}
+.aa-t .badge {
+  position: relative; z-index: 1;
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--tone, var(--text-primary));
+  background: color-mix(in srgb, var(--tone, var(--text-secondary)) 16%, transparent);
+}
+/* an icon cell: the silhouette is the mask of a text-coloured box, so the
+   file's own fill never matters (grenades would stay black otherwise) */
+.aa-t .ic {
+  display: inline-block;
+  height: 1.2em;
+  width: calc(1.2em * var(--ar, 3));
+  vertical-align: text-bottom;
+  background-color: var(--text-primary);
+  -webkit-mask: var(--ico) center / contain no-repeat;
+  mask: var(--ico) center / contain no-repeat;
+}
+.aa-t tbody tr:hover td { background: var(--surface-2); }
+.aa-t tbody tr.clk { cursor: pointer; }
+/* the checkbox column: narrow, centred, its own accent; a click must not
+   trigger the row underneath (the row still opens on the rest of it) */
+.aa-t th.chk, .aa-t td.chk { width: 2.25rem; text-align: center; }
+.aa-t th.chk { padding: 0.35rem 0.25rem; }
+.aa-t .cell.chk { justify-content: center; padding: 0.35rem 0.5rem; }
+.aa-t input[type="checkbox"] {
+  width: 1rem; height: 1rem; margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.aa-t tbody tr.sel td { background: var(--surface-selected); }
+.aa-t tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.aa-t tbody tr.stripe td:first-child { box-shadow: inset 3px 0 0 var(--stripe); }
+.aa-t tbody tr.sel.stripe td:first-child { box-shadow: inset 3px 0 0 var(--stripe); }
+.aa-t th.stick, .aa-t td.stick { position: sticky; left: 0; z-index: 2; background: var(--surface-1); }
+.aa-t th.stick { z-index: 3; background: var(--surface-2); }
+.aa-t tbody tr:hover td.stick { background: var(--surface-2); }
+.aa-t tbody tr.sel td.stick { background: var(--surface-selected); }
+.aa-empty { padding: 18px; color: var(--text-muted); }
+.tone-accent { --tone: var(--accent); }
+.tone-opponent { --tone: var(--opponent); }
+.tone-positive { --tone: var(--positive); }
+.tone-negative { --tone: var(--negative); }
+.tone-info { --tone: var(--info); }
+.tone-warning { --tone: var(--warning); }
+.tone-context { --tone: var(--context); }
+.stripe-accent { --stripe: var(--accent); }
+.stripe-opponent { --stripe: var(--opponent); }
+.stripe-positive { --stripe: var(--positive); }
+.stripe-negative { --stripe: var(--negative); }
+.stripe-info { --stripe: var(--info); }
+.stripe-warning { --stripe: var(--warning); }
+.stripe-context { --stripe: var(--context); }

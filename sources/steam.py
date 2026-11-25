@@ -1,24 +1,8 @@
-"""
-Steam / Valve Matchmaking provider.
+"""Steam / Valve Matchmaking provider.
 
-Three paths, newest first:
-
-1. boiler-writter (github.com/akiver/boiler-writter, MIT): a console tool
-   that asks the RUNNING Steam client's Game Coordinator for
-   CMsgGCCStrike15_v2_MatchList and writes it to a file. No Steam password
-   is ever involved; for a few seconds the Steam status shows CS2 running.
-   The helper is installed only by an explicit button press: a pinned
-   release is downloaded from GitHub, verified against a pinned SHA-256 and
-   unpacked into data/tools/.
-2. A share code (CSGO-…) for a specific (possibly older) match: decoded to
-   (matchId, outcomeId, tokenId) and fed to the same helper.
-3. The CS2 replays folder (Watch -> Your Matches), scanned by inbox.py -
-   no network, no credentials.
-
-Demo links live on Valve's replay servers for about a month and may be
-plain http:// - HttpTransport only accepts them for the exact
-replay<N>.valve.net pattern.
-"""
+1. boiler-writter (github.com/akiver/boiler-writter, MIT) asks the RUNNING Steam client for the match list. No password; installed only by a button, from a pinned release with a pinned SHA-256, into data/tools/.
+2. A share code (CSGO-…), decoded and fed to the same helper.
+3. The CS2 replays folder (inbox.py)."""
 
 from __future__ import annotations
 
@@ -51,9 +35,8 @@ HELPER_URL = (
 HELPER_SHA256 = "eda6ce361215c4c0427332e55811ffd621755b264ae7df0f5385ef5916331141"
 HELPER_TIMEOUT_S = 40
 
-# The map id sits in the upper 24 bits of the reservation's game_type
-# (hard-coded in CS, the table matches CS Demo Manager's); the low byte is
-# the mode: 8 = competitive 5v5, 10 = wingman
+# the map id is in the upper 24 bits of game_type (table as in CS Demo Manager), the low
+# byte is the mode: 8 = competitive, 10 = wingman
 _MAP_BY_ID = {
     1 << 0: "de_warden",
     1 << 1: "de_dust2",

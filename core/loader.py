@@ -1,16 +1,9 @@
-"""
-Demo loading: the load_demo orchestration (phase by phase, the phases
-live in core/phases.py), the small state.json next to the library and
-the parsed-demo disk cache. Owns DemoParser and PARSE_VERSION - the
-hash covers the whole core package, so a cached parse is never used
-after the parsing code changed.
-"""
+"""load_demo (the phases live in core/phases.py), state.json and the parsed-demo cache."""
 
 from __future__ import annotations
 
 import hashlib
 import importlib.metadata
-import json
 import os
 import re
 
@@ -32,46 +25,25 @@ from core.phases import (
     _parse_totals,
 )
 
+__all__ = ["load_demo", "load_demo_cached", "load_state", "save_state"]
+
 
 # ------------------------------------------------------------ app state
-# Small local state next to the demo library (store.state_path): the last
-# selected demo and player. Everything stays in the data folder; if it is not
-# writable the app does not remember anything.
 def load_state() -> dict:
     """Load the local state file; {} when missing or unreadable."""
-    try:
-        with open(store.state_path(), encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    return store.read_json(store.state_path())
 
 
 def save_state(d: dict) -> None:
     """Atomically save the state file; silent when the data folder is read-only."""
-    try:
-        path = store.state_path()
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, path)
-    except OSError:
-        pass
+    store.write_json(store.state_path(), d)
 
 
 def _parse_round_sides(
     parser, frames: list[pd.DataFrame], flookup: dict, name_to_sid: dict
 ) -> dict[int, dict[str, str]]:
-    """
-    Per-round player sides: team_num read at one tick per round.
-
-    parse_player_info().team_number is a single static value (the team at
-    the END of the match), so after the halftime swap - and again in every
-    overtime half - the T/CT labels are wrong for half of the rounds. The
-    enemy/teammate logic is unaffected (teammates share the static label),
-    but anything shown per side needs the per-round value. Returns {} when
-    the prop is unavailable (old demos / old parser).
-    """
+    """{round: {sid: side}} from team_num at one tick per round: parse_player_info's team
+    is the one at the END of the match. {} when the prop is unavailable."""
 
     per_round: dict[int, int] = {}  # round(1-based) -> representative tick
     for df in frames:
@@ -117,13 +89,7 @@ def _parse_round_sides(
 
 
 def load_demo(path: str, progress=None) -> Demo:
-    """Parse a demo into the Demo container, phase by phase.
-
-    Public interface and PARSE_VERSION are stable (tests pin them); the
-    phases: _parse_players, _parse_events_frames, _drop_warmup +
-    _exclude_preliminary, _filter_gun_events, _parse_round_sides,
-    _parse_tick_table, _parse_mouse, _parse_totals, _build_rounds.
-    """
+    """Parse a demo into the Demo container, phase by phase."""
     say = progress or (lambda *a, **k: None)
     p = DemoParser(path)
 
@@ -172,15 +138,11 @@ def load_demo(path: str, progress=None) -> Demo:
         round_info=round_info,
     )
 
+
 def _parse_version() -> str:
-    """
-    Identity of what load_demo produces: the demoparser2 version plus a hash
-    of this file, so a cached parse is never used after the parser or the
-    parsing code changed (no version number to forget to bump).
-    """
+    """The demoparser2 version plus a hash of the core package: a cached parse is never
+    used after the parser or the parsing code changed."""
     try:
-        # every core module shapes what load_demo produces (model.py holds
-        # Demo and the round-window builder), so the hash covers the package
         h = hashlib.sha1()
         import glob as _glob
 
@@ -202,13 +164,8 @@ PARSE_VERSION = _parse_version()
 
 
 def load_demo_cached(path: str, progress=None) -> tuple["Demo", bool]:
-    """
-    load_demo through the disk cache of the data folder: (demo, from_cache).
-
-    Only library demos are cached (their file name carries the content id);
-    a demo parsed once opens again in a fraction of a second, also after the
-    app was restarted. Any problem with the cache means parsing again.
-    """
+    """load_demo through the disk cache: (demo, from_cache). Only library demos are cached;
+    any problem with the cache means parsing again."""
     cached = store.read_parsed(path, PARSE_VERSION)
     if isinstance(cached, Demo):
         return cached, True

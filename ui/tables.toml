@@ -29,7 +29,7 @@
 #   sticky   pin the column while the table scrolls horizontally
 #   tones  badge colour map: raw/display value -> tone token
 #
-# tests/check_ui.py validates this file (i18n keys exist, fmt formats,
+# tests/test_tables.py validates this file (i18n keys exist, fmt formats,
 # grade/best/bar/tone values are legal, basic ⊆ columns, references
 # resolve, colour tokens exist in theme/).
 # ============================================================================
@@ -222,6 +222,23 @@ kind = "text"
 fmt = "{:.0f}"
 best = "low"
 
+[metric.killer]
+kind = "text"
+
+[metric.victim]
+kind = "text"
+
+[metric.zone_k]
+kind = "text"
+
+[metric.zone_v]
+kind = "text"
+
+[metric.zone_kd]
+fmt = "{:+.0f}"
+best = "high"
+label = "zone_kd"
+
 # ------------------------------------------------------------------- tables
 # The unified match list (Matches page): one row per match from every
 # source. The date column sorts through a hidden raw column that carries
@@ -351,4 +368,32 @@ max_height = 720
 selectable = true
 
 [table.duels.override.aim_err]
+label = "col_err"
+
+# The small tables of the Duels page: duels by map zone, round openings.
+[table.zones]
+columns = ["zone", "kills", "deaths", "zone_kd"]
+
+[table.zones.override.zone]
+sticky = true
+
+[table.openings]
+columns = [
+  "round", "round_sec", "killer", "victim", "weapon", "hs", "zone_k", "zone_v",
+]
+extra = ["hs_raw", "weapon_disp"]
+
+# The Top-3 evidence popovers of the Shooting page.
+[table.ev_err]
+columns = ["round", "opponent", "weapon", "aim_err", "result"]
+extra = ["result_raw", "weapon_disp"]
+
+[table.ev_err.override.aim_err]
+label = "col_err"
+
+[table.ev_lost]
+columns = ["round", "opponent", "weapon", "aim_err", "duration"]
+extra = ["weapon_disp"]
+
+[table.ev_lost.override.aim_err]
 label = "col_err"

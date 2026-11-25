@@ -1,8 +1,4 @@
-"""
-Shot metrics: the per-shot table (one row per gun shot: speed, distance,
-state at the fire tick, hit) plus the stop-quality and risk annotations
-layered onto it. Pure pandas over a parsed Demo; no UI, no Streamlit.
-"""
+"""The per-shot table plus the stop-quality and risk annotations."""
 
 from __future__ import annotations
 
@@ -29,17 +25,13 @@ from core.model import (
     weapon_class,
 )
 
+__all__ = ["add_risk", "add_stop_quality", "shots_table"]
+
 
 def _nearest_enemy_dist(demo: Demo, shots: pd.DataFrame) -> pd.Series:
-    """
-    Distance (units) from each shot to the nearest LIVING enemy.
-
-    Positions come from demo.ticks (every player at every fire tick). An enemy
-    is treated as dead if they have a death event in the same round at an
-    earlier tick (a death at the same tick as the shot still counts as alive:
-    that may be the very victim of this shot). Unknown teams are skipped.
-    Approximation; NaN when no living enemy was found at that tick.
-    """
+    """Distance from each shot to the nearest LIVING enemy at that tick (approximate; NaN
+    when none). A death at the shot's own tick counts as alive: it may be this shot's
+    victim."""
 
     n = len(shots)
     res = pd.Series(np.nan, index=shots.index, dtype=float)
@@ -94,16 +86,8 @@ def _nearest_enemy_dist(demo: Demo, shots: pd.DataFrame) -> pd.Series:
 
 
 def _match_hits(shots: pd.DataFrame, hurts: pd.DataFrame) -> np.ndarray:
-    """
-    hit[i] = this shot damaged an enemy.
-
-    Each hurt row is attributed to the shooter's LATEST same-weapon shot at
-    tick <= hurt_tick within HIT_WINDOW ticks (weapon_fire and player_hurt
-    usually share the tick; the window absorbs off-by-one/two). Taking the
-    latest candidate - unlike a naive +-window set lookup - never flags an
-    earlier shot of the same burst. Shotgun pellets / wallbangs mark the same
-    shot once.
-    """
+    """hit[i] = this shot damaged an enemy: each hurt goes to the shooter's LATEST
+    same-weapon shot within HIT_WINDOW ticks before it."""
 
     hit = np.zeros(len(shots), dtype=bool)
     if not len(hurts) or not {"attacker_steamid", "weapon", "tick"}.issubset(
@@ -175,8 +159,7 @@ def _shot_frames(demo: Demo, s: pd.DataFrame) -> pd.DataFrame:
     ]
     t = demo.ticks[tcols].rename(columns={"steamid": "sid"})
     out = s.merge(t, on=["tick", "sid"], how="left").reset_index(drop=True)
-    # speed on the tick BEFORE the shot (stop detection: 'stopped' = crossed
-    # under the threshold exactly on the shot tick)
+    # speed on the tick BEFORE the shot
     prev = demo.ticks[["tick", "steamid", "speed"]].copy()
     prev["tick"] = prev["tick"] + 1
     out = out.merge(
@@ -195,9 +178,7 @@ def _shot_frames(demo: Demo, s: pd.DataFrame) -> pd.DataFrame:
 
 
 def _state_flags(out: pd.DataFrame) -> None:
-    """flashed / slowed: True/False when the prop is known, NA when the
-    demo/parser does not provide it (an old demo must not look like
-    "0% flashed")."""
+    """flashed / slowed: NA when the demo does not provide the prop, never False."""
     if "flash_left" in out.columns:
         fd = pd.to_numeric(out["flash_left"], errors="coerce")
     else:
@@ -217,12 +198,8 @@ def _state_flags(out: pd.DataFrame) -> None:
 
 
 def _flick_moves(demo: Demo, out: pd.DataFrame) -> None:
-    """first shot of an engagement (gap > ENGAGE_GAP_TICKS since the same
-    sid's previous shot) and the mouse movement that preceded it: the
-    sum of |dx|+|dy| over the FLICK_WIN_TICKS ticks before the shot.
-    first_shot is always known; flick_move is NA for spray follow-ups
-    (recoil control is not aim) and when the demo/parser has no usercmd
-    props (missing is never 0, the buttons lesson)."""
+    """first_shot (a new engagement) and flick_move, the mouse movement over
+    FLICK_WIN_TICKS before it (NA for follow-ups and without usercmd props)."""
     out["first_shot"] = _first_shot_arr(out["tick"], out["sid"])
     out["flick_move"] = np.nan
     if demo.mouse is None or not len(demo.mouse):
@@ -240,16 +217,8 @@ def _flick_moves(demo: Demo, out: pd.DataFrame) -> None:
 
 
 def shots_table(demo: Demo) -> pd.DataFrame:
-    """
-    One row per gun shot: tick, sid, weapon, round, speed, position,
-    dist (nearest living enemy, approx) and hit (damaged an enemy, approx:
-    a hurt event within HIT_WINDOW ticks after the shot; shotgun pellets count once).
-
-    Shot/duel context columns: `zone` (the game's named place at the shot,
-    '' unknown), `round_sec` (seconds into the live round, NaN unknown),
-    `flashed` / `slowed` (shooter state at the fire tick; NA when the
-    demo/parser does not provide the prop - missing is never False).
-    """
+    """One row per gun shot: position, speed, distance to the nearest living enemy, hit,
+    zone, round_sec, flashed / slowed."""
     out = _shot_frames(demo, _fire_rows(demo))
     _state_flags(out)
     _flick_moves(demo, out)
@@ -262,15 +231,8 @@ def shots_table(demo: Demo) -> pd.DataFrame:
 
 
 def add_stop_quality(shots: pd.DataFrame, thr: float) -> pd.DataFrame:
-    """
-    Adds `stop`: what the player's movement did at the shot tick.
-
-    'stopped'  - speed crossed under `thr` exactly on this tick (the
-                 counter-strafe moment: prev tick above, this tick below),
-    'standing' - already slow at this tick (and the previous one),
-    'moving'   - still fast at the shot,
-    ''         - speed unknown.
-    """
+    """Adds `stop`: 'stopped' (crossed under `thr` exactly on this tick), 'standing',
+    'moving' or '' (unknown)."""
 
     out = shots.copy()
     sp = out["speed"] if "speed" in out.columns else pd.Series(np.nan, index=out.index)
@@ -294,10 +256,7 @@ def add_risk(
     safe: float = SAFE_DIST,
     strict: float = STRICT_DIST,
 ) -> pd.DataFrame:
-    """
-    Adds `allowed_speed` and `risky` columns. A shot is risky when its speed
-    is above the distance-aware limit. Unknown speed/distance -> not risky.
-    """
+    """Adds `allowed_speed` and `risky` (unknown speed/distance -> not risky)."""
 
     out = shots.copy()
     out["allowed_speed"] = allowed_speed(out["dist"], thr, safe, strict)

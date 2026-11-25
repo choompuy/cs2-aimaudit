@@ -1,12 +1,5 @@
-"""
-Kills / deaths on the radar - the figure of the Map page.
-
-Pure plotly + core, no Streamlit: app.py passes the translated labels, the
-colours and a ready `hover` text per point, so this module stays testable
-and renderable on its own. Coordinates: with a radar the points are
-placed in radar pixels (the image is 0..size on both axes, y up), without
-one they stay in game units on a plain grid with equal axes.
-"""
+"""Kills / deaths on the radar, the figure of the Map page. Pure plotly: radar pixels (y
+up) with a radar, game units on a plain grid without."""
 
 from __future__ import annotations
 
@@ -166,12 +159,8 @@ def build_figure(
     labels: dict | None = None,
     colors: dict | None = None,
 ) -> go.Figure:
-    """
-    pts: core.kill_points frame plus a `hover` text column.
-    show: "both" | "kills" | "deaths". level: "upper" | "lower" (two-level
-    maps with a lower radar). labels: my_kill / victim / my_death / killer.
-    colors: kill / death / outline.
-    """
+    """pts: core.kill_points plus a `hover` column. show: both | kills | deaths. level:
+    upper | lower."""
     labels = labels or {}
     colors = {
         "kill": "#56b4e9",

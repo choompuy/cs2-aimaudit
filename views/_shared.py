@@ -1,8 +1,4 @@
-"""
-Bits shared by the Streamlit pages (started as the Matches/Settings
-duplicates: steam_cfg, show_error). Keep this module free of page
-layout - only small helpers both pages call with their own `t`.
-"""
+"""Small helpers shared by the pages."""
 
 from __future__ import annotations
 

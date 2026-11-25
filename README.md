@@ -160,16 +160,11 @@ Open the **Data report / debug** expander at the bottom of the page. The built-i
 ## Development
 
 ```bat
-python tests/test_core.py        # synthetic match, no .dem file needed
-python tests/test_sources.py     # match import (Steam), no network
-python tests/test_icons.py       # icon sanitizer / aliases / fallbacks
-python tests/check_ui.py         # i18n / schema / layering guardrails
-python tests/smoke_app.py --fast # AppTest end-to-end (fake parser)
-cd tests/js && npm ci && cd ../.. && python tests/check_roundrep_js.py
+pip install -r requirements-dev.txt
+npm ci --prefix tests/js         # once, needs Node; without it the JS tests are skipped
+pytest                           # no .dem file and no network needed
+pytest --full                    # what CI runs: every page and locale
 ```
-
-The JS line needs Node once (`npm ci` in `tests/js`); without it
-`check_roundrep_js.py` skips. CI runs both.
 
 - `core/` — parsing and all metrics (demoparser2), no UI code.
 - `sources/` — match import from Steam: the provider, the HTTP

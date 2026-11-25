@@ -1,11 +1,5 @@
-"""
-UI translations - the i18n/ folder is the single source of truth (the
-same way ui/tables.toml is for the grid tables and theme/tokens.toml
-for the palette): one file per language, i18n/<lang>.toml, loaded once
-at import. English (i18n/en.toml) is the primary language - keys
-missing from a translation fall back to it. Add a language by adding
-its file to i18n/ and its label to LANGS below.
-"""
+"""UI translations: one flat file per language, i18n/<lang>.toml. Keys missing from a
+translation fall back to English. A new language = its file + its label in LANGS."""
 
 import tomllib
 from pathlib import Path

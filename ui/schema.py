@@ -1,19 +1,7 @@
-"""
-Table schema: ui/tables.toml is the single source of truth for the grid
-tables (formats, sort directions, attributes, grading rules), the same way
-theme/tokens.toml is for the palette.
+"""Table schema: ui/tables.toml is the single source of truth for the grids.
 
-    schema.table("overview", rows, key="ov_grid", selected=..., on_click=...)
-
-replaces the hand-written Col(...) lists in app.py: a new column or table
-is a few lines of TOML, not UI code. This module only loads and merges the
-data - pure functions, no Streamlit at import time. Labels follow the app
-language (the registry key `lang`, read per call so a language switch is
-picked up on the next rerun).
-
-validate() checks every rule the file must hold; tests/check_ui.py runs it
-and feeds it deliberately broken specs (negative tests).
-"""
+No Streamlit at import time; labels follow the app language. validate() checks every
+rule the file must hold (tests/test_tables.py)."""
 
 from __future__ import annotations
 
@@ -45,8 +33,6 @@ _ATTRS = (
 _KINDS = ("num", "text", "badge", "icon")
 _BARS = ("none", "pct", "rel")
 _BESTS = ("none", "high", "low")
-# tone names the renderer understands (ui/table.py); _-prefixed there, but
-# this is the same package
 
 
 @lru_cache(maxsize=1)
@@ -55,13 +41,13 @@ def _load() -> dict:
         return tomllib.load(fh)
 
 
-def _translator():
+def translator():
     """The app's t(): the language lives in the registry key `lang`."""
     lang = None
     try:
         import state
 
-        lang = state.get_lang()
+        lang = state.LANG.get()
     except Exception:  # noqa: BLE001 - bare mode (validate/unit tests): en
         lang = None
     return i18n.make_t(lang or next(iter(i18n.LANGS)))
@@ -97,7 +83,7 @@ def build_cols(table_id: str, *, all_columns: bool = False, t=None) -> list[Col]
     tbl = spec["table"][table_id]
     shown = tbl["columns"] if all_columns else tbl.get("basic", tbl["columns"])
     if t is None:
-        t = _translator()
+        t = translator()
     cols = []
     for col_id in shown:
         m = _merged(spec, table_id, col_id)
@@ -143,12 +129,8 @@ def table(
     checked=None,
     on_check=None,
 ) -> None:
-    """One call instead of a hand-written data_table(...): cols, stripe and
-    height come from tables.toml; selected/on_click are runtime values.
-    ``icons`` is the {key: [data-uri, w, h]} set for the icon columns.
-    ``checkable`` / ``row_keys`` / ``checked`` / ``on_check`` add the
-    checkbox column (see ui.table.data_table) - under the same
-    `selectable` gate as selected/on_click."""
+    """data_table() with cols, stripe and height from tables.toml. ``icons``: {key:
+    [data-uri, w, h]} of the icon columns; the rest see ui.table.data_table."""
     spec = _load()["table"].get(table_id)
     if spec is None:
         raise KeyError(f"unknown table {table_id!r}")
@@ -268,7 +250,7 @@ def _metric_tone_errs(mid: str, m: dict, kind: str, errs: list[str]) -> None:
                 errs.append(f"{where}: tones[{val!r}] unknown tone {tone!r}")
 
 
-def _validate_metric(mid: str, m: dict, errs: list[str], en: set, ru: set) -> None:
+def _validate_metric(mid: str, m: dict, errs: list[str], en: set) -> None:
     """Rules a single [metric.*] entry must hold (appends to errs)."""
     where = f"[metric.{mid}]"
     for attr in m:
@@ -276,13 +258,13 @@ def _validate_metric(mid: str, m: dict, errs: list[str], en: set, ru: set) -> No
             errs.append(f"{where}: unknown attr {attr!r}")
 
     def i18n_ok(k):
-        return k in en and k in ru
+        return k in en
 
     label = m.get("label", f"col_{mid}")
     if not i18n_ok(label):
-        errs.append(f"{where}: label key {label!r} missing in en/ru")
+        errs.append(f"{where}: label key {label!r} missing in en")
     if m.get("help") and not i18n_ok(m["help"]):
-        errs.append(f"{where}: help key {m['help']!r} missing in en/ru")
+        errs.append(f"{where}: help key {m['help']!r} missing in en")
     kind = m.get("kind", "num")
     if kind not in _KINDS:
         errs.append(f"{where}: kind must be one of {_KINDS}")
@@ -292,9 +274,7 @@ def _validate_metric(mid: str, m: dict, errs: list[str], en: set, ru: set) -> No
     if not isinstance(m.get("sticky", False), bool):
         errs.append(f"{where}: sticky must be a boolean")
     if kind == "icon":
-        # the tooltip / fallback text column is what makes an icon cell
-        # usable without the icon set - it must resolve in every table
-        # that shows the column (checked below, like sort_by)
+        # an icon cell needs its text fallback in every table that shows it
         tb = _norm(m.get("title_by"), "none")
         if tb is None:
             errs.append(f"{where}: kind=icon needs title_by (the tooltip column)")
@@ -345,8 +325,7 @@ def _validate_table(tid: str, tbl: dict, metrics: dict, errs: list[str]) -> None
         errs.append(f"{where}: max_height must be a positive int")
     if not isinstance(tbl.get("selectable", False), bool):
         errs.append(f"{where}: selectable must be a boolean")
-    # sort_by and title_by must resolve inside this table (checked per
-    # column, the metric alone does not know which tables show it)
+    # the metric alone does not know which tables show it
     for c in tbl.get("columns", []):
         if c not in metrics:
             continue
@@ -380,9 +359,9 @@ def validate(spec: dict | None = None) -> list[str]:
         spec = _load()
     metrics = spec.get("metric", {})
     tables = spec.get("table", {})
-    en, ru = _keys("en"), _keys("ru")
+    en = _keys("en")
     for mid, m in metrics.items():
-        _validate_metric(mid, m, errs, en, ru)
+        _validate_metric(mid, m, errs, en)
     for tid, tbl in tables.items():
         _validate_table(tid, tbl, metrics, errs)
     return errs

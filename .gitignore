@@ -40,6 +40,6 @@ Thumbs.db
 .idea/
 .vscode/
 
-# optional JS test deps (tests/check_roundrep_js.py); the lockfile IS
+# optional JS test deps (tests/test_roundrep_js.py); the lockfile IS
 # committed (CI runs npm ci, like the exact pins in requirements.txt)
 tests/js/node_modules/

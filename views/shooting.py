@@ -25,8 +25,6 @@ HG_ORDER = [
 ]
 
 
-
-
 @dataclass
 class _Stats:
     """Every number the Shooting page shows, computed once from ctx."""
@@ -88,10 +86,8 @@ def _duel_stats(dd, impact, me):
 
 
 def _discipline_stats(sh_me, thr):
-    """Shot discipline (firing while flashed / while damage-slowed) and
-    first-shot discipline (accuracy on the first shot of an engagement,
-    the pre-fire mouse movement). NA (a prop unknown on old demos) never
-    counts as False - a verdict is only issued when the data exists."""
+    """Firing while flashed / slowed and the first shots of engagements. NA never counts as
+    False."""
     moving_pct = (sh_me["speed"] > thr).mean() * 100 if len(sh_me) else np.nan
     known = (
         sh_me["dist"].notna() & sh_me["speed"].notna()
@@ -116,8 +112,7 @@ def _discipline_stats(sh_me, thr):
     fm = fs_me["flick_move"] if first_n else pd.Series(dtype=float)
     fm_known = int(fm.notna().sum())
     swing_med = fm.median() if fm_known else np.nan
-    # mid-swing first shots: pre-fire movement >= 2x the player's own
-    # median - the bar self-calibrates for sensitivity and playstyle
+    # pre-fire movement >= 2x the player's own median (self-calibrates for sensitivity)
     swing_n = (
         int((fm >= 2.0 * float(swing_med)).sum())
         if fm_known and pd.notna(swing_med)
@@ -188,17 +183,13 @@ def _movement_tips(t, s) -> list:
 
 
 def _discipline_tips(t, s) -> list:
-    """The discipline verdicts (lost first shots, opening duels, firing
-    flashed / slowed, mid-swing first shots) - appended AFTER the
-    established verdicts, so at equal severity the aim / first-shot
-    coaching keeps its top-3 place."""
+    """The discipline verdicts, after the established ones at equal severity."""
     tips = []
     if len(s.dth_df) >= 3:
         n_lost = int((s.dth_df["first"] == "opponent").sum())
         if n_lost and n_lost / len(s.dth_df) >= 0.5:
             tips.append((1, t("tip_lost_first", n=n_lost, m=len(s.dth_df)), "lost"))
-    # opening-duel verdict: only when the player takes openings
-    # often enough (>= 5) and keeps losing them (<= 30% won)
+    # only when the player takes openings (>= 5) and loses them (<= 30% won)
     if s.imp_me is not None and s.imp_me["open_attempts"] >= 5:
         _o_rate = s.imp_me["open_rate"]
         if pd.notna(_o_rate) and _o_rate <= 30.0:
@@ -223,10 +214,7 @@ def _discipline_tips(t, s) -> list:
 
 
 def _build_tips(t, s) -> list:
-    """The coaching engine: at most three items - one movement verdict,
-    the aim-error one, the first-shot one - each (severity, sentence with
-    its number, evidence) where evidence is a popover key, a chart key or
-    None; severity 2 HIGH / 1 MED / 0 INFO."""
+    """[(severity 2 HIGH / 1 MED / 0 INFO, sentence, evidence key or None)]."""
     tips = _movement_tips(t, s) + _discipline_tips(t, s)
     if not tips:
         tips.append((0, t("tip_few"), None))
@@ -235,14 +223,7 @@ def _build_tips(t, s) -> list:
 
 
 def _top3_card(t, s, tips, name_of) -> None:
-    """The "Top 3 things to work on" card: a severity badge (st.badge,
-    the semantic palette: red HIGH / orange MED / blue INFO) + a text
-    label, the sentence with its number, and the evidence behind
-    a "show me" popover or a pointer to the chart below.
-
-    72 lines, under the 80 cap: the per-tip badge/text/evidence row is one
-    visual unit - splitting the popover arms from the badge row would
-    separate the layout from the data it renders."""
+    """The "Top 3 things to work on" card: severity, the sentence, the evidence."""
     sev_color = {
         2: ("sev_high", "red"),  # red    — bad / risky
         1: ("sev_med", "orange"),  # orange — warning
@@ -260,44 +241,10 @@ def _top3_card(t, s, tips, name_of) -> None:
             with ev_col:
                 if ev == "err":
                     ev_df = s.dd[s.dd["my_err"].notna()].nlargest(5, "my_err")
-                    _events_popover(
-                        t,
-                        t("top3_ev_err"),
-                        ev_df,
-                        {
-                            t("col_round"): ev_df["round"].to_numpy(),
-                            t("col_opponent"): [
-                                name_of.get(s, s) for s in ev_df["opponent"]
-                            ],
-                            t("col_weapon"): ev_df["weapon"].to_numpy(),
-                            t("col_err"): ev_df["my_err"].to_numpy(),
-                            t("col_result"): [
-                                fmt_result(v) for v in ev_df["result"]
-                            ],
-                        },
-                        {t("col_round"): "%d", t("col_err"): "%.1f°"},
-                    )
+                    _events_popover(t, "ev_err", ev_df, name_of)
                 elif ev == "lost":
                     ev_df = s.dth_df[s.dth_df["first"] == "opponent"]
-                    _events_popover(
-                        t,
-                        t("top3_ev_lost"),
-                        ev_df,
-                        {
-                            t("col_round"): ev_df["round"].to_numpy(),
-                            t("col_opponent"): [
-                                name_of.get(s, s) for s in ev_df["opponent"]
-                            ],
-                            t("col_weapon"): ev_df["weapon"].to_numpy(),
-                            t("col_err"): ev_df["my_err"].to_numpy(),
-                            t("col_duration"): ev_df["duration_s"].to_numpy(),
-                        },
-                        {
-                            t("col_round"): "%d",
-                            t("col_err"): "%.1f°",
-                            t("col_duration"): "%.2f s",
-                        },
-                    )
+                    _events_popover(t, "ev_lost", ev_df, name_of)
                 elif ev is not None:  # "risk" / "speed": chart is below
                     st.caption(
                         t(
@@ -310,10 +257,7 @@ def _top3_card(t, s, tips, name_of) -> None:
 
 
 def _metric_tiles(t, s) -> None:
-    """One headline tile per theme - Accuracy, Movement (risky, the
-    distance-aware one), Crosshair, Duels; the rest are grouped under
-    section headers behind "All metrics" (mirrors the tables' Basic/Full
-    switch)."""
+    """One headline tile per theme; the rest behind "All metrics"."""
 
     c = st.columns(4)
     c[0].metric(t("m_acc"), pct(s.acc_pct), help=t("m_acc_help"))
@@ -407,11 +351,8 @@ def _all_metrics_tiles(t, s) -> None:
     )
 
 
-
 def _charts(t, s) -> None:
-    """The angle warning, hit placement + speed histogram (one row,
-    style_figure keeps both small charts at the same height), then the
-    risk chart."""
+    """Hit placement, speed histogram and the risk chart."""
 
     if len(s.dd):
         k_err = s.dd.loc[s.dd["result"] == "kill", "my_err"].median()
@@ -428,8 +369,6 @@ def _charts(t, s) -> None:
         else:
             idx = [k for k in HG_ORDER if k in s.hg_me.index]
             idx += [k for k in s.hg_me.index if k not in HG_ORDER]
-            # your hits in the accent colour; style_figure keeps both
-            # small charts at the same height, axis style and hover format
             fig = go.Figure(
                 go.Bar(
                     x=[t(f"hg_{k}") for k in idx],
@@ -448,9 +387,8 @@ def _charts(t, s) -> None:
         st.markdown(f"**{t('speed_hist')}**")
         sv = s.sh_me["speed"].dropna() if len(s.sh_me) else pd.Series(dtype=float)
         if len(sv):
-            # your speeds in the accent colour; the moving threshold
-            # is a grey context line — the danger boundary is the
-            # vermillion curve on the risk chart below, not this line
+            # the threshold is a grey context line: the danger boundary is on the risk
+            # chart
             fig = go.Figure(go.Histogram(x=sv, nbinsx=40, marker_color=PAL["you"]))
             fig.add_vline(x=s.thr, line_dash="dot", line_color=PAL["ctx"])
             style_figure(fig, height=260, x_title=t("speed_x"), y_title=t("speed_y"))
@@ -460,20 +398,14 @@ def _charts(t, s) -> None:
 
 
 def _risk_chart(t, s) -> None:
-    """The "too fast for this distance" scatter: grey = misses (context),
-    blue = hits (good), vermillion = the boundary; a plain red/green pair
-    would be the classic colour-blind trap, and every series keeps its
-    own label."""
+    """The "too fast for this distance" scatter: grey misses, blue hits, vermillion
+    boundary (colour-blind-safe)."""
 
     st.markdown(f"**{t('risk_title')}**")
     known_r = s.sh_me[s.sh_me["dist"].notna() & s.sh_me["speed"].notna()]
     if not len(known_r):
         st.info(t("risk_none"))
     else:
-        # grey = misses (context), blue = hits (good), vermillion = the
-        # "too fast for this distance" boundary; a plain red/green pair
-        # would be the classic colour-blind trap, and every series keeps
-        # its own label
         fig = go.Figure()
         miss = known_r[~known_r["hit"].astype(bool)]
         hit = known_r[known_r["hit"].astype(bool)]
@@ -519,9 +451,7 @@ def _risk_chart(t, s) -> None:
 
 
 def _weapons_grid(ctx) -> None:
-    """The per-weapon table: same conventions as the other tables - units
-    in the numbers, progress bars for percentages, the weapon name pinned;
-    the name itself is the silhouette (tooltip carries the display name)."""
+    """The per-weapon table."""
     t = ctx.t
 
     st.divider()
@@ -531,9 +461,6 @@ def _weapons_grid(ctx) -> None:
         hurts=ctx.hurts_f,
     )
     if len(w):
-        # same table conventions as the other tables - units in the
-        # numbers, progress bars for percentages, weapon name pinned; the
-        # name itself is the silhouette (tooltip carries the display name)
         w_vals, w_labels, w_icons = icons.weapon_cells(w["weapon"])
         cells = {c: w[c].to_numpy() for c in schema.columns("weapons")}
         schema.table(
@@ -556,20 +483,25 @@ def render(ctx) -> None:
     _weapons_grid(ctx)
 
 
-
-def _events_popover(t, caption: str, ev_df, cols: dict, numfmt: dict) -> None:
-    """The Top-3 evidence popover: a small localized events table behind
-    the "Show" button (started as the err/lost near-duplicate). Empty
-    evidence draws only the caption."""
+def _events_popover(t, table_id: str, ev_df, name_of) -> None:
+    """The Top-3 evidence behind the "Show" button; empty evidence draws
+    only the caption."""
     with st.popover(t("top3_show")):
-        st.caption(caption)
+        st.caption(t(f"top3_{table_id}"))
         if len(ev_df):
-            st.dataframe(
-                pd.DataFrame(cols),
-                column_config={
-                    k: st.column_config.NumberColumn(k, format=v)
-                    for k, v in numfmt.items()
+            w_vals, w_labels, w_icons = icons.weapon_cells(ev_df["weapon"])
+            schema.table(
+                table_id,
+                {
+                    "round": ev_df["round"].to_numpy(),
+                    "opponent": [name_of.get(s, s) for s in ev_df["opponent"]],
+                    "weapon": w_vals,
+                    "weapon_disp": w_labels,
+                    "aim_err": ev_df["my_err"].to_numpy(),
+                    "duration": ev_df["duration_s"].to_numpy(),
+                    "result": [fmt_result(v) for v in ev_df["result"]],
+                    "result_raw": ev_df["result"].astype(str).to_numpy(),
                 },
-                hide_index=True,
-                width="stretch",
+                key=f"sh_{table_id}",
+                icons=w_icons,
             )

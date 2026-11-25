@@ -22,7 +22,7 @@ The app itself never touches the network: only this script does.
   * the icons are already there  -> does nothing, instantly;
   * AIMAUDIT_NO_ICONS=1 is set   -> does nothing (opt out of the download);
   * no internet / GitHub blocked -> says so, exits 0, and does not retry for
-    a day (the UI falls back to weapon names as text, like before).
+    a day (the UI falls back to weapon names as text).
 
 Every file is verified against a pinned SHA-256 before it is saved (the
 hash of the SANITIZED content - scripts, event handlers, external
@@ -61,7 +61,6 @@ _write = fetchutil.write
 REPO = "lexogrine/cs2-react-hud"
 COMMIT = "7874750c97fcecd8f72eb3fad382917e035ec651"
 URL = "https://raw.githubusercontent.com/{repo}/{commit}/src/assets/{folder}/{name}.svg"
-SAFE_KEY = re.compile(r"^[a-z0-9_]+$")  # keys double as file names
 TIMEOUT_AUTO, TIMEOUT_FULL = 12.0, 60.0
 
 # --------------------------------------------------------------- the pins
@@ -194,24 +193,11 @@ IMAGE_SHA = {
 
 def present(dest: str) -> bool:
     """The icons are installed: a manifest that covers every pinned key."""
-    try:
-        with open(os.path.join(dest, "manifest.json"), encoding="utf-8") as fh:
-            m = json.load(fh)
-    except (OSError, ValueError):
-        return False
-    if not isinstance(m, dict):
-        return False
-    wanted = set(WEAPON_SHA) | set(IMAGE_SHA)
-    return wanted <= set(m)
+    return set(WEAPON_SHA) | set(IMAGE_SHA) <= set(_read_manifest(dest))
 
 
 def _read_manifest(dest: str) -> dict:
-    try:
-        with open(os.path.join(dest, "manifest.json"), encoding="utf-8") as fh:
-            m = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    return m if isinstance(m, dict) else {}
+    return store.read_json(os.path.join(dest, "manifest.json"))
 
 
 # ------------------------------------------------------------ game source
@@ -341,7 +327,7 @@ def fetch_game(dest: str, cs2_dir: str, wanted: dict[str, str], timeout: float) 
     n = 0
     os.makedirs(dest, exist_ok=True)
     # the decompile output lives INSIDE the icons folder (never the system
-    # temp: tests/check_ui.py keeps every module inside the app folder)
+    # temp: tests/test_static.py keeps every module inside the app folder)
     tmp = os.path.join(dest, ".tmp_s2v")
     shutil.rmtree(tmp, ignore_errors=True)
     os.makedirs(tmp, exist_ok=True)

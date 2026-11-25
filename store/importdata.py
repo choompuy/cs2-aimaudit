@@ -1,55 +1,31 @@
-"""
-Match-import settings and caches (accounts.json, matches.json): the
-same atomic-write rules as the library - a corrupt file counts as empty
-and is recreated, no secrets are ever stored.
-"""
+"""accounts.json (no secrets) and matches.json (the cached match lists)."""
 
 from __future__ import annotations
 
-import json
-import os
-
+from store.jsonio import read_json, write_json
 from store.library import _read_library, _update
 from store.paths import _now, accounts_path, matches_cache_path
 
-
-# accounts.json (no secrets - the Steam import needs none) and matches.json
-# (the cached match lists) follow the same rules as library.json: atomic
-# writes, a corrupt file counts as empty and is recreated.
-def _read_json_file(path: str) -> dict:
-    try:
-        with open(path, encoding="utf-8") as fh:
-            d = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    return d if isinstance(d, dict) else {}
-
-
-def _write_json_file(path: str, d: dict) -> bool:
-    try:
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(d, fh, ensure_ascii=False, indent=1)
-        os.replace(tmp, path)
-        return True
-    except OSError:
-        return False
+__all__ = [
+    "find_by_match", "mark_analyzed", "read_accounts", "read_matches_cache",
+    "write_accounts", "write_matches_cache",
+]
 
 
 def read_accounts() -> dict:
-    return _read_json_file(accounts_path())
+    return read_json(accounts_path())
 
 
 def write_accounts(d: dict) -> bool:
-    return _write_json_file(accounts_path(), d)
+    return write_json(accounts_path(), d)
 
 
 def read_matches_cache() -> dict:
-    return _read_json_file(matches_cache_path())
+    return read_json(matches_cache_path())
 
 
 def write_matches_cache(d: dict) -> bool:
-    return _write_json_file(matches_cache_path(), d)
+    return write_json(matches_cache_path(), d)
 
 
 def find_by_match(provider: str, match_id: str) -> dict | None:

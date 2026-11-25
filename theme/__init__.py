@@ -1,26 +1,7 @@
-"""
-CS2-AimAudit theme system. Everything visual derives from theme/tokens.toml.
+"""The theme system: everything visual derives from theme/tokens.toml.
 
-Public API
-- tok("tier.good")            -> resolved value ("#8fd16a") for Styler / inline HTML
-- theme.tokens()              -> every flat token of the active theme
-- theme.active_theme()        -> "violet" (env AIMAUDIT_THEME overrides)
-- theme.available_themes()    -> ["green", "violet"]
-- theme.chart_colors()        -> [chart-1 .. chart-6]
-- theme.css_variables()       -> ":root { --bg-app: ...; ... }" string
-- theme.plotly_template()     -> go.layout.Template built from tokens
-- theme.inject_theme()        -> injects CSS variables + theme/overrides.css
-                                 once per run via st.markdown (see below)
-
-Streamlit notes
-- st.html() (>=1.52) renders inside a sandboxed iframe: CSS written there
-  cannot reach the main document. inject_theme() therefore uses
-  st.markdown(..., unsafe_allow_html=True), which works on every supported
-  version (>=1.56) and styles the app itself.
-- Native widgets do not read CSS variables; they take their colours from
-  .streamlit/config.toml, which tools/sync_theme.py regenerates from the
-  same tokens. Changing the palette = edit tokens.toml + run sync + restart.
-"""
+inject_theme() uses st.markdown: st.html() renders in a sandboxed iframe. Native widgets
+read .streamlit/config.toml: after a palette change run tools/sync_theme.py and restart."""
 
 from __future__ import annotations
 
@@ -45,9 +26,7 @@ def tok(path: str, theme: str | None = None) -> str:
     return loader.token(path, theme)
 
 
-# Design constants that are not palette tokens. Plotly needs a real colour
-# string for "transparent" (charts sit directly on the app surface); keeping
-# the literal here keeps rgba() out of UI sources (see tests/check_ui.py).
+# Plotly needs a real colour string; here it stays out of the UI sources
 TRANSPARENT = "rgba(0,0,0,0)"
 
 
@@ -71,12 +50,7 @@ def overrides_css() -> str:
 
 
 def inject_theme() -> None:
-    """
-    Inject CSS variables and overrides into the app, once per run.
-
-    Call it once near the top of app.py (after st.set_page_config); it is
-    cheap (one st.markdown element) and keeps every rerun consistent.
-    """
+    """Inject the CSS variables and overrides, once per run."""
     import streamlit as st
 
     st.markdown(
@@ -86,15 +60,7 @@ def inject_theme() -> None:
 
 
 def plotly_template():
-    """
-    The shared Plotly template built from tokens ("aimaudit").
-
-    app.py registers it once (pio.templates["aimaudit"]) and style_figure()
-    also sets its attributes explicitly on every figure: the browser merges
-    Streamlit's own plotly theme into layout.template, but explicit
-    layout.* values always win, so charts look identical on every supported
-    Streamlit version.
-    """
+    """The shared Plotly template built from tokens ("aimaudit")."""
     import plotly.graph_objects as go
 
     stack = tok("font.family-stack")

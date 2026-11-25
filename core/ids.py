@@ -1,15 +1,4 @@
-"""
-SteamID resolution and frame normalization, the shapes demoparser2
-hands over and the rest of core normalizes:
-
-- build_id_lookup / fix_ids: event and tick SteamIDs arrive as float64
-  (UInt64 with nulls, values > 2^53 rounded), UInt64 or rounded floats
-  hidden in object columns - NEVER convert through Int64, map through
-  the exact parse_player_info lookup (see fix_ids for the why);
-- _extract_punch: aim_punch_angle in every shape it arrives in;
-- _norm_alive: is_alive -> plain bool;
-- _add_speed: the one-tick position delta speed of the fire-tick table.
-"""
+"""SteamID resolution and frame normalization of what demoparser2 hands over."""
 
 from __future__ import annotations
 
@@ -18,17 +7,13 @@ import pandas as pd
 
 from core.model import NA, TICKRATE, _speed_from_positions
 
+__all__ = ["build_id_lookup", "fix_ids"]
+
 
 def build_id_lookup(info: pd.DataFrame):
-    """
-    From parse_player_info: (float64 -> [candidate steamids], name -> steamid).
-
-    The float lookup may map one float to SEVERAL steamids: when a UInt64
-    column with nulls becomes float64, SteamID64s (> 2^53) get rounded and
-    two ids that differ in the last digits can collapse to the same float.
-    The name map is used to disambiguate such collisions (event and tick
-    tables always carry player names).
-    """
+    """From parse_player_info: (float64 -> [candidate steamids], name -> steamid).
+    SteamID64s above 2^53 get rounded in float64, so two ids may collapse to one float;
+    the name disambiguates."""
 
     flookup: dict[float, list[str]] = {}
     name_to_sid: dict[str, str] = {}
@@ -47,22 +32,12 @@ def fix_ids(
     names: pd.Series | None = None,
     name_to_sid: dict[str, str] | None = None,
 ) -> pd.Series:
-    """
-    SteamID column -> exact strings, whatever dtype it arrives in.
+    """SteamID column -> exact strings, whatever dtype it arrives in.
 
-    demoparser2 hands event/tick SteamIDs over in several shapes: float64
-    (UInt64 with nulls -> float, values > 2^53 rounded to a 16-unit grid),
-    plain UInt64, and sometimes ROUNDED FLOATS hidden inside an object /
-    nullable column. Converting any of those through Int64 -> str bakes the
-    float rounding in: only players whose SteamID happens to be a multiple of
-    16 survive, everyone else disappears from the stats (seen in the
-    wild: a 10-player match where exactly one player kept his hits).
-
-    So: NEVER convert through Int64. Every numeric-ish value is mapped through
-    the {float64(sid): [sids]} lookup built from the exact parse_player_info
-    table; the accompanying player name disambiguates collisions; anything
-    else becomes NA.
-    """
+    NEVER convert through Int64: ids arrive as float64 (or rounded floats in object
+    columns), where values above 2^53 sit on a 16-unit grid, so most players would
+    disappear. Every value is mapped through build_id_lookup instead; anything unknown
+    becomes NA."""
 
     def one(v, nm):
         try:
@@ -92,12 +67,7 @@ def fix_ids(
 
 
 def _extract_punch(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normalize aim_punch_angle into numeric punch_pitch / punch_yaw (degrees).
-
-    demoparser2 may return the QAngle either as one column (string "x y z" or
-    a list/tuple) or pre-split into several columns; handle all shapes.
-    """
+    """aim_punch_angle (string, list or pre-split columns) -> punch_pitch / punch_yaw."""
 
     df = df.copy()
     df["punch_pitch"] = np.nan
@@ -164,13 +134,8 @@ def _norm_alive(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_speed(df: pd.DataFrame, tickrate: int = TICKRATE) -> pd.DataFrame:
-    """
-    Own `speed` column for the fire-tick table (see the POS note above).
-
-    Fire ticks are parsed together with tick-1, so speed is the exact one-tick
-    delta |pos(t) - pos(t-1)| * tickrate. NaN when: no t-1 row, the player was
-    dead at either tick, or the delta looks like a teleport (respawn/dormancy).
-    """
+    """`speed` as the one-tick position delta (fire ticks are parsed with tick-1). NaN
+    without a t-1 row, when dead at either tick, or on a teleport."""
 
     df = df.copy()
     if "speed" not in df.columns:

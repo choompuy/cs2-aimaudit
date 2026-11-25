@@ -1,17 +1,5 @@
-"""
-The per-match summary cache: the little numbers the Matches table shows.
-
-One small JSON per demo (data/cache/matchstats/, keyed like the parsed
-cache: <parse_key>-<code version>.json, see store) so the table NEVER
-parses a demo while it renders. The values reuse core's own functions
-(player_summary, impact_stats, round_winners) - no new formulas.
-
-Who "me" is: the me_sid remembered in the library entry (the explicit
-per-match pick, also the "this is not me" correction) when she played in
-the demo, else the accounts' SteamID64. Without a "me" there is no
-summary; the match view asks once per demo and the Matches page analyzes
-a finished download with whatever it can resolve.
-"""
+"""The per-match summary cache behind the Matches table: one small JSON per demo, keyed
+like the parsed cache, so the table never parses demos."""
 
 from __future__ import annotations
 
@@ -28,12 +16,10 @@ from core.openings import round_winners
 from core.shots import shots_table
 from core.summary import player_summary
 
-# the summary format itself (content changes bump PARSE_VERSION through the
-# loader hash, this marks structural changes of the JSON)
+# the structure of the JSON (content changes go through the loader hash)
 STATS_VERSION = 1
 
-# the fixed thresholds the summary is computed with: the cache is keyed on
-# the demo only, so it must not follow the analysis sliders
+# fixed thresholds: the cache must not follow the analysis sliders
 _WINDOW_S = 3.0
 _THR = 40
 _SAFE = 500
@@ -41,9 +27,8 @@ _STRICT = 1500
 
 
 def resolve_me(demo, entry: dict, accounts: dict) -> str | None:
-    """Who "me" is in this demo: the pick remembered for THIS match first
-    (it is the explicit answer, also the "this is not me" correction), else
-    the accounts' SteamID64 when she played. None when unknown (the UI asks)."""
+    """Who "me" is: the pick remembered for THIS match, else the accounts' SteamID64, if
+    that player is in the demo. None: the UI asks."""
     players = set(demo.players["sid"])
     me = entry.get("me_sid")
     if me and me in players:
@@ -72,10 +57,7 @@ def played_at_of(entry: dict) -> datetime | None:
 
 
 def compute(demo, me_sid: str, played_at: datetime | None = None) -> dict:
-    """The summary of one player's match, from the already parsed demo.
-
-    Existing core functions only; the fixed thresholds keep the cache
-    independent of the analysis sliders (see _WINDOW_S and friends)."""
+    """The summary of one player's match from the parsed demo."""
     shots = shots_table(demo)
     duels = build_duels(demo, _WINDOW_S)
     summary = player_summary(demo, duels, shots, _THR, _SAFE, _STRICT)
@@ -153,6 +135,13 @@ def read_cached(path: str) -> dict | None:
 def write_cached(path: str, stats: dict) -> bool:
     """Cache a demo's summary; older code versions are dropped."""
     return store.write_matchstats(path, PARSE_VERSION, stats)
+
+
+def ensure(demo, entry: dict, me_sid: str) -> None:
+    """Compute and cache the summary unless it is there for this very player."""
+    path = store.demo_path(entry)
+    if (read_cached(path) or {}).get("me_sid") != me_sid:
+        write_cached(path, compute(demo, me_sid, played_at=played_at_of(entry)))
 
 
 def drop_cached(path: str) -> bool:

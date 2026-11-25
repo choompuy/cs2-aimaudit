@@ -1,13 +1,5 @@
-"""
-The Matches page: every match of every source in one table.
-
-No network happens just by opening the page - only the local caches are
-read (the provider lists and the per-match summaries); every request
-(Refresh / Download) is an explicit press. A row click opens the match when
-the demo is in the library, and otherwise runs the row's own action
-(download / import / locate the file). Accounts and the Steam helper live
-on the Settings page.
-"""
+"""The Matches page: every match of every source in one table. The network runs only on
+explicit presses; opening the page reads local caches."""
 
 from __future__ import annotations
 
@@ -32,11 +24,6 @@ _PERIODS = ("7", "30", "all")
 _RESULTS = ("all", "win", "loss", "tie")
 # how many rows the table draws before the "Show more" button
 PAGE_ROWS = 25
-
-
-# ------------------------------------------------------------- shared bits
-_steam_cfg = _shared.steam_cfg
-_show_error = _shared.show_error
 
 
 def _all_records() -> list[sm.MatchRecord]:
@@ -90,7 +77,7 @@ def _after_pick(paths, t) -> None:
     """Link the chosen files (a native dialog gave their real paths) and
     open the last one as the match."""
     if paths is None:
-        state.set_pick_err(t("lib_no_dialog"))
+        state.PICK_ERR.set(t("lib_no_dialog"))
         return
     added, errs = [], []
     for p in paths:
@@ -104,7 +91,7 @@ def _after_pick(paths, t) -> None:
             added[-1]["name"] if len(added) == 1 else t("lib_n_added", n=len(added))
         )
     if errs:
-        state.set_pick_err("  ".join(errs))
+        state.PICK_ERR.set("  ".join(errs))
 
 
 def _pick_file(t) -> None:
@@ -134,7 +121,7 @@ def _add_match(t) -> None:
 def _refresh(t, n: int) -> None:
     accounts = store.read_accounts()
     errs = {}
-    cfg = _steam_cfg(accounts)
+    cfg = _shared.steam_cfg(accounts)
     try:
         records = sources.list_matches("steam", cfg, n)
         known = {r.match_id for r in records}
@@ -167,36 +154,25 @@ def _show_import_error(t) -> None:
         st.error(t("lib_save_failed", err=st.session_state.pop("mt_import_err")))
 
 
-def _analyze_entry(entry: dict, accounts: dict) -> str | None:
-    """Parse a finished download right away and cache its per-match summary
-    for the resolved 'me' - the Matches table's numbers are ready without
-    opening the demo. None when 'me' is unknown (the ask card will show on
-    open) or the demo does not parse; never raises (one broken download
-    must not take the rest of a multi-download with it)."""
+def _analyze_entry(entry: dict, accounts: dict) -> None:
+    """Parse a finished download and cache its summary for the resolved 'me'. Never raises:
+    one broken demo must not stop a multi-download."""
     try:
         entry = store.get_demo(entry["id"]) or entry
         path = core.decompressed_demo(store.demo_path(entry), tag=entry["id"][:8])
         demo, _ = core.load_demo_cached(path)
         me_sid = core.matchstats.resolve_me(demo, entry, accounts)
-        if me_sid is None:
-            return None
-        if core.matchstats.read_cached(store.demo_path(entry)) is None:
-            stats = core.matchstats.compute(
-                demo, me_sid, played_at=core.matchstats.played_at_of(entry)
-            )
-            core.matchstats.write_cached(store.demo_path(entry), stats)
-        return me_sid
+        if me_sid is not None:
+            core.matchstats.ensure(demo, entry, me_sid)
     except Exception:  # noqa: BLE001 - a broken demo is reported by open, not here
-        return None
+        pass
 
 
 def _download(t, rec: sm.MatchRecord) -> None:
-    """The row's download, run AFTER the table drew its "Downloading…"
-    state: the cell stays busy for the whole transfer while the status +
-    progress line underneath tracks the real numbers. The finished demo is
-    analyzed on the spot, then opened (the summary is cached already)."""
+    """The row's download, run AFTER the table drew its "Downloading…" state; the demo is
+    analyzed, then opened."""
     accounts = store.read_accounts()
-    cfg = _steam_cfg(accounts)
+    cfg = _shared.steam_cfg(accounts)
     status = st.status(t("mt_dl_status"))
     bar = st.progress(0.0)
 
@@ -220,9 +196,6 @@ def _download(t, rec: sm.MatchRecord) -> None:
     else:
         status.update(label=t("mt_dl_done", name=entry["name"]), state="complete")
         st.session_state["_dl_done"] = entry["name"]
-        # straight into the match: opening it computes the summary, so the
-        # analysis starts right after the download instead of waiting for
-        # an extra click on the row
         shell.go_match(entry["id"])
     st.session_state.pop("mt_dl", None)
     st.rerun()
@@ -255,9 +228,8 @@ def _ask_multi_download() -> None:
 
 
 def _run_flagged_downloads(t, rows: list[core.MatchRow]) -> None:
-    """Download (and analyze) every selected match, one after another, with
-    one status box and one overall progress bar; the newest of them opens.
-    A failed demo is reported and does not stop the rest."""
+    """Download and analyze every selected match; the newest opens. A failed one is
+    reported and does not stop the rest."""
     if not st.session_state.pop("mt_dl_multi", None):
         return
     sel = _selected_rows(rows)
@@ -265,7 +237,7 @@ def _run_flagged_downloads(t, rows: list[core.MatchRow]) -> None:
         return
     st.session_state.pop(CHECKED, None)  # the rows flip to in-library anyway
     accounts = store.read_accounts()
-    cfg = _steam_cfg(accounts)
+    cfg = _shared.steam_cfg(accounts)
     status = st.status(t("mt_dl_multi_status", n=len(sel)))
     bar = st.progress(0.0)
     ok, skipped, errs, first = 0, 0, [], None
@@ -306,9 +278,7 @@ def _run_flagged_downloads(t, rows: list[core.MatchRow]) -> None:
         st.toast(t("mt_dl_multi_skip", n=skipped))
     if ok:
         st.session_state["_dl_multi_done"] = (ok, len(sel))
-        # the newest of the selected matches opens (the first row of the
-        # date-sorted selection that made it); every other download was
-        # analyzed above, its row carries the numbers
+        # the rows are date-sorted: the first is the newest
         shell.go_match(first["id"])
     st.rerun()
 
@@ -330,8 +300,7 @@ def action_of(t, row: core.MatchRow) -> str:
     if row.entry is not None:
         if row.missing:
             return t("act_locate")
-        # not analyzed yet: the click opens the match, which computes the
-        # summary on the way in (the demo is parsed there anyway)
+        # the click opens the match, which computes the summary
         return t("mt_open") if row.stats else t("act_analyze")
     if row.rec is None:
         return "—"
@@ -359,9 +328,7 @@ def _row_action(t, row: core.MatchRow) -> None:
         st.rerun()
         return
     if _wants_download(row):
-        # flag only: the render continues so THIS table draw already shows
-        # "Downloading…" in the cell; the download itself runs after the
-        # table (see render), keeping one render path and no remount
+        # flag only: THIS draw already shows "Downloading…", the download runs after it
         if store.find_by_match(row.rec.provider, row.rec.match_id) is not None:
             st.toast(t("mt_dl_exists"))
             return
@@ -508,8 +475,7 @@ def _filters(t, rows: list[core.MatchRow], now: datetime) -> list[core.MatchRow]
 # ------------------------------------------------------------------- table
 def _table(t, rows: list[core.MatchRow], empty: str = "") -> None:
     def _row_click(i: int) -> None:
-        # the component's trigger callback runs before the script: remember
-        # the row, the render below executes the action
+        # a trigger callback runs before the script: render executes the action
         st.session_state["mt_action_row"] = int(i)
 
     cells = {
@@ -524,8 +490,7 @@ def _table(t, rows: list[core.MatchRow], empty: str = "") -> None:
         "msrc": [_kind_disp(r.kind, t) for r in rows],
         "src_raw": [r.kind for r in rows],
         "mact": [action_of(t, r) for r in rows],
-        # the renderer's first click on a text column sorts ascending, so
-        # the raw date column carries NEGATIVE timestamps (newest first)
+        # a text column sorts ascending first: negative timestamps = newest first
         "date_sort": [-r.played_at.timestamp() if r.played_at else None for r in rows],
     }
     from ui import schema
@@ -536,8 +501,6 @@ def _table(t, rows: list[core.MatchRow], empty: str = "") -> None:
         key="mt_grid",
         on_click=_row_click,
         empty=empty,
-        # the checkbox column: only the rows that can be downloaded (a
-        # click on such a row would download it; the checkbox stacks them)
         checkable=[_wants_download(r) for r in rows],
         row_keys=[r.key for r in rows],
         checked=_checked_keys(),
@@ -608,12 +571,12 @@ def _notices(t) -> None:
     errors, freed space, pick warnings, added/downloaded toasts."""
     _show_import_error(t)
     errs = st.session_state.pop("mt_errs", None) or {}
-    _show_error(t, errs.get("steam"))
+    _shared.show_error(t, errs.get("steam"))
     if "mt_freed" in st.session_state:
         st.success(
             t("lib_freed", size=store.human_size(st.session_state.pop("mt_freed")))
         )
-    _pe = state.pop_pick_err()
+    _pe = state.PICK_ERR.pop()
     if _pe is not None:
         st.warning(_pe)
     if "_added" in st.session_state:
@@ -624,12 +587,12 @@ def _notices(t) -> None:
         ok, n = st.session_state.pop("_dl_multi_done")
         st.toast(t("mt_dl_multi_done", ok=ok, n=n))
     if "_dl_err" in st.session_state:
-        _show_error(t, st.session_state.pop("_dl_err"))
+        _shared.show_error(t, st.session_state.pop("_dl_err"))
     if "_dl_errs" in st.session_state:
         errs = st.session_state.pop("_dl_errs")
         st.error(t("mt_dl_multi_errs", ids=", ".join(str(m) for m, _k, _w in errs)))
         for _m, k, kw in errs[:3]:
-            _show_error(t, (k, kw))
+            _shared.show_error(t, (k, kw))
 
 
 def _title_row(t) -> None:
@@ -708,9 +671,8 @@ def render(ctx) -> None:
     limit = st.session_state.get("mt_limit") or PAGE_ROWS
     page_rows = kept[:limit]
     st.caption(t("mflt_shown", x=len(page_rows), y=len(rows)))
-    # a row click's action resolves BEFORE the table draws: a download
-    # only flags mt_dl here (no rerun), so this very render already shows
-    # "Downloading…" in the Action cell instead of the stale "Download"
+    # before the table draws: a download flags mt_dl, so this render already shows
+    # "Downloading…"
     i = st.session_state.pop("mt_action_row", None)
     if i is not None and 0 <= i < len(page_rows):
         _row_action(t, page_rows[i])

@@ -7,6 +7,11 @@ import pandas as pd
 
 from core.model import weapon_class
 
+__all__ = [
+    "Filters", "ROUNDS_PER_HALF", "apply_filters", "halves_from_sides", "pistol_rounds",
+    "round_bounds",
+]
+
 
 @dataclass
 class Filters:
@@ -39,17 +44,9 @@ ROUNDS_PER_HALF = 12
 
 
 def halves_from_sides(sides: dict, n_rounds: int) -> list[tuple[int, int]]:
-    """
-    Inclusive (lo, hi) round ranges of the halves (including every overtime
-    half), derived from the per-round sides: a half boundary is a round in
-    which (almost) every player with known sides swapped T<->CT. Returns []
-    when sides are missing or no full swap is found - the caller then falls
-    back to the MR12 assumption in round_bounds/pistol_rounds.
-
-    A pair of rounds is only compared when both are known AND consecutive:
-    with a gap (rounds without any events) the swap position is unknowable,
-    and guessing it would misplace the halves.
-    """
+    """Inclusive (lo, hi) round ranges of the halves: a boundary is a round where (almost)
+    every player swapped sides. [] when no full swap is found. Only consecutive known
+    rounds are compared: across a gap the swap position is unknowable."""
     if not sides:
         return []
     rounds = sorted(r for r in sides if isinstance(r, int) and r >= 1)
@@ -82,14 +79,8 @@ def halves_from_sides(sides: dict, n_rounds: int) -> list[tuple[int, int]]:
 
 
 def round_bounds(n_rounds: int, preset: str, halves=None) -> tuple[int, int]:
-    """
-    Inclusive 1-based round range of a preset for a match of `n_rounds`
-    rounds ('all', 'first', 'second', 'ot'). `halves` are the data-driven
-    (lo, hi) ranges from halves_from_sides; when given they define the
-    halves (MR15, overtime lengths and all), otherwise MR12 is assumed:
-    first half 1-12, second 13-24, overtime 25+. A preset beyond the match
-    gives an empty range (lo > hi) - the UI does not offer it.
-    """
+    """Inclusive round range of a preset ('all', 'first', 'second', 'ot') from `halves`,
+    else MR12 (1-12, 13-24, 25+). Beyond the match: an empty range (lo > hi)."""
 
     n = max(int(n_rounds), 1)
     if halves:
@@ -116,11 +107,7 @@ def round_bounds(n_rounds: int, preset: str, halves=None) -> tuple[int, int]:
 
 
 def pistol_rounds(n_rounds: int, halves=None) -> set[int]:
-    """
-    First round of each half incl. overtime halves. With `halves` from
-    halves_from_sides that is data-driven (MR15 -> {1, 16}); the MR12
-    fallback gives {1, 13, 25, ...}.
-    """
+    """First round of each half incl. overtime (MR12 without `halves`)."""
     if halves:
         return {lo for lo, hi in halves if lo <= max(int(n_rounds), 1)}
     return {
@@ -134,15 +121,8 @@ def apply_filters(
     hurts: pd.DataFrame | None = None,
     f: Filters | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
-    """
-    Boolean-index shots / duels / hurts by the global filter (copies back).
-
-    Every selection is optional: None/empty means 'no constraint'. Works on
-    the raw frames (shots_table / build_duels / demo.hurts) and on
-    duels_for() frames - 'my_side' and 'result' columns are used when
-    present; raw duels keep a row for the side filter when EITHER role
-    matches (each player's kills/deaths then keep the correct rows).
-    """
+    """Cut shots / duels / hurts by the filter; None/empty selections do not constrain. Raw
+    duels keep a row when EITHER role matches the side."""
 
     if f is None or f.empty():
         return (
@@ -154,8 +134,7 @@ def apply_filters(
     def _weapon_mask(df: pd.DataFrame) -> pd.Series | None:
         if "weapon" not in df.columns or not len(df):
             return None
-        # weapons and classes combine as a UNION: picking "rifles" plus a
-        # specific AWP shows both, not their intersection.
+        # weapons and classes combine as a UNION
         parts: list[pd.Series] = []
         if f.weapons:
             parts.append(df["weapon"].isin(f.weapons))
