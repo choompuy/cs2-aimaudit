@@ -172,7 +172,7 @@ def test_sanitizer() -> None:
 # ------------------------------------------------------------------ loader
 def test_loader() -> None:
     with _IconDir() as dest:
-        all_icons = icons.load()
+        all_icons = icons.bundle()
         check("load() returns the whole fixture", set(all_icons) == set(FIXTURE), set(all_icons))
         ak = icons.icon("ak47")
         check("icon() gives a base64 data URI",
@@ -192,11 +192,11 @@ def test_loader() -> None:
             fh.write("{not json")
         icons.reset_cache()
         check("a corrupt manifest answers None everywhere", icons.icon("ak47") is None)
-        check("a corrupt manifest makes load() empty", icons.load() == {})
+        check("a corrupt manifest makes bundle() empty", icons.bundle() == {})
     # an empty folder (icons not installed yet) is the same normal state
     with _IconDir(empty=True):
         check("an empty folder answers None", icons.icon("ak47") is None)
-        check("an empty folder makes load() empty", icons.load() == {})
+        check("an empty folder makes bundle() empty", icons.bundle() == {})
 
 
 # ------------------------------------------------------- weapons and cells
@@ -212,15 +212,21 @@ def test_weapons() -> None:
             ("planted_c4", "c4"),
             ("c4", "c4"),
             ("knife_karambit", "knife"),   # an exotic knife falls back to the plain one
-            ("bumpmine", None),            # explicitly no icon
+            ("bumpmine", None),            # no silhouette exists
             ("negev", None),               # not in the fixture
         ):
             got = icons.weapon_key(name)
             check(f"weapon_key({name!r}) == {want!r}", got == want, got)
-        info = icons.weapon_info("weapon_ak47")
-        check("weapon_info bundles key/uri/size/label",
-              info["key"] == "ak47" and info["uri"].startswith("data:") and info["label"] == "AK-47",
-              info)
+        check("weapon_label is localized", icons.weapon_label("weapon_ak47") == "AK-47")
+        check("bundle() is the whole set", set(icons.bundle()) == set(FIXTURE), set(icons.bundle()))
+        check("weapon_labels() names every weapon", icons.weapon_labels()["negev"] == "Negev")
+        for name, want in (
+            ("weapon_ak47", "ak47"), ("USP-S", "usp_silencer"), ("High Explosive Grenade", "hegrenade"),
+            ("C4 Explosive", "c4"), ("Karambit", "knife_karambit"), ("Some New Knife", "knife"),
+            ("", ""), (None, ""),
+        ):
+            got = icons.weapon_id(name)
+            check(f"weapon_id({name!r}) == {want!r}", got == want, got)
         vals, labels, ic = icons.weapon_cells(["ak47", "usp", "world", None])
         check("weapon_cells values are icon keys where they exist",
               vals == ["ak47", "usp_silencer", "world", ""], vals)
@@ -233,12 +239,9 @@ def test_weapons() -> None:
               p["ak47"][1:] == [100, 32], p["ak47"])
     # without the icon set: keys empty, labels still resolve (tooltips / text)
     with _IconDir(empty=True):
-        info = icons.weapon_info("weapon_ak47")
-        check("weapon_info without the set: no key/uri, label stays",
-              info["key"] == "" and info["uri"] == "" and info["label"] == "AK-47", info)
         vals, labels, ic = icons.weapon_cells(["ak47", "usp"])
         check("weapon_cells without the set: names as values, no icons",
-              vals == ["ak47", "usp"] and ic == {}, (vals, ic))
+              vals == ["ak47", "usp_silencer"] and ic == {}, (vals, ic))
         check("labels without the set still localize", labels == ["AK-47", "USP-S"], labels)
 
 

@@ -25,12 +25,6 @@ export default function (component) {
   };
   S.cleanup = cleanup;
 
-  const el = (tag, cls, text) => {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text != null) n.textContent = text;
-    return n;
-  };
   const fmtT = (sec) => {
     // before the freeze ends the clock is negative; a whole second shows once it is full
     if (sec < 0) return "-" + fmtT(Math.ceil(-sec));
@@ -45,7 +39,7 @@ export default function (component) {
   const WHY_GLYPH = { bomb: "\u{1F4A5}", defuse: "\u2702", elim: "\u2620", time: "\u23F1", surrender: "\u2691", hostage: "\u2691", draw: "\u2691" };
   const BOMB_GLYPH = { plant: "\u{1F4A3}", defuse: "\u2702", boom: "\u{1F4A5}" };
   // the icons of the same things (ui/icons.py): silhouettes in the CS2
-  // kill-feed style, delivered in d.icons for exactly this round
+  // kill-feed style, delivered in d.icons (the whole set)
   const WHY_ICON = { bomb: "bomb_explode", defuse: "defuse", elim: "skull", time: "hourglass" };
   const BOMB_ICON = { plant: "bomb", defuse: "defuse", boom: "bomb_explode" };
   // how the round ended, as a reason key: the demo's own when it has a
@@ -81,11 +75,6 @@ export default function (component) {
   const BOMB_WHITE = "#ffffff";
   // the ink of the map: the text colour, a little towards the background (pure
   // white on the dark art is harsh)
-  const hexOf = (h) => { const v = parseInt(String(h || "").replace("#", ""), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
-  const mixHex = (a, b, k) => {
-    const p = hexOf(a), q = hexOf(b);
-    return "#" + p.map((v, i) => Math.round(v * k + q[i] * (1 - k)).toString(16).padStart(2, "0")).join("");
-  };
   const INK = C.text && C.bg ? mixHex(C.text, C.bg, 0.92) : C.text;
 
   // an icon in the DOM: the SVG is never inlined - only its data URI, as
@@ -219,13 +208,9 @@ export default function (component) {
     full: svg('<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>'),
     unfull: svg('<path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/>'),
   };
-  const btn = (cls, ch, title, fn) => {
-    const b = el("button", "rr-sbtn " + (cls || ""));
+  const sbtn = (cls, ch, title, fn) => {
+    const b = btn("rr-sbtn " + (cls || ""), ICO[ch] ? null : ch, title, fn);
     if (ICO[ch]) { b.classList.add("ic"); b.innerHTML = ICO[ch]; }
-    else b.textContent = ch;
-    b.type = "button";
-    if (title) { b.title = title; b.setAttribute("aria-label", title); }
-    b.addEventListener("click", fn);
     return b;
   };
 
@@ -260,15 +245,15 @@ export default function (component) {
     if (i >= 0 && nx) setTriggerValue("rnd", nx[0]);
   };
 
-  const playBtn = btn("play", "play", lab.play || "play", () => {
+  const playBtn = sbtn("play", "play", lab.play || "play", () => {
     if (!playing && t >= winEnd() - 0.5) t = winStart();
     setPlaying(!playing);
   });
-  const rPrev = btn("", "prev", lab.round_prev || "previous round", () => gotoRound(-1));
-  const rNext = btn("", "next", lab.round_next || "next round", () => gotoRound(1));
-  const dPrev = btn("", "prev", lab.duel_prev || "previous duel", () => jumpDuel(-1));
-  const dNext = btn("", "next", lab.duel_next || "next duel", () => jumpDuel(1));
-  const exitBtn = btn("exit", "exit", lab.exit || "exit duel", () => exitDuel());
+  const rPrev = sbtn("", "prev", lab.round_prev || "previous round", () => gotoRound(-1));
+  const rNext = sbtn("", "next", lab.round_next || "next round", () => gotoRound(1));
+  const dPrev = sbtn("", "prev", lab.duel_prev || "previous duel", () => jumpDuel(-1));
+  const dNext = sbtn("", "next", lab.duel_next || "next duel", () => jumpDuel(1));
+  const exitBtn = sbtn("exit", "exit", lab.exit || "exit duel", () => exitDuel());
 
   // speed: ONE button showing the current speed; a menu with 0.1x..4x opens on
   // hover (mouse) or on click / tap / Enter (touch, keyboard), Escape closes it
@@ -344,17 +329,17 @@ export default function (component) {
   document.addEventListener("pointerdown", outside, true);
   disposers.push(() => { document.removeEventListener("pointerdown", outside, true); if (menuTimer) clearTimeout(menuTimer); });
 
-  const plBtn = btn("", lab.players || "players", lab.players_hide || "hide", () => {
+  const plBtn = sbtn("", lab.players || "players", lab.players_hide || "hide", () => {
     S.panel = !S.panel; applyPanel(); layout(); draw();
   });
-  const dpBtn = btn("", lab.duels || "duels", lab.duels_hide || "hide", () => {
+  const dpBtn = sbtn("", lab.duels || "duels", lab.duels_hide || "hide", () => {
     S.dpanel = !S.dpanel; applyPanel(); layout(); draw();
   });
   // the names on the map (the weapons stay)
-  const lbBtn = btn("", lab.labels || "names", lab.labels_hide || "hide", () => {
+  const lbBtn = sbtn("", lab.labels || "names", lab.labels_hide || "hide", () => {
     S.labels = !S.labels; applyPanel(); draw();
   });
-  const resetBtn = btn("", "reset", lab.view_reset || "reset view", () => resetView());
+  const resetBtn = sbtn("", "reset", lab.view_reset || "reset view", () => resetView());
   // Full screen: the HOST element goes full screen, not the player inside it - a
   // round switch replaces the player, and the browser would leave the mode.
   // Inside a shadow root document.fullscreenElement is the shadow host; the
@@ -389,7 +374,7 @@ export default function (component) {
   };
   host.addEventListener("toggle", onPop);
   disposers.push(() => host.removeEventListener("toggle", onPop));
-  const fullBtn = btn("full", "full", lab.full || "full screen", () => toggleFull());
+  const fullBtn = sbtn("full", "full", lab.full || "full screen", () => toggleFull());
   if (!host.requestFullscreen && !host.showPopover) fullBtn.style.display = "none";
   const onFull = () => {
     const on = isFull();
@@ -408,7 +393,7 @@ export default function (component) {
   const dLab = el("span", "rr-glab"), rLab = el("span", "rr-glab", (lab.round || "R") + " " + d.round);
   ctl.append(
     group("tr", playBtn,
-      btn("", "start", lab.restart || "restart", () => { setPlaying(false); t = winStart(); sync(); draw(); }),
+      sbtn("", "start", lab.restart || "restart", () => { setPlaying(false); t = winStart(); sync(); draw(); }),
       spdWrap, timeLab),
     group("rn", rPrev, rLab, rNext),
     group("dl", dPrev, dLab, dNext, exitBtn, lockChip),
@@ -1451,13 +1436,6 @@ export default function (component) {
   }
 
   // ---------- drawing --------------------------------------------------------------------------------------------------
-  const rgba = (hex, a) => {
-    const h = (hex || "").replace("#", "");
-    if (h.length !== 6) return "transparent";
-    const n = parseInt(h, 16);
-    return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
-  };
-
   // ---------- weapon icons on the canvas --------------------------------------------------
   // The silhouettes are TINTED through the alpha mask, never through the
   // file's own fill (grenades carry none and would stay black): the icon is

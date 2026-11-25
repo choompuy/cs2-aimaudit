@@ -6,7 +6,7 @@ import { JSDOM } from "jsdom";
 import fs from "fs";
 import path from "path";
 import assert from "assert";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -29,7 +29,9 @@ window.Element.prototype.getBoundingClientRect = function () {
   return { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 };
 };
 
-const mod = await import(pathToFileURL(path.join(here, "..", "..", "ui", "roundrep.js")).href);
+// the component is common.js + roundrep.js in one module, like ui/component.py builds it
+const asset = (name) => fs.readFileSync(path.join(here, "..", "..", "ui", name), "utf8");
+const mod = await import("data:text/javascript;base64," + Buffer.from(asset("common.js") + asset("roundrep.js")).toString("base64"));
 const triggers = [];
 const root = document.getElementById("root");
 const mount = (data) => mod.default({ data, parentElement: root, setTriggerValue: (k, v) => triggers.push([k, v]) });

@@ -168,10 +168,6 @@ def build_payload() -> dict:
         rounds=[{"n": i, "win": ["CT", "T", ""][i % 3], "why": ["defuse", "bomb", ""][i % 3]}
                 for i in range(1, 25)],
         thr=34.0,
-        weapon_info=ui_icons.weapon_info,
-        icon_of=lambda key: (
-            (lambda ic: [ic["uri"], ic["w"], ic["h"]] if ic else None)(ui_icons.icon(key))
-        ),
         labels={"players": "Players", "rounds": "Rounds", "locked": "Duel", "exit": "Exit duel",
                 "round_prev": "Previous round", "round_next": "Next round", "round": "Round",
                 "won_ct": "Counter-Terrorists won", "won_t": "Terrorists won",

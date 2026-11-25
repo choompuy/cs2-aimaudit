@@ -1,0 +1,96 @@
+:host { display: block; }
+.aa-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: inherit;
+  color: var(--text-primary);
+}
+.aa-sbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+.aa-sbtn:hover { color: var(--accent); border-color: var(--accent); }
+.aa-sbtn:focus-visible,
+.aa-chip:focus-visible,
+.aa-rd:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.aa-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  scrollbar-width: thin;
+}
+.aa-rd {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.aa-rd:hover { color: var(--accent); border-color: var(--accent); }
+.aa-rd.cur {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.aa-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  cursor: pointer;
+}
+.aa-chip.k { color: var(--positive); }
+.aa-chip.d { color: var(--negative); }
+.aa-chip:hover { border-color: var(--accent); }
+.aa-chip.cur {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.aa-pos {
+  flex: none;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

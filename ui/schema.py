@@ -55,7 +55,7 @@ def _load() -> dict:
         return tomllib.load(fh)
 
 
-def _translator():
+def translator():
     """The app's t(): the language lives in the registry key `lang`."""
     lang = None
     try:
@@ -97,7 +97,7 @@ def build_cols(table_id: str, *, all_columns: bool = False, t=None) -> list[Col]
     tbl = spec["table"][table_id]
     shown = tbl["columns"] if all_columns else tbl.get("basic", tbl["columns"])
     if t is None:
-        t = _translator()
+        t = translator()
     cols = []
     for col_id in shown:
         m = _merged(spec, table_id, col_id)

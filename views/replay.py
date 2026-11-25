@@ -16,7 +16,6 @@ import core
 import state
 import theme
 from context import get_round_outcomes, get_round_replay, get_timeline
-from ui import icons as ui_icons
 from ui.charts import PAL, style_figure
 from ui.format import duel_label, fmt_first, fmt_result, num
 from ui.roundrep import round_payload, round_replay
@@ -33,14 +32,6 @@ def _cut_at_death(tdf: pd.DataFrame, tick: int, tickrate: int):
         return tdf, None
     d_tick = int(tdf["tick"].to_numpy()[int(np.argmax(dead))])
     return tdf[tdf["tick"] <= d_tick], (d_tick - tick) / tickrate
-
-
-def _icon_of(key: str) -> list | None:
-    """A status icon as [data-uri, w, h] - the shape ui.round_payload's
-    icon_of wants (ui.icons.icon hands out a dict; a tiny adapter keeps
-    the payload builder free of icon-set internals)."""
-    ic = ui_icons.icon(key)
-    return [ic["uri"], ic["w"], ic["h"]] if ic else None
 
 
 def _key_runs(on: np.ndarray, xs: np.ndarray, row: int, tick_dur: float):
@@ -549,8 +540,6 @@ def _replay_fragment(ctx) -> None:
         ],
         thr=ctx.thr,
         sel=sel,
-        weapon_info=ui_icons.weapon_info,
-        icon_of=_icon_of,
         labels=_replay_labels(t, data),
         colors=_replay_colors(),
     )

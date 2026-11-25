@@ -3,21 +3,35 @@ Custom component glue shared by ui/table, ui/strip and ui/roundrep:
 declaring a component, wiring its event callback and rendering it with
 its payload (started as the roundrep/strip/table triplicate).
 
-No colours or texts here - the CSS/JS payloads stay in the owner modules.
+The front end of component X is ui/X.js + ui/X.css, with ui/common.js in front.
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
 from typing import Callable, Mapping
 
 import streamlit as st
 
 
-def declare(name: str, css: str, js: str):
+_HERE = Path(__file__).resolve().parent
+
+
+@lru_cache
+def _asset(name: str) -> str:
+    return (_HERE / name).read_text(encoding="utf-8")
+
+
+def _declare(name: str):
     # registered on every run on purpose: the registry lives in the Streamlit
     # runtime (AppTest and server restarts start with an empty one), and
     # re-registering an identical definition is cheap and idempotent
-    return st.components.v2.component(name, css=css, js=js)
+    return st.components.v2.component(
+        f"aimaudit_{name}",
+        css=_asset(f"{name}.css"),
+        js=_asset("common.js") + _asset(f"{name}.js"),
+    )
 
 
 def event_callback(
@@ -56,8 +70,6 @@ def event_callback_set(
 
 def render(
     name: str,
-    css: str,
-    js: str,
     *,
     key: str,
     data: Mapping,
@@ -74,7 +86,7 @@ def render(
     more than one kind of event (the table: row clicks AND the checkbox
     selection).
     """
-    comp = declare(name, css=css, js=js)
+    comp = _declare(name)
     kwargs: dict = {}
     if handler is not None:
         kwargs[f"on_{trigger}_change"] = event_callback(key, trigger, handler)
