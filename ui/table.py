@@ -1,22 +1,8 @@
-"""
-Universal data table: one component for every table in the app.
+"""Universal data table: one component for every table in the app.
 
-    data_table(rows, cols, key="ov_grid", selected=2, stripe=[...], on_click=cb)
-
-- bars are the *background* of a cell (not a slider inside it): a column opts
-  in with Col(bar="pct" | "rel");
-- clicking a header sorts "best value first", then reversed, then resets to
-  the original order (Col.best = "high" | "low" decides what "best" means);
-- a row click calls on_click(row_index) before the next script run (same
-  contract as the old st.dataframe on_select callbacks);
-- Col(grade=...) colours the value itself by quality, red -> text -> green,
-  from the tier tokens ("auto" = position inside the column, or fixed
-  thresholds); one mechanism for every column;
-- colours are CSS variables from theme/ (var(--accent) ...), never literals.
-
-Python builds the cell model (raw value, display text, bar fraction, tone);
-ui/table.js only sorts and draws it. Streamlit components v2 (>=1.51).
-"""
+Python builds the cell model (raw value, text, bar fraction, tone, grade), ui/table.js
+sorts and draws it. A header click sorts best first, then reversed, then resets; a row
+click calls on_click(row_index)."""
 
 from __future__ import annotations
 
@@ -43,16 +29,13 @@ class Col:
     sort: str | None = None  # rows[sort] -> raw value used for sorting
     tones: Mapping[str, str] | None = None  # badge colour by raw/display text
     sticky: bool = False
-    # rows[title_by] -> the label of an icon cell: its tooltip AND its text
-    # fallback when the icon set is not installed ("N/A" for no weapon)
+    # rows[title_by]: an icon cell's tooltip and text fallback
     title_by: str | None = None
-    # colour of the VALUE by quality, from tier tokens (bad -> poor -> mid -> text -> good -> elite):
-    #   None                  no colouring
-    #   "auto"                position inside this column (best value = greenest);
-    #                         "best" decides the direction, needs >= 3 distinct values
-    #   (bad, good)           linear between two fixed values; their order sets the direction
-    #   (bad, ok, good)       like above, but `ok` is the neutral text colour:
-    #                         below it the colour slides to red, above it to green
+    # colour of the VALUE by quality (tier tokens):
+    #   None            no colouring
+    #   "auto"          position inside this column (>= 3 distinct values)
+    #   (bad, good)     linear; the order sets the direction
+    #   (bad, ok, good) `ok` is the neutral text colour
     grade: str | tuple[float, ...] | None = None
 
 
@@ -150,9 +133,7 @@ def _num_cell(c: Col, src, col_max, col_rng) -> list:
 
 
 def _icon_cell(c: Col, rows: Mapping[str, Sequence], i: int, src) -> list:
-    """An icon cell: raw is the icon key (or the plain name when no icon
-    exists), disp is the localized name - the tooltip, and the visible
-    text when the icon set is missing ("N/A" for no weapon)."""
+    """An icon cell: raw is the icon key (or the name), disp the localized name."""
     name = "" if src is None else str(src)
     disp = (
         str(rows[c.title_by][i])
@@ -191,18 +172,11 @@ def table_payload(
     row_keys: Sequence[str] | None = None,
     checked: Collection[str] | None = None,
 ) -> dict:
-    """JSON-ready model of the table (pure function: unit-testable).
+    """JSON-ready model of the table.
 
-    ``icons`` is {icon key: [data-uri, w, h]} for every icon the icon-kind
-    cells of THIS table reference (ui/icons.py builds it); it travels with
-    the payload so the renderer can deduplicate and the SVG never lands
-    in the DOM as anything but an <img>/mask source.
-
-    ``checkable`` (one bool per row) adds the checkbox column: the rows
-    marked True get a checkbox, the header one toggles all of them at
-    once. Every checkable row needs a stable ``row_keys`` entry; the
-    current selection is ``checked`` (a set of those keys), and each
-    change reports the whole selection back through the "checked" event."""
+    ``icons``: {key: [data-uri, w, h]} the icon cells reference. ``checkable`` (one bool
+    per row) adds the checkbox column: ``row_keys`` identify the rows, ``checked`` is
+    the selection, reported back whole."""
     n = len(next(iter(rows.values()))) if rows else 0
     col_max = _rel_maxima(rows, cols)
     col_rng = _auto_ranges(rows, cols)

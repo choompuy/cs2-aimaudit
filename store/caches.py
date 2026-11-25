@@ -1,10 +1,5 @@
-"""
-The disk caches of the data folder: the parsed demos (pickle, pruned by
-an LRU byte budget), the per-match summary JSONs, and the storage
-report / clear actions of the Library-and-storage settings panel. Cache
-files are keyed by store.paths.parse_key (<demo id> or location + size
-+ mtime), so a replaced file never reads a stale cache.
-"""
+"""The disk caches: parsed demos (pickle, LRU byte budget), per-match summaries, the
+storage report and the clear actions."""
 
 from __future__ import annotations
 
@@ -36,13 +31,9 @@ __all__ = [
 
 
 def parse_key(path: str) -> str | None:
-    """
-    Disk-cache key of a demo file the app loads: <id8> or <id8>-<suffix>.
-    A copy in demos/ keys on its content id, an unpacked archive on its id plus
-    its own name (which holds the archive's size and mtime), any other file
-    (a linked plain .dem) on its location plus size and mtime - so a file that
-    was replaced on disk never gets a stale cache.
-    """
+    """Disk-cache key <id8>[-<suffix>]: a copy keys on its content id, an unpacked archive
+    on its id plus name, a linked file on location + size + mtime, so a replaced file
+    never gets a stale cache."""
     p = os.path.abspath(str(path))
     base = os.path.basename(p)
     folder = os.path.normcase(os.path.realpath(os.path.dirname(p)))
@@ -74,8 +65,7 @@ def read_parsed(path: str, code_ver: str):
         with open(f, "rb") as fh:
             obj = pickle.load(fh)  # our own file in our own data folder
     except Exception as e:  # noqa: BLE001 - truncated / from another build: reparse
-        # pickle.load may raise anything (Python docs: arbitrary exceptions
-        # from __setstate__) - the note records which cache was dropped and why
+        # pickle.load may raise anything
         log_note("cache", f"dropped unreadable parsed cache: {type(e).__name__}")
         _unlink_freed(f)
         return None
@@ -97,8 +87,7 @@ def write_parsed(path: str, code_ver: str, obj, max_bytes: int | None = None) ->
             pickle.dump(obj, fh, protocol=pickle.HIGHEST_PROTOCOL)
         os.replace(tmp, f)
     except (OSError, TypeError, pickle.PicklingError) as e:
-        # OSError = a full disk (the analysis itself keeps working); the
-        # pickling pair = obj suddenly unpicklable (a code change)
+        # a full disk / obj became unpicklable
         log_note("cache", f"parsed cache write failed: {type(e).__name__}")
         _unlink_freed(tmp)
         return False
@@ -134,10 +123,6 @@ def prune_parsed(max_bytes: int) -> int:
     return freed
 
 
-# The per-match summaries of the Matches table (core/matchstats.py builds
-# the content): one small JSON per demo next to the parsed cache, keyed the
-# same way (<parse_key>-<code version>.json) so a deleted demo or a code
-# change takes the cache with it.
 def _matchstats_file(path: str, code_ver: str) -> str | None:
     key = parse_key(path)
     if not key:

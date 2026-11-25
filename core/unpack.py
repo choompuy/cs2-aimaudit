@@ -1,11 +1,5 @@
-"""
-Compressed-demo handling: .bz2 / .gz / .zip (stdlib) and .zst (the
-optional zstandard package) archives are stream-decompressed into the
-data folder's cache/unpacked and cached there (never the system temp
-dir). A truncated or corrupt archive raises ValueError - the only
-exception shape the UI catches - and a half-written .part never
-survives a failure.
-"""
+"""Compressed demos (.bz2 / .gz / .zip / .zst), unpacked into the data folder's cache. A
+broken archive raises ValueError and leaves no .part behind."""
 
 from __future__ import annotations
 
@@ -74,27 +68,9 @@ def _unpack(ext: str, p: str, tmp: str) -> None:
 
 
 def decompressed_demo(path: str, tag: str | None = None) -> str:
-    # 68 lines, under the 80 cap: the per-format branches share the
-    # cache/verify/teardown sequence and read best as one unit.
-    """
-    Path to a plain .dem for `path`, decompressing transparently.
-
-    Demos are often delivered compressed: Valve serves .dem.bz2, FACEIT
-    .dem.gz, tournaments .zip. Supported: .bz2 / .gz / .zip (stdlib) and
-    .zst (needs the `zstandard` package). Inside a .zip the first *.dem
-    member (alphabetically) is used. The decompressed copy is cached in
-    cache/unpacked of the data folder (never the system temp dir) under a
-    name derived from the source name + size + mtime, so re-opening the same
-    archive does not decompress again. `tag` (the library id) is put into
-    that name so deleting a demo from the library also removes its unpacked
-    copy. Anything else is returned unchanged.
-
-    A truncated or corrupt archive raises ValueError (whatever the
-    decompressor throws - EOFError, BadZipFile, ZstdError, OSError...):
-    the UI only catches ValueError, and a raw traceback is not a friendly
-    message. A half-written .part is never left behind either - it can be
-    as large as the unpacked demo.
-    """
+    """Path to a plain .dem for `path`, decompressing transparently (the first *.dem of a
+    .zip). Cached under source name + size + mtime; `tag` (the library id) lets
+    delete_demo find the copy. Anything else is returned unchanged."""
 
     p = os.path.realpath(path)
     ext = os.path.splitext(p)[1].lower()

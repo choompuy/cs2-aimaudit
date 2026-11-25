@@ -1,20 +1,5 @@
-"""
-Match import: the facade the Matches page talks to.
-
-    sources.list_matches("steam", cfg, 5)         -> list[MatchRecord]
-    sources.fetch_demo(rec, cfg, progress=...)     -> library entry
-    sources.import_local(rec, path)                -> library entry
-    sources.read_cache("steam")                    -> cached records
-
-The page never builds transports or clients itself, so tests replace these
-functions (or the class under sources.steam) to run the whole UI without a
-network. Everything here is offline-safe: opening the page reads only the
-local cache (read_cache / cache_time); network calls happen on explicit
-actions.
-
-Layer: this package is a leaf like core/ - no Streamlit, no views/shell
-knowledge (enforced by tests/test_static.py). It may import store/ for paths.
-"""
+"""Match import: the only calls the pages make into the package. The network runs on
+explicit actions only; a leaf package (no Streamlit)."""
 
 from __future__ import annotations
 
@@ -74,9 +59,6 @@ def _live_transport() -> http.HttpTransport:
 
 
 # ------------------------------------------------------------ local cache
-# matches.json is the Matches page's local cache: opening the page reads it,
-# Refresh rewrites it. The helpers are pure store/model glue (no Streamlit)
-# so the Matches and Settings pages share them.
 def sorted_records(records: list[MatchRecord]) -> list[MatchRecord]:
     """By date, newest first; undated records keep to the end."""
     return sorted(

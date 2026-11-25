@@ -8,10 +8,6 @@ from ui import icons
 from ui import schema
 from ui.format import fmt_first, fmt_result
 
-# ~8 columns by default, "All columns" reveals the detail metrics and
-# the technical tick column; numbers carry their units; the opponent name
-# stays pinned when the full table scrolls horizontally.
-
 
 def _duel_flags(ddf: pd.DataFrame, t) -> list[str]:
     """The per-duel flag column: low confidence / noscope / smoke / ..."""
@@ -62,8 +58,6 @@ def _duel_cells(
 def _duels_grid(ctx) -> None:
     """The duel list table (row click opens the timeline window)."""
     t, ddf = ctx.t, ctx.my_duels
-    # the weapon column is a silhouette (ui/icons.py); the label is the
-    # tooltip and the plain-text fallback when icons are missing
     w_vals, w_labels, w_icons = icons.weapon_cells(ddf["weapon"])
     du_cells = _duel_cells(ddf, ctx.name_of, t, w_vals, w_labels)
     _tcol, _ = st.columns([1, 2])
@@ -71,9 +65,7 @@ def _duels_grid(ctx) -> None:
         du_full = st.toggle(t("all_columns"), key="du_full", persist_state="session")
 
     def _duel_click_row(i):
-        """Grid row click -> open that duel's chart window (see
-        views/replay.open_duel_dialog; it is called at the bottom of
-        the run)."""
+        """Open that duel's window (at the bottom of the run)."""
         if 0 <= i < len(ctx.my_duels):
             state.TL_DUEL.set(i)
             state.DU_OPEN.set(True)
@@ -95,9 +87,7 @@ def _duels_grid(ctx) -> None:
 
 
 def _zone_table(my_duels: pd.DataFrame, t) -> None:
-    """Duels by named map zone. The zone comes from the death event
-    (last_place_name at the kill tick); duels without a known zone
-    are skipped."""
+    """Duels by named map zone (at the kill tick; unknown zones are skipped)."""
     _zd = (
         my_duels[my_duels["my_zone"].astype(str).str.len() > 0]
         if len(my_duels)
@@ -183,8 +173,7 @@ def render(ctx) -> None:
     else:
         _duels_grid(ctx)
         _zone_table(ctx.my_duels, t)
-    # opening duels are independent of the player's own duels above:
-    # shown even when they have none.
+    # shown even when the player has no duels
     op = _openings_frame(ctx.openings, ctx.filters)
     if len(op):
         _openings_table(op, ctx.me, ctx.name_of, t)

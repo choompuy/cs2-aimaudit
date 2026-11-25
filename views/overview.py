@@ -7,11 +7,6 @@ import state
 from ui import icons
 from ui import schema
 
-# One table for both teams (Team column + subtle team tint); ~8 columns
-# by default, "All columns" adds the detail metrics; the selected
-# player's row is highlighted (★ + tint) and clicking any row selects
-# that player - same as the select box above.
-
 
 def render(ctx) -> None:
     """Draw the Overview page."""
@@ -42,8 +37,6 @@ def render(ctx) -> None:
     ov_sids = ov["sid"].tolist()
     sel_row = ov_sids.index(me) if me in ov_sids else None
 
-    # the icon columns: the weapon silhouettes themselves come from the
-    # icon set (ui/icons.py); the labels are the tooltips / text fallback
     bw_vals, bw_labels, bw_icons = icons.weapon_cells(ov["best_weapon"])
     dt_vals, dt_labels, dt_icons = icons.weapon_cells(ov["died_to"])
 

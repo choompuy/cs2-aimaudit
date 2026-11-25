@@ -1,17 +1,8 @@
-"""
-Native file dialogs for the demo library ("Choose demo file...").
+"""Native file dialogs: they give the REAL path of a demo, which a browser upload never
+does, so the library can link it.
 
-The app runs on the user's own machine, so a real Windows dialog can hand it
-the REAL path of a demo - something a browser upload never does. That is what
-lets the library link a demo instead of copying it.
-
-The dialog (tkinter, part of the standard Python installer) runs in a CHILD
-process: Streamlit executes the script on a worker thread, and Tk wants its
-own main thread. The child prints the chosen paths as JSON.
-
-Plain Python, no Streamlit, no app knowledge: callers get a list of paths
-(empty when the dialog was cancelled) or None when no dialog is available.
-"""
+tkinter runs in a CHILD process (Streamlit runs the script on a worker thread, Tk wants
+a main thread). Returns the paths, [] when cancelled, None when no dialog is available."""
 
 from __future__ import annotations
 
@@ -55,12 +46,8 @@ def _desktop_from_registry() -> str | None:
 
 
 def _initial_dir() -> str:
-    """A folder the dialog can actually open in. start.bat's portable mode
-    points the profile into data\\home, where ~/Desktop does not exist -
-    Windows then answers 'Location is not available' before the dialog
-    even shows. The real Desktop comes from the registry; the fallback is
-    the app folder (a folder that always exists, and store/ stays the
-    one module that knows locations)."""
+    """A folder the dialog can open in: portable mode points the profile into data\\home,
+    where ~/Desktop does not exist, so the real one comes from the registry."""
     return _desktop_from_registry() or os.getcwd()
 
 

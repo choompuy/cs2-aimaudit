@@ -1,14 +1,6 @@
-"""
-CS2-AimAudit — local CS2 demo analysis. Run: streamlit run app.py
+"""CS2-AimAudit — local CS2 demo analysis. Run: streamlit run app.py
 
-The entry point only: page config, theme, the run context and the page
-dispatcher. Navigation is native (shell.navigation registers the pages
-through st.navigation; the sidebar rail is st.page_link): a match is
-opened from the Matches list and the old analysis pages are its tabs.
-The shell (loading / context row / match header) is shell.py, the filter
-bar is filters_ui.py, the pages live in views/, the cached core calls
-and the shared Ctx in context.py.
-"""
+The entry point only: page config, theme, the run context and the page dispatch."""
 
 import functools
 import os
@@ -32,10 +24,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# The design system: CSS variables + overrides (theme/overrides.css) are
-# injected here once per run; charts and inline HTML read tokens through
-# theme.tok(); native widgets take their colours from .streamlit/config.toml,
-# which tools/sync_theme.py regenerates from the same theme/tokens.toml.
 theme.inject_theme()
 
 
@@ -57,9 +45,7 @@ def _app_version() -> str:
 
 
 # --------------------------------------------------------- the page bodies
-# app.py owns the dispatch (it may import views; shell must not, so the
-# import graph stays one-way). shell.navigation wraps each body in the
-# st.Page that records the running page in the registry key.
+# here and not in shell: shell must not import views
 def _page_dashboard(ctx) -> None:
     views.dashboard.render(ctx)
 
@@ -77,14 +63,11 @@ def _page_matches(ctx) -> None:
     shell.apply_match_url()
     if state.MATCH.get():
         if store.get_demo(state.MATCH.get()) is None:
-            # the match's demo left the library (deleted in Settings or by
-            # hand): show the list instead of blowing up
+            # the demo left the library: show the list
             state.MATCH.pop()
         else:
             _match(ctx)
             return
-    # the pages without a demo must open on an empty library; their filter
-    # widget states are re-assigned so nothing is lost on the way back
     views.matches.render(ctx)
 
 

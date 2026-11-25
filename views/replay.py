@@ -1,10 +1,4 @@
-"""
-The 2D replay page and the duel-breakdown dialog.
-
-_replay_fragment draws the whole round on the radar for every player
-(ui/roundrep.py); open_duel_dialog is the chart window a Duels row opens.
-Both read the run's Ctx.
-"""
+"""The 2D replay page and the duel window a Duels row opens."""
 
 import numpy as np
 import pandas as pd
@@ -46,10 +40,7 @@ def _key_runs(on: np.ndarray, xs: np.ndarray, row: int, tick_dur: float):
 
 
 def _signal_traces(fig, t, x, xs, speed, yaw, pitch, thr, unit) -> None:
-    """Speed / threshold / yaw / pitch lines (rows 1-3 of the figure).
-    One colour per ROLE, never reused across rows with another meaning:
-    speed = you (accent), yaw / pitch = their own hues, dashed yellow =
-    the moving threshold, keys by key group."""
+    """Speed / threshold / yaw / pitch lines (rows 1-3), one colour per role."""
     c_speed, c_thr = PAL["you"], theme.tok("warning")
     c_yaw, c_pitch = theme.tok("chart-4"), theme.tok("chart-3")
     fig.add_trace(
@@ -174,8 +165,7 @@ def _reference_lines(fig, r, xs, tick, tr, death_x, tick_dur, t, rows_n) -> None
             first_x = fx
     # x = 0 is the duel event - label it with the result, not "kill/death"
     for row_i in range(1, rows_n + 1):
-        # annotation kwargs only on the top row: passing annotation_position
-        # with no text still creates an (empty) annotation on every subplot
+        # annotation_position with no text still creates an empty annotation
         top = row_i == 1
         fig.add_vline(
             x=0, line_dash="dash", line_color=PAL["ctx"], row=row_i, col=1,
@@ -186,10 +176,8 @@ def _reference_lines(fig, r, xs, tick, tr, death_x, tick_dur, t, rows_n) -> None
                 x=first_x, line_dash="dot", line_color=c_thr, row=row_i, col=1,
                 **({"annotation_text": t("tl_first_shot"), "annotation_position": "top left"} if top else {}),
             )
-    # the death moment named on the chart (vermillion = bad); when it lands on
-    # the event tick the lines would overlap - for a death duel the event line
-    # already says "death", for a kill duel (a simultaneous trade) label the
-    # shared line with both
+    # when the death lands on the event tick the lines would overlap: a death duel
+    # already says "death", a trade labels the shared line with both
     if death_x is not None:
         if abs(death_x) > tick_dur:
             fig.add_vline(
@@ -217,10 +205,8 @@ def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
         if "speed" in tdf.columns
         else pd.Series(np.nan, index=tdf.index)
     )
-    # Yaw is shown as the turn relative to the aim at the event moment: the
-    # absolute angle is an arbitrary map direction (and the unwrapped value
-    # drifts past +-180), the turn is what matters. Pitch stays absolute -
-    # 0 is the horizon.
+    # yaw relative to the event moment (the absolute angle is arbitrary), pitch absolute
+    # (0 is the horizon)
     yaw_abs = np.degrees(np.unwrap(np.radians(tdf["yaw"].astype(float))))
     yaw = yaw_abs - yaw_abs[int(np.argmin(np.abs(xs)))]
     pitch = np.degrees(np.unwrap(np.radians(tdf["pitch"].astype(float))))
@@ -234,8 +220,7 @@ def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
         subplot_titles=[t("ch_speed"), t("ch_yaw"), t("ch_pitch")]
         + ([t("ch_keys")] if btn_cols else []),
     )
-    # the aim at the event moment (yaw) and the horizon (pitch): added BEFORE
-    # the traces so the data lines draw on top of them
+    # before the traces, so the data lines draw on top
     fig.add_hline(y=0, line_color=theme.tok("chart-grid"), row=2, col=1)
     fig.add_hline(
         y=0,
@@ -255,8 +240,6 @@ def _duel_figure(ctx, r, tdf: pd.DataFrame, tick: int, death_x):
     fig.update_yaxes(title_text=t("tl_ax_speed"), row=1, col=1)
     fig.update_yaxes(title_text=t("tl_ax_yaw"), row=2, col=1)
     fig.update_yaxes(title_text=t("tl_ax_pitch"), row=3, col=1)
-    # half-second ticks: whole seconds were too coarse to line a shot or a
-    # key press up with the curves above
     fig.update_xaxes(title_text=t("ch_x"), dtick=0.5, row=rows_n, col=1)
     style_figure(fig, height=760, margin=dict(t=60, r=10))
     fig.update_layout(
@@ -381,10 +364,8 @@ def _first_shot_keys(ctx, r, tdf, btn_cols) -> None:
 
 
 def _duel_dialog(ctx) -> None:
-    """A duel opened from the Duels table: the verdict and the chart.
-
-    Left/Right (the strip) walk all duels of the table without leaving the
-    window; a dialog is a fragment, so every step reruns only this window."""
+    """A duel of the table: the verdict and the chart. A dialog is a fragment, so the
+    strip's steps rerun only this window."""
     t = ctx.t
     demo = ctx.demo
     me = ctx.me
@@ -494,11 +475,7 @@ def _picked_duel(duels: list, pick, round_no: int) -> int:
 
 @st.fragment
 def _replay_fragment(ctx) -> None:
-    """2D replay: the whole round on the radar (ui/roundrep.py).
-
-    Everyone of both teams, every duel of every player; nobody is selected
-    or highlighted. The round bar under the timeline switches rounds (one
-    fragment rerun per switch)."""
+    """The whole round on the radar; the round bar switches rounds."""
     t = ctx.t
     demo = ctx.demo
     mtime = ctx.mtime
@@ -519,13 +496,10 @@ def _replay_fragment(ctx) -> None:
             st.info(t("rr_no_round"))
             return
 
-    # the duels of the round by the SAME window the replay plays: a kill can
-    # never show up under another round
+    # by the SAME window the replay plays
     duels = core.round_duels(ctx.duels_all, windows[int(round_no)], demo.tickrate)
     sel = _picked_duel(duels, st.session_state.get("rr_sel"), int(round_no))
 
-    # how every round ended: the demo's round_end when it has one, else read
-    # from the bomb events and the kills (core.round_outcomes)
     outcomes = get_round_outcomes(path, mtime)
     data["info"] = {**(data.get("info") or {}), **outcomes.get(int(round_no), {})}
     payload = round_payload(

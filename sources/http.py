@@ -1,16 +1,10 @@
-"""
-The HTTP client every source shares: urllib only, no third-party deps.
+"""The HTTP client every source shares (urllib only).
 
-Rules enforced here (see docs/ARCHITECTURE.md, "sources"):
-- AIMAUDIT_OFFLINE=1 makes every call fail fast with OfflineError;
-- https only, except Valve demo servers (http://replay<N>.valve.net/...),
-  whose URLs are additionally checked against the known replay pattern;
-- the User-Agent is the app name; credentials travel in headers, never URLs;
-- JSON calls retry on 429 (honouring Retry-After) and 5xx (backoff), at most
-  3 attempts, then raise a localized ProviderError;
-- downloads stream in chunks to <dest>.part and are renamed into place only
-  when complete; a cancel callback between chunks removes the .part.
-"""
+- AIMAUDIT_OFFLINE=1 fails every call with OfflineError;
+- https only, except Valve demo servers (http://replay<N>.valve.net/...);
+- credentials travel in headers, never URLs;
+- JSON calls retry on 429 (Retry-After) and 5xx, at most 3 attempts;
+- downloads stream to <dest>.part, renamed only when complete."""
 
 from __future__ import annotations
 
@@ -145,12 +139,8 @@ class HttpTransport:
         cancel=None,
         max_bytes: int = MAX_DEMO_BYTES,
     ) -> int:
-        """Stream `url` into `dest` via `dest + ".part"`; returns bytes written.
-
-        `progress(done, total)` fires per chunk (total is None without
-        Content-Length); `cancel()` is polled between chunks and aborts with
-        DownloadCancelled, removing the .part.
-        """
+        """Stream `url` into `dest`; returns the bytes written. `progress(done, total)`
+        fires per chunk, `cancel()` is polled between chunks (DownloadCancelled)."""
         _check_offline()
         _scheme_ok(url, demo=True)
         hdrs = {"User-Agent": USER_AGENT, **(headers or {})}

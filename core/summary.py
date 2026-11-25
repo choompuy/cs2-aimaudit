@@ -1,9 +1,5 @@
-"""
-Per-player and per-weapon summaries: the overview row every player gets
-(player_summary), the weapons grid (weapon_stats) and the hitgroup
-counts. K/D and opening rate are round structure (the Filters argument),
-shot/duel cells come from the already-filtered frames.
-"""
+"""Per-player and per-weapon summaries. K/D and opening rate are round structure (the
+Filters argument), shot/duel cells come from filtered frames."""
 
 from __future__ import annotations
 
@@ -29,10 +25,7 @@ __all__ = ["hitgroup_counts", "player_summary", "weapon_stats"]
 
 
 def _hurts_of(demo: Demo, me: str, hurts: pd.DataFrame | None = None) -> pd.DataFrame:
-    """
-    hurts rows caused by `me`; safe when the player_hurt event is absent.
-    `hurts` overrides demo.hurts (used by the global filter).
-    """
+    """hurts rows caused by `me`; `hurts` overrides demo.hurts."""
     h = demo.hurts if hurts is None else hurts
     if h is not None and "attacker_steamid" in getattr(h, "columns", []) and len(h):
         return h[h["attacker_steamid"] == me]
@@ -80,12 +73,8 @@ def _player_kd(
     if keep is not None and have_d:
         return int(kills_by.get(p_sid, 0)), int(deaths_by.get(p_sid, 0))
     if have_d:
-        # K/D like the in-game scoreboard: every ENEMY kill/death with
-        # any weapon (knife and grenades included), whole match. Duels
-        # above are gun-only, so the two must not be mixed.
-        # Static teams are fine here: teammates share the label before
-        # and after the halftime swap. World/suicide deaths have no
-        # known attacker and stay out, teamkills stay out both ways.
+        # K/D like the scoreboard: every ENEMY kill/death with any weapon. Static teams
+        # are fine here: teammates share the label on both halves.
         dth, teams = demo.deaths, demo.teams
         ta = dth["attacker_steamid"].map(teams)
         tu = dth["user_steamid"].map(teams)
@@ -174,13 +163,11 @@ def _player_row(demo: Demo, p, fr: _PlayerFrames, kills: int, deaths: int, thr: 
         "first_shot": (
             round((fs["first"] == "me").mean() * 100, 1) if len(fs) else np.nan
         ),
-        # first-shot accuracy: hit rate on first shots of
-        # engagements (crosshair placement quality)
+        # hit rate on first shots of engagements
         "first_acc": (
             round(fsh["hit"].mean() * 100, 1) if len(fsh) else np.nan
         ),
-        # opening-duel win rate: share of the rounds' first enemy
-        # kills won (killer vs victim)
+        # share of the opening duels won
         "open_rate": open_rate.get(p.sid, np.nan),
         "aim_err": (
             round(dd["my_err"].median(), 1)
@@ -204,17 +191,11 @@ def player_summary(
     hurts: pd.DataFrame | None = None,
     f: "Filters | None" = None,
 ) -> pd.DataFrame:
-    """
-    One row per player. Shot / duel metrics come from the (already
-    filtered) frames. K/D, opening rate and the impact numbers are round
-    structure: with `f` they follow its round range and side (per round,
-    so a halftime swap is handled), not the weapon / distance filters.
-    """
+    """One row per player. Round-structure numbers follow the round range and side of `f`,
+    not the weapon / distance filters."""
     res = []
     dth = demo.deaths
     have_d = len(dth) and {"attacker_steamid", "user_steamid"} <= set(dth.columns)
-    # opening-duel win rate (impact_stats): whole-match, like
-    # the K/D below - it is round structure, not a filterable shot metric
     open_rate = impact_stats(demo, f=f).set_index("sid")["open_rate"].to_dict()
     de = _enemy_kill_rows(demo) if have_d else pd.DataFrame()
     keep, kills_by, deaths_by, best_w, died_w = _kd_setup(demo, f, de, have_d)
@@ -254,8 +235,6 @@ def weapon_stats(
     )
     if len(sh):
         g["risky"] = sh.groupby("weapon")["_r"].mean() * 100
-        # first-shot accuracy per weapon: hit rate on the weapon's first
-        # shots of engagements (the AWP/USP number that matters);
         # NaN for weapons that only appear inside sprays
         fsh = sh[sh["first_shot"]]
         if len(fsh):

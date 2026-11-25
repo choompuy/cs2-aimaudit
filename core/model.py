@@ -1,7 +1,4 @@
-"""
-Constants, the Demo dataclass and pure helpers (weapons, angles,
-speed, first-shot windows). No parsing, no I/O.
-"""
+"""Constants, the Demo dataclass and pure helpers. No parsing, no I/O."""
 
 from __future__ import annotations
 
@@ -53,8 +50,7 @@ HITGROUPS = {
 }
 
 
-# Weapon classes (CS2 internal names after norm_weapon).
-# Everything unmapped is "other".
+# CS2 internal names after norm_weapon; everything unmapped is "other".
 WEAPON_CLASSES: dict[str, set[str]] = {
     "rifle": {"ak47", "m4a1", "m4a1_silencer", "famas", "galilar", "aug", "sg556"},
     "sniper": {"awp", "ssg08", "scar20", "g3sg1"},
@@ -80,9 +76,7 @@ WEAPON_TO_CLASS: dict[str, str] = {w: c for c, ws in WEAPON_CLASSES.items() for 
 
 
 # ------------------------------------------------------------- buttons
-# Named button props supported by demoparser2 (README props table).
-# LEFT/RIGHT are strafe A/D (IN_MOVELEFT/IN_MOVERIGHT), TURNLEFT/RIGHT are not
-# exposed as named props.
+# LEFT/RIGHT are strafe A/D
 BTN_NAMED = [
     "FORWARD",
     "LEFT",
@@ -95,8 +89,7 @@ BTN_NAMED = [
 ]
 
 
-# DUCK / JUMP are NOT exposed as named props -> decoded from the raw bitfield.
-# Bits follow Source IN_* button codes (see examples/buttons_bitfield).
+# not exposed as named props: decoded from the raw bitfield (Source IN_* codes)
 BTN_BITS = {"JUMP": 1 << 1, "DUCK": 1 << 2}
 
 
@@ -115,27 +108,20 @@ BUTTONS = [
 ]
 
 
-# Movement keys with the direction they push (deg relative to yaw).
-# Counter-strafing = tapping the key that pushes AGAINST your motion.
+# movement keys and the direction they push (deg relative to yaw)
 STRAFE_DIRS = {"FORWARD": 0.0, "LEFT": 90.0, "BACK": 180.0, "RIGHT": -90.0}
 
 
-# NOTE: velocity_X/velocity_Y are deliberately NOT requested. demoparser2
-# computes them as (prev sampled pos - prev-prev sampled pos) * 64 over the
-# REQUESTED tick rows (see its collect_data.rs::velocity_from_history), so with
-# a sparse tick list every real movement is inflated by the tick gap and every
-# spawn/respawn teleport becomes a 30k+ u/s spike. We compute speed ourselves
-# from positions (see _add_speed).
+# velocity_X/Y are NOT requested: demoparser2 derives them from the REQUESTED tick rows,
+# so a sparse tick list inflates every movement (see _add_speed).
 POS = ["X", "Y", "Z", "pitch", "yaw"]
 
 
-# m_bPawnIsAlive - lets us drop garbage rows around death/respawn (stale
-# button bits and frozen/teleporting positions of a dead pawn).
+# drops garbage rows of a dead pawn (stale buttons, frozen positions)
 ALIVE_PROPS = ["is_alive"]
 
 
-# Recoil punch angle (CCSPlayerPawn.m_aimPunchAngle): requested in addition to
-# POS; if the parser does not know the prop we fall back to a plain POS parse.
+# recoil punch; unknown to the parser -> a plain POS parse
 PUNCH_PROPS = ["aim_punch_angle"]
 
 
@@ -150,11 +136,8 @@ SIDE_PROPS = ["team_num"]  # m_iTeamNum per tick: the real per-round side
 
 
 # ------------------------------------------------- distance-aware risk model
-# Heuristic, NOT the real in-game spread table. Weapon inaccuracy grows with
-# speed, but whether it matters depends on distance to the enemy:
-#   dist <= SAFE_DIST   -> any speed is accepted (point-blank run-and-gun);
-#   dist >= STRICT_DIST -> only near-stationary shots (speed <= thr) are;
-#   in between          -> the accepted speed falls off linearly.
+# A heuristic, NOT the real spread table: any speed is accepted up to SAFE_DIST, only
+# speed <= thr from STRICT_DIST, linear in between.
 SAFE_DIST = 500.0
 
 
@@ -167,15 +150,12 @@ FULL_SPEED = 250.0  # ~ running speed with a rifle
 IMPOSSIBLE_SPEED = 350.0  # above this the speed data itself looks broken
 
 
-# Horizontal speed cap: real movement stays far below it (running ~250 u/s,
-# air-strafing a bit more); anything above is a teleport / respawn / dormancy
-# artifact in the position stream and becomes NaN.
+# above this a position delta is a teleport / respawn / dormancy artifact -> NaN
 MAX_SPEED = 600.0
 
 
-# weapon_fire and player_hurt normally share the tick; a hurt is attributed
-# to the shooter's latest same-weapon shot at most this many ticks earlier
-# (absorbs off-by-one/two without flagging earlier shots of the same burst).
+# a hurt belongs to the shooter's latest same-weapon shot at most this many ticks
+# earlier
 HIT_WINDOW = 3
 
 
@@ -183,10 +163,7 @@ MAX_DUEL_DIST = 10000.0
 
 
 # ------------------------------------------------- shot context
-# Per-shot context from server fields:
-# more than FLASH_SHOT_S of blindness left -> the shot counts as fired while
-# flashed; velo_modifier below SLOWED_MAX -> still slowed by recent damage;
-# round_second outside [0, ROUND_SEC_MAX] -> bad clock data -> NaN.
+# blindness left for a flashed shot, the slowed threshold, the valid round clock
 FLASH_SHOT_S = 0.5
 
 
@@ -196,42 +173,23 @@ SLOWED_MAX = 0.99
 ROUND_SEC_MAX = 300.0
 
 
-# First shot of an engagement: no shot by the same player in the previous
-# ENGAGE_GAP_TICKS (~350 ms at 64 tick) - the crosshair had time to leave
-# the target, so the next shot starts a fresh aim event. Spray follow-ups
-# inside the gap are recoil control, not aim.
+# first shot of an engagement: no shot by the player in this many ticks (~350 ms)
 ENGAGE_GAP_TICKS = 22
 
 
-# Pre-fire mouse window: usercmd deltas summed over the FLICK_WIN_TICKS
-# ticks (~250 ms) before a first shot = how much the mouse was moving when
-# the player committed.
+# mouse movement is summed over this many ticks (~250 ms) before a first shot
 FLICK_WIN_TICKS = 16
 
 
-# Trade window: a teammate avenging your death within this many seconds
-# counts as a trade (the usual community definition).
+# a death avenged by a teammate within this is a trade
 TRADE_S = 5.0
 
 
-# Eye / head heights (units, above the pawn origin). Crouching lowers both
-# by ~18 units; we scale linearly with duck_amount (0..1).
+# eye / head heights above the pawn origin; crouching lowers both by DUCK_DROP
 EYE_STAND, HEAD_STAND, DUCK_DROP = 64.0, 62.0, 18.0
 
 
-# Eye / head heights (units, above the pawn origin). Crouching lowers both
-# by ~18 units; we scale linearly with duck_amount (0..1).
-EYE_STAND, HEAD_STAND, DUCK_DROP = 64.0, 62.0, 18.0
-
-
-# Eye / head heights (units, above the pawn origin). Crouching lowers both
-# by ~18 units; we scale linearly with duck_amount (0..1).
-EYE_STAND, HEAD_STAND, DUCK_DROP = 64.0, 62.0, 18.0
-
-
-# Approximate horizontal size of the head hitbox (units). Used to express
-# the aim error in "head widths": 5° at 200 units is a miss, 5° at 2000
-# units can still be a headshot.
+# approximate head hitbox width (units): the aim error in "head widths"
 HEAD_WIDTH = 18.0
 
 
@@ -243,12 +201,7 @@ MIN_N_DUELS = 5
 
 
 def wilson_ci(k: float, n: float, z: float = 1.96) -> tuple[float, float]:
-    """
-    Wilson score interval (in %) for a binomial rate k/n.
-
-    With 8 duels a '62%' means almost nothing; a rate means little next
-    to its uncertainty. Returns (nan, nan) when n <= 0.
-    """
+    """Wilson score interval (%) of a binomial rate k/n; NaNs when n <= 0."""
 
     if n is None or k is None or n <= 0 or pd.isna(n) or pd.isna(k):
         return (float("nan"), float("nan"))
@@ -265,13 +218,8 @@ def wilson_ci(k: float, n: float, z: float = 1.96) -> tuple[float, float]:
 def rank_in_lobby(
     summary: pd.DataFrame, sid: str, col: str, best: str = "high"
 ) -> tuple[int, int] | None:
-    """
-    (position, n) of player `sid` in a summary column, 1 = best.
-
-    best='high' -> the largest value is the best (accuracy), best='low' ->
-    the smallest wins (risky shots). Players with NaN in `col` are skipped;
-    None when the player or the column is not there or nothing to compare.
-    """
+    """(position, n) of player `sid` in a summary column, 1 = best; NaN players are
+    skipped. None when there is nothing to compare."""
 
     if (
         summary is None
@@ -293,11 +241,8 @@ def weapon_class(w) -> str:
 
 
 def allowed_speed(dist, thr, safe=SAFE_DIST, strict=STRICT_DIST, vmax=FULL_SPEED):
-    """
-    Max speed (units/s) at which a shot at distance `dist` (units) is still
-    'acceptable'. Flat `vmax` at/below `safe`, `thr` at/above `strict`, linear
-    in between. NaN distance -> NaN (unknown, caller decides).
-    """
+    """Max acceptable speed of a shot at `dist`: vmax up to `safe`, thr from `strict`,
+    linear in between. NaN distance -> NaN."""
 
     scalar = np.ndim(dist) == 0
     d = pd.Series(np.asarray(dist, dtype=float).ravel())
@@ -346,12 +291,7 @@ def _round_col(df: pd.DataFrame) -> pd.Series:
 
 
 def _decode_buttons(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Derive DUCK/JUMP from the raw `buttons` bitfield (bits 2 and 1).
-
-    The bitfield max bit is 35 (IN_INSPECT), far below 2^53, so the
-    float64 conversion quirk that hits SteamIDs cannot corrupt it.
-    """
+    """DUCK / JUMP from the raw `buttons` bitfield (far below 2^53: float64 is safe)."""
 
     if "buttons" not in df.columns:
         return df
@@ -375,13 +315,8 @@ def _speed_from_positions(
 
 
 def _counter_strafe_tap(rt, rp) -> bool:
-    """
-    True when every held movement key (W/A/S/D) at the shot tick - or at
-    the tick before - pushed AGAINST the player's movement over that tick:
-    an active counter-strafe tap, not just releasing keys. False when
-    button data is missing, the player barely moved (no direction to
-    oppose) or the held keys are mixed (still steering).
-    """
+    """True when every held movement key at the shot tick (or the one before) pushed
+    AGAINST the movement: an active counter-strafe, not just releasing keys."""
 
     if rt is None or rp is None:
         return False
@@ -432,13 +367,8 @@ def _zone(v) -> str:
 
 
 def _row_round_sec(r) -> float:
-    """
-    Seconds into the live round at the row's tick.
-
-    round_second = game_time - round_start_time; round_start_time is the
-    freeze END, so this is play time without the buy time. NaN when the
-    fields are absent (old demos) or out of [0, ROUND_SEC_MAX].
-    """
+    """Seconds into the live round (freeze time excluded); NaN when the fields are absent
+    or the clock is bad."""
 
     gt = getattr(r, "game_time", None)
     rst = getattr(r, "round_start_time", None)
@@ -452,15 +382,8 @@ def _row_round_sec(r) -> float:
 
 
 def angle_err(a, t) -> float:
-    """
-    Angle (deg) between player a's view direction and player t's head.
-
-    Approximate heights: eyes = Z+64, head = Z+62; both drop by ~18u with
-    duck_amount when the parser provides it (crouch-aware). If recoil punch
-    angles are known for `a` they are ADDED to the view (bullet direction
-    ~= eye angles + aim punch), so `err` reflects where the bullet could
-    actually go, not just the pre-recoil crosshair.
-    """
+    """Angle (deg) between a's bullet direction (view + recoil punch) and t's head;
+    crouch-aware, approximate heights."""
 
     if a is None or t is None:
         return float("nan")
@@ -480,10 +403,7 @@ def angle_err(a, t) -> float:
 
 
 def head_ang(dist) -> float | np.ndarray:
-    """
-    Angular size (deg) of the head (HEAD_WIDTH wide) at `dist` units.
-    Scalar in, scalar out; Series/array in, array out; NaN for dist <= 0.
-    """
+    """Angular size (deg) of the head at `dist` units; NaN for dist <= 0."""
 
     d = np.asarray(dist, dtype=float)
     scalar = d.ndim == 0
@@ -516,29 +436,17 @@ class Demo:
     ticks: pd.DataFrame  # POS (+punch/alive) of all players at every gun-fire
     #                      tick AND tick-1; `speed` is our own position delta
     excluded: dict = field(default_factory=dict)
-    #                      rounds dropped before the live match: {warmup,
-    #                      knife_round, restart: round counts}
+    # excluded rounds: {warmup, knife_round, restart: count}
     tickrate: int = TICKRATE  # from the demo header (fallback: 64)
     sides: dict = field(default_factory=dict)  # round(1-based) -> sid -> T/CT
     totals: pd.DataFrame | None = None
-    #                      game kills_total / deaths_total per player,
-    #                      sampled at the last event tick (None when the
-    #                      parser or props are unavailable) - input of the
-    #                      data_checks scoreboard cross-check
+    # scoreboard kills / deaths per player at the last event tick (None: unknown)
     mouse: pd.DataFrame | None = None
-    #                      usercmd mouse deltas (|dx|+|dy| per tick) around
-    #                      first-shot windows, None when the demo/parser
-    #                      does not provide them - input of flick_move
+    # usercmd mouse deltas around the first-shot windows (None: not in the demo)
     round_windows: dict = field(default_factory=dict)
-    #                      {round: (t0, t1)} tick windows of the played
-    #                      rounds (build_round_windows) - input of the
-    #                      2D replay and the duels' round column
+    # {round: (t0, t1)} tick windows of the played rounds
     round_info: dict = field(default_factory=dict)
-    #                      {round: how it ended}: {"winner": 'CT'/'T'/'',
-    #                      "reason": see ROUND_REASONS, "end": tick of
-    #                      round_end | None, "bomb": [(tick, kind, sid)],
-    #                      "bomb_known": bool} - from the demo's round_end
-    #                      and bomb events (build_round_info)
+    # {round: how it ended}, see build_round_info
 
     def side_at(self, round_no: int, sid: str) -> str:
         """Player's side in a given round (falls back to the static team)."""
@@ -571,10 +479,8 @@ class Demo:
 
 # How a round ended (the key of Demo.round_info[n]["reason"]).
 ROUND_REASONS = ("bomb", "defuse", "elim", "time", "surrender", "hostage", "draw", "other")
-# Three spellings of the same thing: the `message` of a real round_end event,
-# the word demoparser2 puts into `reason` when it builds round_end itself (no
-# message then), and the numeric code (CS2: 1 bombed, 7 defused, 8 CT win,
-# 9 T win, 12 target saved).
+# Three spellings: the event's `message`, demoparser2's word in `reason` when it builds
+# round_end itself, and the numeric code.
 _REASON_BY_MESSAGE = (
     ("Target_Bombed", "bomb"),
     ("Bomb_Defused", "defuse"),
@@ -597,8 +503,7 @@ _REASON_BY_CODE = {
     17: "surrender",
     18: "surrender",
 }
-# demoparser2 0.42.2; the escape / VIP words (modes CS2 does not have) and
-# t_saved stay "other"
+# escape / VIP words and t_saved stay "other"
 _REASON_BY_WORD = {
     "bomb_exploded": "bomb",
     "bomb_defused": "defuse",
@@ -646,27 +551,12 @@ def build_round_windows(
     max_s: float = 180.0,
     marks=(),
 ) -> dict[int, tuple[int, int]]:
-    """
-    {round: (t0, t1)} tick windows of the played rounds, for the 2D replay.
+    """{round: (t0, t1)} tick windows of the played rounds.
 
-    ``freeze_ends`` are the sorted live round_freeze_end ticks (round i
-    starts at freeze_ends[i]); ``officially_ended`` the round_officially_ended
-    ticks - the win panel belongs to the round, so the tick BEFORE the one
-    falling inside a window is its end when present (on the tick itself
-    everybody is already respawned for the next round). ``events`` is a frame with ``tick``
-    and ``round`` (1-based, from total_rounds_played + 1).
-
-    A window without events is not a played round and is skipped. The round
-    NUMBER comes from the events inside the window, not the freeze index:
-    a demo starting mid-match keeps its numbers, and a kill after the round
-    ended (already counted in the next round) stays inside the window its
-    tick belongs to. Two windows claiming one number -> the later one gets
-    the next free number. End = officially_ended | last event + 5 s,
-    capped by the next freeze end - 1 and start + max_s. ``marks`` (ticks of
-    round_end / the bomb defused or exploded) count as events for that end
-    only: the LAST round of a match has no officially_ended, and a defuse
-    can come later than 5 s after the last shot.
-    """
+    Round i starts at freeze_ends[i]; it ends one tick before its round_officially_ended
+    (on that tick everybody is respawned), else 5 s after its last event / mark, capped
+    by the next freeze end and start + max_s. Windows without events are skipped. The
+    round NUMBER comes from the events inside (a demo may start mid-match)."""
     fe = sorted(int(x) for x in (freeze_ends or []))
     if not fe or events is None or not len(events):
         return {}
@@ -695,9 +585,7 @@ def build_round_windows(
         if not len(named):
             continue
         n0 = int(named.sort_values("_t")["_r"].iloc[0])
-        # this round's own officially_ended tick: pairing the two lists by
-        # position breaks whenever warmup/restart rounds shift one of them,
-        # so the tick is looked up inside the window itself
+        # looked up inside the window: pairing by position breaks on warmup / restarts
         cands = [o for o in off if start < o <= hard]
         if cands:
             end = max(min(cands) - 1, start + 1)
@@ -730,19 +618,10 @@ def build_round_info(
     bombs: Sequence[tuple[int, str, str]],
     bomb_known: bool = False,
 ) -> dict[int, dict]:
-    """
-    round -> how it ended, from the demo's own ``round_end`` rows
-    (columns tick / winner / reason / message) and the bomb events
-    [(tick, kind, sid)], kind in plant / defuse_start / defuse / boom.
-
-    A ``round_end`` belongs to the round whose window holds its tick (a row
-    past the last window - the match-ending surrender - belongs to nobody).
-    A round without a ``round_end`` (many demos do not carry the event, see
-    docs/DEMOPARSER_NOTES.md 12.1) gets winner '' and reason '' - the
-    result is then inferred from the bomb events and the kills
-    (core.round_outcomes). ``bomb_known`` says the demo reports bomb events
-    at all, so "no plant in this round" is a fact and not a blind spot.
-    """
+    """round -> how it ended, from the demo's ``round_end`` rows and bomb events [(tick,
+    plant / defuse_start / defuse / boom, sid)]. Without a ``round_end`` (many demos)
+    winner and reason are '' and round_outcomes infers them. ``bomb_known``: the demo
+    reports bomb events at all."""
     out: dict[int, dict] = {}
     ends: list[tuple[int, str, str]] = []
     if round_end is not None and len(round_end) and "tick" in round_end.columns:
@@ -772,19 +651,13 @@ def build_round_info(
 
 
 def _first_shot_arr(ticks, sids) -> np.ndarray:
-    """
-    Boolean array aligned to the inputs: True where the row is the FIRST
-    shot of an engagement for that player - no shot by the same sid within
-    the previous ENGAGE_GAP_TICKS ticks (~350 ms). A spray's
-    follow-up shots are recoil control; the fresh aim event is what the
-    flick analysis looks at. Rows may arrive in any order.
-    """
+    """True where a row is the player's FIRST shot of an engagement (no shot in the
+    previous ENGAGE_GAP_TICKS). Rows may arrive in any order."""
 
     n = len(ticks)
     if not n:
         return np.zeros(0, dtype=bool)
-    # plain numpy values: a filtered shots table carries a holey index and
-    # the fresh frame must not inherit it
+    # plain values: a filtered table carries a holey index
     d = pd.DataFrame(
         {
             "tick": np.asarray(pd.Series(ticks).astype(int)),
@@ -801,12 +674,7 @@ def _first_shot_arr(ticks, sids) -> np.ndarray:
 
 
 def _first_shot_windows(fires: pd.DataFrame) -> list[int]:
-    """
-    Sorted ticks covering the FLICK_WIN_TICKS window before every first
-    shot of an engagement in `fires` (gun shots, warmup already excluded)
-    - what the usercmd mouse parse is sampled on. Ticks below 0 (a first
-    shot right at the demo start) are clipped away.
-    """
+    """Sorted ticks of the FLICK_WIN_TICKS window before every first shot."""
 
     if (
         fires is None

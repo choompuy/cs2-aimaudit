@@ -1,15 +1,5 @@
-"""
-The parse phases load_demo walks through (core/loader.py orchestrates,
-this module does the work): the player table, the event frames, warmup
-and pre-live exclusion (knife rounds, restarts), the gun-event filter,
-the fire-tick table with speed and buttons, the mouse deltas, the
-scoreboard totals, and the round windows with how each round ended.
-
-Also here: the header tickrate and _parse_ticks_tiered (parse_ticks
-over prop-set tiers, so old demos and old parsers fall back instead of
-failing). Every phase may raise through to the caller; load_demo only
-orders them.
-"""
+"""The parse phases of load_demo (core/loader.py orchestrates): players, events, warmup /
+pre-live exclusion, the fire-tick table, mouse, totals, round windows."""
 
 from __future__ import annotations
 
@@ -51,14 +41,8 @@ __all__ = ["tickrate_from_header"]
 
 
 def tickrate_from_header(header: dict) -> int:
-    """
-    Tick rate from the demo header: playback_ticks / playback_time.
-
-    A hard-coded 64 is wrong for 128-tick demos (FACEIT and
-    community servers): every speed and every seconds<->ticks conversion
-    would be off by 2x. Falls back to 64 when the header is missing or
-    implausible (corrupt header, partial demo).
-    """
+    """playback_ticks / playback_time of the header (128-tick demos exist); 64 when missing
+    or implausible."""
 
     try:
         ticks = float(header.get("playback_ticks"))
@@ -78,14 +62,8 @@ def _parse_ticks_tiered(
     ticks,
     players: list | None = None,
 ):
-    """
-    parse_ticks over prop-set tiers: the first tier that parses wins.
-
-    Old demos and old parser versions choke on unknown props, so callers
-    order the tiers from the richest prop-set down to the bare POS
-    fallback. When every tier fails the LAST error is re-raised (that
-    message is what the user sees), matching the old inline loops.
-    """
+    """parse_ticks over prop-set tiers, richest first: the first that parses wins, the LAST
+    error is re-raised."""
     df = None
     last_err: Exception | None = None
     for props in tiers:
@@ -131,36 +109,23 @@ def _parse_players(p):
 
 
 def _parse_events_frames(p, flookup, name_to_sid):
-    """Phase 2: the event frames with steamids fixed in place.
-
-    Kept whole (75 lines, under the 80 cap): the tiered parse and the
-    id-fixing loops are one logical unit - a further split would only
-    pass four frames and two lookups through another helper.
-    """
+    """Phase 2: the event frames with steamids fixed in place."""
     _events = [
         "player_death",
         "weapon_fire",
         "player_hurt",
-        # round/match structure:
-        # begin_new_match marks the live-match start (FACEIT knife
-        # rounds sit before it), round_freeze_end bounds the rounds
+        # begin_new_match marks the live start, round_freeze_end bounds the rounds
         "begin_new_match",
         "round_freeze_end",
     ]
     _other = ["total_rounds_played", "is_warmup_period"]
     ev: dict | None = None
     last_ev_err: Exception | None = None
-    # shot/duel context: the named map zone of both players at
-    # every event (player=) plus the round clock (other=): round_second =
-    # game_time - round_start_time, where round_start_time is the freeze
-    # END (verified on real demos). Old parsers/demos may not know the
-    # fields - fall back step by step; the columns then stay absent
-    # and every consumer treats them as missing data, never as false.
+    # map zones (player=) and the round clock (other=); round_start_time is the freeze
+    # END. Parsers that do not know a field fall back step by step, the columns stay
+    # absent = unknown.
     for kw in (
-        # first choice also asks for the position (X/Y/Z) of both players
-        # at every event: the Map page draws kills / deaths from it. Old
-        # parsers that reject it fall through to the next step, the
-        # columns stay absent and the page says so.
+        # with the positions of both players (the Map page)
         {
             "player": ["last_place_name", "X", "Y", "Z"],
             "other": _other + ["game_time", "round_start_time"],
@@ -190,8 +155,7 @@ def _parse_events_frames(p, flookup, name_to_sid):
             (
                 ("attacker_steamid", "attacker_name"),
                 ("user_steamid", "user_name"),
-                # assists for the impact stats; the same float64/steamid
-                # collision rules apply as for the attacker column
+                # the same float64 steamid collisions as the attacker column
                 ("assister_steamid", "assister_name"),
             ),
         ),
@@ -308,12 +272,8 @@ def _keep_from_tick(deaths, fires, hurts, tick):
 
 
 def _knife_fallback(fe_rows, deaths, fires, hurts):
-    """No begin_new_match: knife fallback on the FIRST round segment.
-
-    Freeze_end-bounded when available, else the trp=0 rows. The gate is
-    strict - no gun shots and knife-only kills - so a pistol round is
-    never mistaken for a knife round.
-    """
+    """No begin_new_match: the FIRST segment is a knife round only with no gun shots and
+    knife-only kills, so a pistol round is never mistaken for one."""
     excluded: dict[str, int] = {"warmup": 0, "knife_round": 0, "restart": 0}
     if fe_rows:
         lo = fe_rows[0][0]
@@ -349,9 +309,7 @@ def _knife_fallback(fe_rows, deaths, fires, hurts):
 
 
 def _shift_first_round(deaths, fires, hurts, live_start, excluded) -> None:
-    """First live round must be round 1: when the counter kept counting the
-    excluded round (knife round without a begin_new_match restart), shift
-    total_rounds_played so the first remaining round is 0 (in place)."""
+    """Shift total_rounds_played in place when the counter kept counting the excluded round."""
     if live_start is None and not excluded["knife_round"]:
         return
     trp_min = None
@@ -370,16 +328,11 @@ def _shift_first_round(deaths, fires, hurts, live_start, excluded) -> None:
 
 
 def _exclude_preliminary(ev, deaths, fires, hurts, warmup_rows):
-    """Phase 3b: cut what precedes the live match and count why.
+    """Phase 3b: drop everything before the LAST begin_new_match (FACEIT knife / warmup
+    rounds are not flagged as warmup), else the knife fallback.
 
-    FACEIT-style demos open with a knife round (often followed by a warmup
-    round) that is NOT flagged is_warmup_period; the live match begins at
-    the LAST begin_new_match. Everything before that tick is dropped and
-    counted per cause for the UI banner. Fallback without the event: the
-    first round segment with zero gun fires and knife-only kills is the
-    knife round. Returns (deaths, fires, hurts, excluded, live_start,
-    fe_rows) with fe_rows = [(freeze_end_tick, is_warmup)].
-    """
+    Returns (deaths, fires, hurts, excluded, live_start, fe_rows) with fe_rows =
+    [(freeze_end_tick, is_warmup)]."""
     fe_rows, live_start = _round_bounds(ev)
 
     if live_start is not None and live_start > 0:
@@ -390,8 +343,7 @@ def _exclude_preliminary(ev, deaths, fires, hurts, warmup_rows):
     else:
         excluded = {"warmup": 0, "knife_round": 0, "restart": 0}
     if not fe_rows and any(warmup_rows.values()):
-        # warmup rows were dropped but there are no round boundary events:
-        # report the activity without pretending to know the round count
+        # no round boundaries: report the warmup without pretending to count rounds
         excluded["warmup"] = max(excluded["warmup"], 1)
     _shift_first_round(deaths, fires, hurts, live_start, excluded)
     return deaths, fires, hurts, excluded, live_start, fe_rows
@@ -400,8 +352,8 @@ def _exclude_preliminary(ev, deaths, fires, hurts, warmup_rows):
 def _filter_gun_events(players, deaths, fires, hurts):
     """Phase 4: gun-only fires and the hurts cleanup."""
     teams = dict(zip(players["sid"], players["team"], strict=True))
-    # NOTE: boolean-mask filtering an ALREADY-empty DataFrame drops all its
-    # columns in pandas ((0, n) -> (0, 0)), so every filter is guarded.
+    # boolean-mask filtering an ALREADY-empty DataFrame drops all its columns in pandas,
+    # so every filter is guarded
     if not fires.empty:
         fires = fires[fires["weapon"].map(is_gun)].copy()
         fires["weapon"] = fires["weapon"].map(norm_weapon)
@@ -423,14 +375,9 @@ def _filter_gun_events(players, deaths, fires, hurts):
 
 
 def _flash_left(p, td, flookup, name_to_sid, tickrate) -> pd.Series:
-    """Seconds of blindness LEFT on every row of ``td``.
-
-    flash_duration is not that number: the server writes the whole length of
-    the blindness at the flash and holds it there until the fade is over
-    (~1.4 times as long), so it only says THAT the player was flashed. What is
-    left is counted from the player_blind event the value came with. A value
-    without its event (the parser has none, another length) is unknown -> NaN.
-    """
+    """Seconds of blindness LEFT on every row of ``td``. flash_duration holds the whole
+    length until the fade is over, so the rest is counted from its player_blind event; a
+    value without its event is unknown -> NaN."""
     fd = pd.to_numeric(td["flash_duration"], errors="coerce")
     left = fd.where(fd <= 0).astype(float)
     rows = td.loc[fd > 0, ["tick", "steamid"]].dropna()
@@ -442,8 +389,7 @@ def _flash_left(p, td, flookup, name_to_sid, tickrate) -> pd.Series:
         ev = None
     need = {"tick", "user_steamid", "blind_duration"}
     if ev is None or not len(ev) or not need <= set(ev.columns):
-        # flashed shots exist and cannot be told from the fade: nothing is
-        # known (zeros alone would read as "0% flashed")
+        # flashed shots cannot be told from the fade: unknown, not "0% flashed"
         return pd.Series(float("nan"), index=td.index)
     start = pd.DataFrame(
         {
@@ -473,14 +419,9 @@ def _flash_left(p, td, flookup, name_to_sid, tickrate) -> pd.Series:
 
 
 def _parse_tick_table(p, fires, flookup, name_to_sid, header, say):
-    """Phase 5: the tick table at the fire ticks, with speed.
-
-    Positions / buttons / punch / duck / alive at every fire tick AND
-    tick-1, plus the flash/velo shooter state; returns (td, ticks_list,
-    tickrate).
-    """
-    # Fire ticks AND tick-1: the exact one-tick position delta gives the real
-    # speed at the moment of each shot without the parser's velocity props.
+    """Phase 5: positions / buttons / punch / shooter state at every fire tick and tick-1,
+    with speed. Returns (td, ticks_list, tickrate)."""
+    # tick-1 for the exact one-tick position delta
     fticks = {int(t) for t in fires["tick"]}
     ticks_list = sorted(fticks | {t - 1 for t in fticks if t > 0})
     say("ticks", n=len(fires))
@@ -505,11 +446,8 @@ def _parse_tick_table(p, fires, flookup, name_to_sid, header, say):
     td = _decode_buttons(td)
     td = _norm_alive(td)
     td = _extract_punch(td)
-    # shooter state at the fire ticks: flash_duration (the whole length of the
-    # blindness; _flash_left makes the seconds left of it) and velo_modifier
-    # (<1 = slowed by recent damage). A separate parse_ticks call: an unknown prop must not take the
-    # POS/buttons chain down with it (the buttons lesson). On
-    # failure the columns stay absent -> flags come out NA, not False.
+    # a separate call: an unknown prop must not take the POS/buttons chain down; on
+    # failure the flags come out NA, not False
     try:
         state = p.parse_ticks(["flash_duration", "velo_modifier"], ticks=ticks_list)
     except Exception:  # noqa: BLE001 - old parser / prop unavailable
@@ -538,11 +476,8 @@ def _parse_tick_table(p, fires, flookup, name_to_sid, header, say):
 def _parse_mouse(p, fires, flookup, name_to_sid):
     """Phase 6: usercmd mouse deltas around the first-shot windows
     (None -> flick_move comes out NA everywhere, never 0)."""
-    # usercmd mouse deltas around first-shot windows: a THIRD
-    # separate parse_ticks call - the rows must never merge into `td`
-    # (they would change the delta-position speed chain), and an unknown
-    # prop must not take anything down with it (the buttons lesson). None
-    # -> flick_move comes out NA everywhere, never 0.
+    # a separate call too: these rows must never merge into `td` (they would change the
+    # delta-position speed)
     mouse = None
     _mwin = _first_shot_windows(fires)
     if _mwin:
@@ -582,13 +517,8 @@ def _parse_mouse(p, fires, flookup, name_to_sid):
 def _parse_totals(p, deaths, fires, hurts, flookup, name_to_sid):
     """Phase 7: the game's own kills_total / deaths_total at the last
     event tick, for the data_checks cross-check (None on any failure)."""
-    # scoreboard aggregates: the game's own kills_total /
-    # deaths_total at the last event tick, for the data_checks
-    # cross-check. Verified on the real demos: the game updates them
-    # live (a kill is already counted at the tick of the last death of
-    # its round) and resets both at begin_new_match, so the sample is
-    # directly comparable to our live-only tables. Any failure ->
-    # totals stays None and the check reports a skip, never a guess.
+    # The game updates both live and resets them at begin_new_match, so the sample
+    # compares to our live-only tables. Any failure -> None, the check is skipped.
     totals = None
     _ev_max = [int(df["tick"].max()) for df in (deaths, fires, hurts) if len(df)]
     if _ev_max:
@@ -664,9 +594,8 @@ def _named_event_windows(deaths, fires, hurts):
 
 
 def _synthesize_round_bounds(win_ev, tickrate) -> list[int]:
-    """No round_freeze_end at all: synthesize the boundaries BETWEEN the
-    rounds the events name - a boundary inside one round's events would
-    split it into two windows claiming the same number."""
+    """No round_freeze_end: boundaries BETWEEN the rounds the events name (inside a round
+    they would split it in two)."""
     _named_ev = win_ev[win_ev["round"] >= 1]
     _bounds: list[int] = []
     _prev_last: int | None = None
@@ -681,12 +610,7 @@ def _synthesize_round_bounds(win_ev, tickrate) -> list[int]:
 
 
 def _build_rounds(p, deaths, fires, hurts, fe_rows, live_start, tickrate):
-    """Phase 8: the round windows for the 2D replay + how rounds ended.
-
-    Live freeze ends bound the rounds, round_officially_ended ends them
-    (the win panel is part of the round), the events' own round numbers
-    name them.
-    """
+    """Phase 8: the round windows and how rounds ended."""
     _roe = _round_mark_events(p)
     fe_live = sorted(
         t for t, w in fe_rows if not w and (live_start is None or t >= live_start)

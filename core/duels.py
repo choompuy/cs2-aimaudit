@@ -1,9 +1,4 @@
-"""
-Duel metrics: one row per enemy kill - the shots BOTH players fired in
-the window before it, aimed at each other, with the numbers measured at
-their first shots. build_duels builds the table, duels_for cuts it to
-one player's kills and deaths.
-"""
+"""Duel metrics: one row per enemy kill (build_duels), one player's duels (duels_for)."""
 
 from __future__ import annotations
 
@@ -192,8 +187,7 @@ def _duel_row(ctx: _DuelCtx, r, rd: int, s: DuelShots) -> dict:
         "thrusmoke": bool(getattr(r, "thrusmoke", False)),
         "attackerblind": bool(getattr(r, "attackerblind", False)),
         "penetrated": int(getattr(r, "penetrated", 0) or 0) > 0,
-        # context: when in the round and on which named zone
-        # the duel ended (kill-time values from the death event)
+        # when and where the duel ended (kill-time values)
         "round_sec": _row_round_sec(r),
         "killer_zone": _zone(getattr(r, "attacker_last_place_name", None)),
         "victim_zone": _zone(getattr(r, "user_last_place_name", None)),
@@ -220,14 +214,9 @@ def _duel_row(ctx: _DuelCtx, r, rd: int, s: DuelShots) -> dict:
 def build_duels(
     demo: Demo, window_s: float = 3.0, aim_deg: float = 30.0
 ) -> pd.DataFrame:
-    """
-    One row per enemy kill. 'Duel' = the shots both players fired in the
-    window before the kill *aimed at each other*: a shot counts only when
-    the shooter's crosshair was within `aim_deg` degrees of that opponent
-    (removes the noise of shooting someone else inside the window). Shots
-    without position data keep the old keep-them behaviour. `low_conf` marks
-    duels where either player also aimed at a different enemy in the window.
-    """
+    """One row per enemy kill with the shots both players fired in the window before it,
+    aimed within `aim_deg` of each other. Shots without positions are kept. `low_conf`:
+    either player also aimed at another enemy in the window."""
     ctx = _DuelCtx(demo, window_s, aim_deg)
     d = demo.deaths
     if not len(d) or "attacker_steamid" not in d.columns:
@@ -237,10 +226,8 @@ def build_duels(
         & d["user_steamid"].isin(demo.names)
         & (d["attacker_steamid"] != d["user_steamid"])
     ]
-    # duels are gun fights: knife / grenade / zeus / world / C4 kills have
-    # no shots to analyse (a mid-match knife kill is a real thing, and it
-    # must not appear as a "duel without shots"). Overview K/D still counts
-    # every enemy kill - player_summary reads demo.deaths directly.
+    # duels are gun fights: knife / grenade / zeus / world kills have no shots to
+    # analyse (the overview K/D still counts them)
     if "weapon" in d.columns and len(d):
         d = d[d["weapon"].map(is_gun)]
     out = []
@@ -248,9 +235,7 @@ def build_duels(
         k, v, t = r.attacker_steamid, r.user_steamid, int(r.tick)
         if demo.teams.get(k) == demo.teams.get(v):
             continue
-        # the round follows the demo's round windows (a post-round kill
-        # already counted in the next round still belongs to this one),
-        # total_rounds_played is the fallback when there are no windows
+        # a post-round kill already counted in the next round still belongs to this one
         rd = round_of_tick(getattr(demo, "round_windows", None) or {}, t)
         if rd is None:
             rd = _safe_int(getattr(r, "total_rounds_played", 0)) + 1

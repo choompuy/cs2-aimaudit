@@ -1,7 +1,4 @@
-"""
-Radar/map helpers, kill points and the tick-level timeline / duel /
-round replay data. Owns DemoParser.
-"""
+"""Radar helpers, kill points and the tick-level timeline / duel / replay data."""
 
 from __future__ import annotations
 
@@ -38,8 +35,7 @@ from core.openings import _enemy_kill_rows
 from core.phases import _parse_ticks_tiered, tickrate_from_header
 
 if TYPE_CHECKING:
-    # annotation-only (F821): kill_points' `f: "Filters | None"` resolves
-    # without another runtime import next to apply_filters above
+    # for the annotations only
     from core.filters import Filters
 
 __all__ = [
@@ -50,13 +46,7 @@ __all__ = [
 
 
 def _timeline_speed(df: pd.DataFrame, tickrate: int = TICKRATE) -> pd.DataFrame:
-    """
-    Own `speed` column for a contiguous tick window (timeline chart).
-
-    Adjacent rows are scaled by the real tick difference; gaps, teleports and
-    rows of a dead player are masked to NaN (a dead pawn's data is not real
-    input - the user-facing charts are cut at death instead).
-    """
+    """`speed` over a contiguous tick window; gaps, teleports and dead rows are NaN."""
 
     df = df.copy()
     if "speed" not in df.columns:
@@ -77,13 +67,8 @@ RADAR_SIZE = 1024  # awpy-data radars are square; calibration is for this size
 
 
 def radar_roots() -> list[str]:
-    """
-    Folders that may hold radar data (a map_data.json plus the images, in
-    `<root>/radars/` or `<root>` itself), best first: $AIMAUDIT_RADAR_DIR, then
-    <data folder>/radars (written by start.bat / tools/fetch_radars.py). Nothing
-    outside the app folder is searched, so deleting the folder leaves no
-    radars (or anything else) behind. The app itself never downloads anything.
-    """
+    """Folders that may hold radars, best first: $AIMAUDIT_RADAR_DIR, then the data folder.
+    Nothing outside the app folder, nothing is downloaded."""
     roots: list[str] = []
     env = os.environ.get("AIMAUDIT_RADAR_DIR")
     if env:
@@ -116,13 +101,8 @@ def _radar_png(root: str, name: str) -> str | None:
 
 
 def load_radar(map_name: str) -> dict | None:
-    """
-    Radar of a map: {"png", "lower_png", "size", "pos_x", "pos_y", "scale",
-    "lower": (z_min, z_max) | None}, or None when no root has both the
-    calibration (map_data.json) and the image. `lower` is the altitude
-    range of the lower level of a two-level map (Nuke, Vertigo) and is
-    only set when its image exists as well.
-    """
+    """Radar of a map: {"png", "lower_png", "size", "pos_x", "pos_y", "scale", "lower":
+    (z_min, z_max) | None}, or None without calibration or image."""
     if not map_name:
         return None
     for root in radar_roots():
@@ -195,17 +175,8 @@ KILL_POINT_COLS = [
 
 
 def kill_points(demo: Demo, me: str, f: "Filters | None" = None) -> pd.DataFrame:
-    """
-    Every enemy kill and death of player `me` (any weapon, like the K/D)
-    with both positions, for the Map page. `result` is "kill" or "death",
-    `my_*` is where `me` stood, `opp_*` where the opponent stood;
-    `distance` is computed from the two positions (game units, the same
-    scale as the shot distances). The global filter applies as everywhere:
-    round range, side (me in that round), weapon / class, distance.
-    Rows without the player's own position are dropped, a missing opponent
-    position stays NaN. Empty frame (with the columns) when the demo's
-    kill events carry no positions.
-    """
+    """Every enemy kill and death of `me` with both positions, cut by the global filter.
+    Rows without my position are dropped; an empty frame when the demo has no positions."""
     empty = pd.DataFrame(columns=KILL_POINT_COLS)
     de = _enemy_kill_rows(demo)
     need = {f"{who}_{ax}" for who in ("attacker", "user") for ax in ("X", "Y")}
@@ -296,8 +267,7 @@ def timeline_data(
     return df.sort_values("tick").reset_index(drop=True), missing
 
 
-# What the replay shows besides position / health: the economy of every
-# player (armor, helmet, defuse kit, money, gear value, inventory, defusing).
+# what the replay shows besides position / health
 ECONOMY_PROPS = [
     "armor_value",
     "has_helmet",
@@ -353,9 +323,7 @@ def _round_frames(parser, lo: int, hi: int, max_samples: int):
 
 
 def _round_events(demo: Demo, lo: int, hi: int):
-    """The round's shots / kills / hits (tick window, not the round column:
-    the window is already the round). Hits cover EVERY pair of the round -
-    the replay shows the whole round, teammate trades included."""
+    """Shots / kills / hits of the window; hits cover EVERY pair of the round."""
     fires, deaths, hurts = demo.fires, demo.deaths, demo.hurts
     out_shots: list[tuple[int, str, str]] = []
     s = _events_in_window(fires, lo, hi, {"tick", "weapon"})
@@ -388,10 +356,7 @@ def _round_events(demo: Demo, lo: int, hi: int):
 
 
 def _kd_before(demo: Demo, lo: int) -> dict[str, list[int]]:
-    """Kills / deaths of every player in the match BEFORE tick ``lo`` (the
-    start of the replayed round): {sid: [kills, deaths]}. A kill is an
-    enemy kill - suicides, world deaths and team kills do not count (the
-    replay panel adds the round's own kills on top, by the same rule)."""
+    """{sid: [enemy kills, deaths]} of the match BEFORE tick ``lo``."""
     out: dict[str, list[int]] = {}
     deaths = getattr(demo, "deaths", None)
     if deaths is None or deaths.empty or "tick" not in deaths.columns:
@@ -408,19 +373,14 @@ def _kd_before(demo: Demo, lo: int) -> dict[str, list[int]]:
     return out
 
 
-# the replay of a round: from REPLAY_LEAD_S before the freeze ends (everybody still
-# stands) to REPLAY_TAIL_S after the round is decided
+# seconds shown before the freeze ends / after the round is decided
 REPLAY_LEAD_S = 2.0
 REPLAY_TAIL_S = 5.0
 
 
 def _replay_span(demo, round_no, windows, lo, hi, tickrate) -> tuple[int, int]:
-    """The ticks the replay shows of the round window (lo, hi).
-
-    The lead never reaches into the round before; the tail is the same for
-    every round (the demo's own runs 5-11 s) but keeps every kill and bomb
-    event of the window, with a second after it.
-    """
+    """The ticks the replay shows: a lead that never reaches into the round before, and one
+    tail length that keeps every kill and bomb event plus a second."""
     t0 = lo - int(REPLAY_LEAD_S * tickrate)
     t0 = max([t0, 0, *(int(w[1]) + 1 for n, w in windows.items() if n != round_no and w[1] < lo)])
     info = (getattr(demo, "round_info", None) or {}).get(round_no) or {}
@@ -442,31 +402,12 @@ def round_replay_data(
     max_samples: int = 2400,
     max_s: float = 180.0,
 ):
-    """
-    Tick-level data of the WHOLE round for the 2D replay: every player
-    of both teams, their positions / view / HP / weapon / keys, plus the
-    round's shots, kills and hits.
+    """Tick-level data of the WHOLE round for the 2D replay (ui.roundrep.round_payload).
 
-    The span is the demo's own round window (demo.round_windows, built by
-    build_round_windows) with a short lead before the freeze ends and one
-    length of tail (_replay_span); ``start`` is the tick the round clock
-    counts from (the end of the freeze). A round that cannot be placed raises
-    ValueError("no_round_data"). Frames are sampled on a uniform grid
-    (<= max_samples points, the UI interpolates) and ffilled per player
-    like the timeline. Returns a dict for ui.roundrep.round_payload:
-
-    {"t0", "t1", "start", "step", "tickrate", "round", "frames": {sid: df},
-     "keys": [available key names], "shots": [(tick, sid, weapon)],
-     "kills": [(tick, attacker, victim, weapon, hs)],
-     "hits": [(tick, attacker, victim)],
-     "kd0": {sid: [kills, deaths]} of the match before the round,
-     "info": how the round ended (Demo.round_info[round])}
-    (hits cover EVERY pair of the round - the replay shows the whole
-    round, teammate trades included). The frames also carry the economy
-    when the parser has it: armor_value, has_helmet, has_defuser,
-    balance (money), current_equip_value, inventory, is_defusing
-    (ECONOMY_PROPS).
-    """
+    Frames ({sid: df}) are sampled on a uniform grid (<= max_samples points) and ffilled
+    per player; ``start`` is the end of the freeze; ECONOMY_PROPS ride along when the
+    parser has them. Raises ValueError("no_round_data") for a round that cannot be
+    placed."""
     windows = getattr(demo, "round_windows", None) or {}
     round_no = int(round_no)
     if round_no not in windows:
@@ -479,8 +420,7 @@ def round_replay_data(
 
     t0, hi = _replay_span(demo, round_no, windows, lo, hi, tickrate)
     frames, step, keys = _round_frames(DemoParser(demo.path), t0, hi, max_samples)
-    # no lead where the demo has nothing before the round (moved by whole steps:
-    # the frames lie on this grid)
+    # no lead where the demo has nothing before the round (whole steps: same grid)
     seen = [int(f["tick"].min()) for f in frames.values() if len(f)]
     if seen:
         t0 += max(0, (min(lo, *seen) - t0) // step) * step
@@ -503,9 +443,7 @@ def round_replay_data(
 
 
 def _events_in_window(events, lo: int, hi: int, need: set):
-    """An event frame cut to the [lo, hi] tick window, or None when the
-    frame is absent/empty or misses columns (old demos) - the guard every
-    round-event block repeats."""
+    """An event frame cut to [lo, hi]; None when absent or columns are missing."""
     if events is None or not len(events) or not need <= set(events.columns):
         return None
     return events[events["tick"].between(lo, hi)]
@@ -545,8 +483,7 @@ def _duel_entry(r, t0: int, t1: int, tk: int, tr: int) -> dict:
     a = max(t0, start - int(0.75 * tr))
     return {
         "a": a,
-        # the duel ends just past the kill: the kill tick plus a one-second
-        # tail so the moment itself (and the body drop) is inside the segment
+        # a one-second tail keeps the kill and the body drop inside the segment
         "b": min(t1, max(tk + tr, a)),
         "tick": tk,
         "killer": str(r.killer),
@@ -556,8 +493,7 @@ def _duel_entry(r, t0: int, t1: int, tk: int, tr: int) -> dict:
         "dur": _row_rnd(r, "duration_s", 2),
         "dist": _row_rnd(r, "distance", 0),
         "first": str(getattr(r, "first", "") or ""),
-        # kill modifiers for the icons (wallbang / noscope / through
-        # smoke / a flashed attacker), when the demo carries them
+        # kill modifiers, when the demo carries them
         "ns": _row_flag(r, "noscope"),
         "sm": _row_flag(r, "thrusmoke"),
         "bl": _row_flag(r, "attackerblind"),
@@ -576,22 +512,11 @@ def _duel_entry(r, t0: int, t1: int, tk: int, tr: int) -> dict:
 def round_duels(
     duels: pd.DataFrame, window: tuple[int, int], tickrate: int
 ) -> list[dict]:
-    """
-    EVERY duel of every player inside a round window (one entry per kill
-    of a gun fight), earliest first - the right-hand list of the 2D replay.
+    """EVERY gun duel inside a round window, earliest first.
 
-    ``duels`` is core.build_duels' frame; a duel belongs to the round whose
-    window holds the kill tick (the same window the replay plays), never to
-    a round number read from another column. ``a``/``b`` bracket the
-    segment the replay locks to: from the first shot of EITHER duelist
-    (minus a short pre-roll to see the approach) up to the kill itself -
-    the duel is over a second after one of them kills, clamped to the round.
-
-    Besides who killed whom the entry carries the per-duelist numbers the
-    duels table already measured at the FIRST SHOT of each side (speed,
-    aim error, how many shots, the first-shot tick; k* = killer, v* =
-    victim) so the replay can state them next to the live curves.
-    """
+    A duel belongs to the window that holds its kill tick. ``a``/``b`` bracket the
+    segment the replay locks to (first shot minus a pre-roll .. kill plus tail); k* / v*
+    are the killer's / victim's numbers at their first shots."""
     if duels is None or not len(duels) or "tick" not in duels.columns:
         return []
     t0, t1 = int(window[0]), int(window[1])
@@ -614,9 +539,7 @@ def _telemetry_prep(f: pd.DataFrame, ticks: np.ndarray, step: int) -> pd.DataFra
 
 
 def _telemetry_series(me: pd.DataFrame, foe: pd.DataFrame, dt_s: float) -> dict:
-    """One duelist's live series: speed (position delta, NaN on gaps /
-    teleports / a dead pawn), turn (deg/s of the view vector), the
-    crosshair-to-enemy-head angle and the distance between them."""
+    """One duelist's series: speed, turn (deg/s), angle to the enemy's head, distance."""
     x, y = me["X"].to_numpy(float), me["Y"].to_numpy(float)
     sp = np.hypot(np.diff(x), np.diff(y)) / dt_s
     yaw = me["yaw"].to_numpy(float)
@@ -671,26 +594,11 @@ def duel_telemetry(
     step: int,
     tickrate: int,
 ) -> dict:
-    """
-    Live aim numbers of one duel for the replay: both duelists' speed, how
-    fast the crosshair turns, and the angle between the crosshair and the
-    ENEMY'S HEAD, plus the distance between them - one value per replay
-    sample inside ``window`` (``t0``/``step`` are the replay grid, so the
-    UI indexes by sample).
+    """Live aim numbers of one duel, one value per replay sample inside ``window``
+    (``t0``/``step`` are the replay grid).
 
-    fa / fb are the players' frames on that grid (X, Y, Z, pitch, yaw,
-    is_alive, DUCK when the parser has it). Same rules as the timeline:
-    speed is the position delta (NaN on gaps, teleports, a dead pawn);
-    ``turn`` is deg/s of the view vector (yaw scaled by cos(pitch) + pitch);
-    ``err`` is the crosshair-to-head angle with eyes/head heights of a
-    standing (or ducking) player. Recoil punch is NOT in these frames, so
-    ``err`` is the pre-recoil crosshair - the table's per-duel number at
-    the first shot includes the punch.
-
-    Returns {"i0": first sample index, "a"/"b": {"sp", "tn", "er"}, "d": [...]}
-    (lists of ints / 1-decimal floats, None for NaN) or {} when there is
-    nothing to show.
-    """
+    ``err`` is the pre-recoil crosshair: punch is not in these frames. Returns {"i0",
+    "a"/"b": {"sp", "tn", "er"}, "d"} (None for NaN) or {}."""
     step = max(int(step), 1)
     if fa is None or fb is None or not len(fa) or not len(fb):
         return {}

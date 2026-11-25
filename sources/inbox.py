@@ -1,12 +1,5 @@
-"""
-The CS2 replays folder (Watch -> Your Matches) as a match source.
-
-The folder is found through the Steam registry key plus libraryfolders.vdf,
-or a manual override. Every .dem with a .dem.info sidecar becomes a record
-with the state "on disk"; the sidecar's demo url pins the real match id.
-
-Pure filesystem access: no network, no credentials.
-"""
+"""The CS2 replays folder (Watch -> Your Matches) as a match source: found through the
+Steam registry key plus libraryfolders.vdf, or set by hand. Files only."""
 
 from __future__ import annotations
 

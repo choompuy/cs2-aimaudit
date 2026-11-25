@@ -1,10 +1,4 @@
-"""
-The match-import data model: records, demo states, configs, errors.
-
-Pure Python (no Streamlit, no network): sources/ modules and the tests build
-on it. Errors carry an i18n key plus kwargs so the UI can render a localized,
-specific message instead of a raw exception string.
-"""
+"""The match-import data model: records, demo states, configs, errors (with i18n keys)."""
 
 from __future__ import annotations
 
@@ -13,8 +7,8 @@ from datetime import datetime
 
 DEFAULT_MATCH_COUNT = 5
 MATCH_COUNT_CHOICES = (5, 10, 20)
-# Valve deletes demos roughly a month after the match; past this age a demo
-# is flagged "expired" (still worth a try - the server decides)
+# Valve deletes demos after about a month; past this age a demo is "expired" (still
+# worth a try)
 DEMO_KEEP_DAYS = 30
 
 

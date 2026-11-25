@@ -1,13 +1,5 @@
-"""
-The Matches page: every match of every source in one table.
-
-No network happens just by opening the page - only the local caches are
-read (the provider lists and the per-match summaries); every request
-(Refresh / Download) is an explicit press. A row click opens the match when
-the demo is in the library, and otherwise runs the row's own action
-(download / import / locate the file). Accounts and the Steam helper live
-on the Settings page.
-"""
+"""The Matches page: every match of every source in one table. The network runs only on
+explicit presses; opening the page reads local caches."""
 
 from __future__ import annotations
 
@@ -163,11 +155,8 @@ def _show_import_error(t) -> None:
 
 
 def _analyze_entry(entry: dict, accounts: dict) -> None:
-    """Parse a finished download right away and cache its per-match summary
-    for the resolved 'me' - the Matches table's numbers are ready without
-    opening the demo. Skipped when 'me' is unknown (the ask card will show on
-    open) or the demo does not parse; never raises (one broken download
-    must not take the rest of a multi-download with it)."""
+    """Parse a finished download and cache its summary for the resolved 'me'. Never raises:
+    one broken demo must not stop a multi-download."""
     try:
         entry = store.get_demo(entry["id"]) or entry
         path = core.decompressed_demo(store.demo_path(entry), tag=entry["id"][:8])
@@ -180,10 +169,8 @@ def _analyze_entry(entry: dict, accounts: dict) -> None:
 
 
 def _download(t, rec: sm.MatchRecord) -> None:
-    """The row's download, run AFTER the table drew its "Downloading…"
-    state: the cell stays busy for the whole transfer while the status +
-    progress line underneath tracks the real numbers. The finished demo is
-    analyzed on the spot, then opened (the summary is cached already)."""
+    """The row's download, run AFTER the table drew its "Downloading…" state; the demo is
+    analyzed, then opened."""
     accounts = store.read_accounts()
     cfg = _shared.steam_cfg(accounts)
     status = st.status(t("mt_dl_status"))
@@ -209,9 +196,6 @@ def _download(t, rec: sm.MatchRecord) -> None:
     else:
         status.update(label=t("mt_dl_done", name=entry["name"]), state="complete")
         st.session_state["_dl_done"] = entry["name"]
-        # straight into the match: opening it computes the summary, so the
-        # analysis starts right after the download instead of waiting for
-        # an extra click on the row
         shell.go_match(entry["id"])
     st.session_state.pop("mt_dl", None)
     st.rerun()
@@ -244,9 +228,8 @@ def _ask_multi_download() -> None:
 
 
 def _run_flagged_downloads(t, rows: list[core.MatchRow]) -> None:
-    """Download (and analyze) every selected match, one after another, with
-    one status box and one overall progress bar; the newest of them opens.
-    A failed demo is reported and does not stop the rest."""
+    """Download and analyze every selected match; the newest opens. A failed one is
+    reported and does not stop the rest."""
     if not st.session_state.pop("mt_dl_multi", None):
         return
     sel = _selected_rows(rows)
@@ -295,9 +278,7 @@ def _run_flagged_downloads(t, rows: list[core.MatchRow]) -> None:
         st.toast(t("mt_dl_multi_skip", n=skipped))
     if ok:
         st.session_state["_dl_multi_done"] = (ok, len(sel))
-        # the newest of the selected matches opens (the first row of the
-        # date-sorted selection that made it); every other download was
-        # analyzed above, its row carries the numbers
+        # the rows are date-sorted: the first is the newest
         shell.go_match(first["id"])
     st.rerun()
 
@@ -319,8 +300,7 @@ def action_of(t, row: core.MatchRow) -> str:
     if row.entry is not None:
         if row.missing:
             return t("act_locate")
-        # not analyzed yet: the click opens the match, which computes the
-        # summary on the way in (the demo is parsed there anyway)
+        # the click opens the match, which computes the summary
         return t("mt_open") if row.stats else t("act_analyze")
     if row.rec is None:
         return "—"
@@ -348,9 +328,7 @@ def _row_action(t, row: core.MatchRow) -> None:
         st.rerun()
         return
     if _wants_download(row):
-        # flag only: the render continues so THIS table draw already shows
-        # "Downloading…" in the cell; the download itself runs after the
-        # table (see render), keeping one render path and no remount
+        # flag only: THIS draw already shows "Downloading…", the download runs after it
         if store.find_by_match(row.rec.provider, row.rec.match_id) is not None:
             st.toast(t("mt_dl_exists"))
             return
@@ -497,8 +475,7 @@ def _filters(t, rows: list[core.MatchRow], now: datetime) -> list[core.MatchRow]
 # ------------------------------------------------------------------- table
 def _table(t, rows: list[core.MatchRow], empty: str = "") -> None:
     def _row_click(i: int) -> None:
-        # the component's trigger callback runs before the script: remember
-        # the row, the render below executes the action
+        # a trigger callback runs before the script: render executes the action
         st.session_state["mt_action_row"] = int(i)
 
     cells = {
@@ -513,8 +490,7 @@ def _table(t, rows: list[core.MatchRow], empty: str = "") -> None:
         "msrc": [_kind_disp(r.kind, t) for r in rows],
         "src_raw": [r.kind for r in rows],
         "mact": [action_of(t, r) for r in rows],
-        # the renderer's first click on a text column sorts ascending, so
-        # the raw date column carries NEGATIVE timestamps (newest first)
+        # a text column sorts ascending first: negative timestamps = newest first
         "date_sort": [-r.played_at.timestamp() if r.played_at else None for r in rows],
     }
     from ui import schema
@@ -525,8 +501,6 @@ def _table(t, rows: list[core.MatchRow], empty: str = "") -> None:
         key="mt_grid",
         on_click=_row_click,
         empty=empty,
-        # the checkbox column: only the rows that can be downloaded (a
-        # click on such a row would download it; the checkbox stacks them)
         checkable=[_wants_download(r) for r in rows],
         row_keys=[r.key for r in rows],
         checked=_checked_keys(),
@@ -697,9 +671,8 @@ def render(ctx) -> None:
     limit = st.session_state.get("mt_limit") or PAGE_ROWS
     page_rows = kept[:limit]
     st.caption(t("mflt_shown", x=len(page_rows), y=len(rows)))
-    # a row click's action resolves BEFORE the table draws: a download
-    # only flags mt_dl here (no rerun), so this very render already shows
-    # "Downloading…" in the Action cell instead of the stale "Download"
+    # before the table draws: a download flags mt_dl, so this render already shows
+    # "Downloading…"
     i = st.session_state.pop("mt_action_row", None)
     if i is not None and 0 <= i < len(page_rows):
         _row_action(t, page_rows[i])

@@ -1,22 +1,5 @@
-"""
-Duel strip: fast duel / round navigation (the duel dialog).
-
-    duel_strip(items, selected, *, key, on_select, round_label, labels)
-
-- every duel is a chip (✓ kill / ✕ death) grouped under its round badge;
-  clicking a chip — or a round badge, which opens the round's first duel —
-  jumps straight to that duel, so any duel is <=2 actions away (scroll the
-  strip + click, or Shift+←/→ to the round, then ←/→);
-- ◀ / ▶ walk ALL duels with wrap-around: the whole match from one key;
-- « / » jump between rounds; Home / End go to the first / last duel;
-- the same actions from the keyboard anywhere on the page: ← / → duel,
-  Shift+← / → round, Home / End ends. The listener yields inside inputs,
-  selects and grids, so native widgets keep their arrow keys;
-- colours are CSS variables from theme/ only (var(--accent) ...), like
-  ui/table.py; Python builds the payload (strip_payload is pure and
-  unit-tested), the JS only draws it and reports back through the "sel"
-  trigger. Streamlit components v2 (>=1.51).
-"""
+"""Duel strip: every duel is a chip under its round badge; ←/→ walk the duels, Shift+←/→
+the rounds, Home/End the ends (ui/strip.js)."""
 
 from __future__ import annotations
 
@@ -43,15 +26,11 @@ def strip_payload(
     round_label: Callable[[int | None, int], str],
     labels: Mapping[str, str] | None = None,
 ) -> dict:
-    """JSON-ready model of the strip (pure function: unit-testable).
+    """JSON-ready model of the strip.
 
-    ``items``: one dict per duel — {"round": int|None, "result":
-    "kill"|"death", "tip": str}. Duels are grouped by their round
-    (consecutive runs of the same round share one badge), ``rstarts`` is
-    the first duel index of every group so the JS can jump between
-    rounds without its own grouping logic, and ``sel`` is clamped into
-    range (an empty strip selects 0).
-    """
+    ``items``: {"round", "result": "kill"|"death", "tip"} per duel; consecutive duels of
+    a round share a badge, ``rstarts`` is the first duel of every group, ``sel`` is
+    clamped into range."""
     out_items = []
     for i, it in enumerate(items):
         res = str(it.get("result") or "")

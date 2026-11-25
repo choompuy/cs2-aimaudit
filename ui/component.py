@@ -1,10 +1,6 @@
-"""
-Custom component glue shared by ui/table, ui/strip and ui/roundrep:
-declaring a component, wiring its event callback and rendering it with
-its payload (started as the roundrep/strip/table triplicate).
+"""Custom component glue shared by ui/table, ui/strip and ui/roundrep.
 
-The front end of component X is ui/X.js + ui/X.css, with ui/common.js in front.
-"""
+The front end of component X is ui/X.js + ui/X.css, with ui/common.js in front."""
 
 from __future__ import annotations
 
@@ -24,9 +20,8 @@ def _asset(name: str) -> str:
 
 
 def _declare(name: str):
-    # registered on every run on purpose: the registry lives in the Streamlit
-    # runtime (AppTest and server restarts start with an empty one), and
-    # re-registering an identical definition is cheap and idempotent
+    # on every run on purpose: the registry lives in the Streamlit runtime (AppTest and
+    # restarts start with an empty one)
     return st.components.v2.component(
         f"aimaudit_{name}",
         css=_asset(f"{name}.css"),
@@ -37,11 +32,7 @@ def _declare(name: str):
 def event_callback(
     key: str, field: str, handler: Callable[[int], None]
 ) -> Callable[[], None]:
-    """
-    The on_*_change callback every component event uses: read the widget's
-    state dict, pick the event field, hand the int to the handler. A
-    missing or None field (first render, no event yet) does nothing.
-    """
+    """The on_*_change callback: hand the event's int to the handler."""
 
     def _cb() -> None:
         state = st.session_state.get(key)
@@ -55,9 +46,7 @@ def event_callback(
 def event_callback_set(
     key: str, field: str, handler: Callable[[set], None]
 ) -> Callable[[], None]:
-    """The set-flavoured event callback: the component reports a whole
-    selection (the table's checkbox column) as one newline-joined string
-    of row keys; the handler receives it as a set of strings."""
+    """The same for a whole selection (newline-joined row keys -> a set)."""
 
     def _cb() -> None:
         state = st.session_state.get(key)
@@ -77,15 +66,8 @@ def render(
     handler: Callable[[int], None] | None,
     events: Mapping[str, Callable[[], None]] | None = None,
 ) -> None:
-    """
-    Declare the `name` component and render `data` under `key` - the one
-    call every component module makes. `handler` (None = no callback)
-    receives the int the front end reports in its `trigger` field, wired
-    through the on_<trigger>_change callback Streamlit needs. `events`
-    adds further on_<field>_change callbacks for components that report
-    more than one kind of event (the table: row clicks AND the checkbox
-    selection).
-    """
+    """Declare the component and render `data`. `handler` receives the int of the `trigger`
+    field, `events` adds further on_<field>_change callbacks."""
     comp = _declare(name)
     kwargs: dict = {}
     if handler is not None:

@@ -1,11 +1,5 @@
-"""
-The session_state registry: the keys shared by 2+ modules and the
-match-level navigation mutators. A module does not touch another module's
-key by a string literal.
-
-Page switching itself (go_page / go_match) lives in shell.py: it needs
-the st.Page registry that shell.navigation() fills.
-"""
+"""The session_state keys shared by 2+ modules and the match-level mutators. Page switching
+lives in shell.py: it needs the st.Page registry."""
 
 from __future__ import annotations
 
@@ -48,9 +42,7 @@ PICK_ERR = Key("_pick_err")  # file-dialog failure -> the library panel
 
 # --------------------------------------------------- navigation mutators
 def leave_match() -> None:
-    """«← Матчи»: back to the list; the loaded demo and the filters stay.
-    The shareable ?m= / ?tab= go with it, so the next run lands on the
-    list (the URL is the truth about the open match)."""
+    """Back to the list; the loaded demo and the filters stay."""
     MATCH.pop()
     for k in ("m", "tab"):
         st.query_params.pop(k, None)

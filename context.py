@@ -1,11 +1,4 @@
-"""
-Run context for the app: cached core calls and the shared Ctx.
-
-The cached wrappers (get_demo / get_shots / get_duels / get_timeline /
-get_round_replay) are st.cache_* functions keyed on the demo file. Ctx is the
-bundle of page-shared state that the shell fills as the run progresses
-and every view reads (see views/*.render(ctx)).
-"""
+"""Cached core calls and Ctx, the run state the shell fills and every view reads."""
 
 from dataclasses import dataclass
 
@@ -14,8 +7,7 @@ import streamlit as st
 
 import core
 
-# The translator used by _say() progress labels, injected once per run
-# (after the language is known) via set_t().
+# the translator of the _say() progress labels, set once per run
 t = None
 
 
@@ -43,8 +35,6 @@ def _say(step, **kw):
 
 @st.cache_resource(show_spinner=False)
 def get_demo(path: str, mtime: float) -> core.Demo:
-    # through the disk cache of the data folder: a demo parsed once opens
-    # again instantly, also after the app was restarted
     demo, _from_cache = core.load_demo_cached(path, progress=_say)
     return demo
 
@@ -69,9 +59,7 @@ def get_round_outcomes(path: str, mtime: float) -> dict:
     return core.round_outcomes(get_demo(path, mtime))
 
 
-# The heavy frames behind st.cache_data, keyed on the demo file and
-# the analysis thresholds, so a rerun (or a slider tweak that misses the
-# cache only once) does not recompute every page from scratch.
+# keyed on the demo file and the thresholds
 @st.cache_data(show_spinner=False)
 def get_shots(path: str, mtime: float, thr: int, safe_dist: int, strict_dist: int):
     demo = get_demo(path, mtime)
@@ -89,13 +77,7 @@ def get_duels(path: str, mtime: float, window_s: float):
 # ------------------------------------------------------------------- Ctx
 @dataclass
 class Ctx:
-    """
-    The run-shared state the shell fills and every view reads.
-
-    Flat: each view's render(ctx) unpacks the few fields it
-    needs into locals. Fields are grouped by the shell function that
-    produces them.
-    """
+    """The run-shared state, grouped by the shell function that fills it."""
 
     # sidebar(ctx)
     t = None  # the run's translator
@@ -150,15 +132,11 @@ def page_metrics(ctx) -> None:
     )
 
     my_duels = core.duels_for(duels_f, me) if len(duels_f) else pd.DataFrame()
-    # kill/death filter is a per-player concept: it follows the Result
-    # control (Duels / Timeline); the all-players Overview keeps both
+    # the kill/death filter is per player: the Overview keeps both
     if res_sel and len(my_duels):
         my_duels = my_duels[my_duels["result"].isin(res_sel)]
-    # round-impact layer: opening duels, trades, multi-kills,
-    # assists. Round structure, so like the K/D in the summary it follows the
-    # Side and Rounds filters (a player's rounds on that side), not the
-    # weapon / distance ones. The openings table on the Duels page is the
-    # match context of both teams and stays unfiltered.
+    # follows the Side and Rounds filters like the K/D, not weapon / distance; the
+    # openings table shows both teams and stays unfiltered
     openings = core.openings_table(demo)
     impact = core.impact_stats(demo, f=filters)
     if status is not None:

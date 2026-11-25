@@ -1,10 +1,5 @@
-"""
-The demo library (library.json): copies in data/demos AND demos linked
-by path (the file stays where it is - removing a linked demo never
-touches it). Owns adding (link / copy / upload), the disk sync that
-adopts files dropped into demos/ by hand, entry metadata and deletion
-(including the caches that belong to a demo).
-"""
+"""The demo library (library.json): copies in data/demos AND demos linked by path (a linked
+file is never touched)."""
 
 from __future__ import annotations
 
@@ -89,9 +84,7 @@ def _scan_demo_files(d: str) -> dict | None:
 
 
 def _keep_entries(entries: list[dict], files: dict) -> tuple[list[dict], set[str]]:
-    """Entries that still exist: a copy whose file vanished leaves the
-    list; a LINKED demo stays (it is shown as missing so the user can
-    locate it again)."""
+    """A copy whose file vanished leaves the list; a LINKED demo stays as missing."""
     kept: list[dict] = []
     ids: set[str] = set()
     for e in entries:
@@ -104,9 +97,8 @@ def _keep_entries(entries: list[dict], files: dict) -> tuple[list[dict], set[str
 
 
 def _adopt_files(d: str, files: dict, kept: list[dict], ids: set[str]) -> None:
-    """Files copied into demos/ by hand are adopted (named with an id
-    marker so the caches can find them); duplicates of a known demo are
-    ignored."""
+    """Adopt files copied into demos/ by hand (renamed with an id marker for the caches);
+    duplicates are ignored."""
     known = {e["file"] for e in kept if e.get("file")}
     linked = {os.path.normcase(e["path"]) for e in kept if e.get("path")}
     for name, f in sorted(files.items()):
@@ -132,11 +124,7 @@ def _adopt_files(d: str, files: dict, kept: list[dict], ids: set[str]) -> None:
 
 
 def _sync() -> list[dict]:
-    """
-    The library as it is on disk: entries whose file vanished are dropped,
-    files copied into demos/ by hand are adopted (named with an id marker so
-    the caches can find them), duplicates of a known demo are ignored.
-    """
+    """The library as it is on disk: vanished copies dropped, new files adopted."""
     entries = _read_library()
     d = demos_dir()
     files = _scan_demo_files(d)
@@ -212,17 +200,13 @@ def _clean_path(path) -> str:
 
 
 def add_link(path) -> dict:
-    """
-    Add a demo to the library BY ITS PATH: nothing is copied or read, the
-    file stays where it is. Adding the same path again returns the same entry.
-    """
+    """Add a demo BY ITS PATH, nothing is copied; the same path again returns the same entry."""
     p = _clean_path(path)
     st = _check_demo_file(p)
     if os.path.normcase(os.path.realpath(os.path.dirname(p))) == os.path.normcase(
         os.path.realpath(demos_dir())
     ):
-        # already inside the library folder: it belongs to the library as a copy
-        # (the sync adopts it, and may rename it to carry its id)
+        # inside the library folder: a copy, the sync adopts it
         base = os.path.basename(p)
         for e in _sync():
             if not e.get("path") and base in (e.get("file"), e.get("orig")):
@@ -262,14 +246,8 @@ def relink(demo_id: str, path) -> dict:
 
 
 def add_demo(source, name: str | None = None) -> dict:
-    """
-    Save a demo into the library and return its entry.
-
-    `source` is a path or a file-like object (the Streamlit upload); it is
-    streamed to demos/ while the content hash is computed, so a demo that is
-    already in the library (same bytes, any file name) is not stored twice -
-    its entry is returned and marked as just opened.
-    """
+    """Save a path or a file-like upload into the library and return its entry; the same
+    bytes are not stored twice."""
     close = False
     if isinstance(source, (str, os.PathLike)):
         name = name or os.path.basename(os.fspath(source))
@@ -337,12 +315,8 @@ def update_meta(demo_id: str, **fields) -> None:
 
 
 def delete_demo(demo_id: str) -> int:
-    """
-    Remove a demo from the library together with its parsed / unpacked caches;
-    returns the bytes freed. A COPY (an upload in demos/) is deleted from
-    disk. A LINKED demo only loses its list entry and caches: the user's own
-    file is never touched.
-    """
+    """Remove a demo and its caches; returns the bytes freed. A COPY is deleted from disk,
+    a LINKED file is never touched."""
     freed = 0
     entries = _read_library()
     hit = next((e for e in entries if e["id"] == demo_id), None)

@@ -1,23 +1,9 @@
-"""
-Token loading and resolution for theme/tokens.toml.
+"""Token loading and resolution for theme/tokens.toml (stdlib only).
 
-Pure Python (stdlib only): no Streamlit, no Plotly, so any test or tool can
-check token resolution without the app stack. The public API lives in
-theme/__init__.py.
-
-Resolution rules
-- [primitive] holds raw literals; a primitive value that names another
-  primitive or token is an error.
-- [semantic] (with sub-tables like tier / radius / font, flattened to dotted
-  keys) is the default token set.
-- [themes.<name>] overrides a subset of the same keys; unknown keys fail
-  fast with a clear message instead of silently doing nothing.
-- A token value may name a primitive ("pink-500") or another semantic token
-  ("accent", "text-secondary"); references resolve recursively with cycle
-  detection. Anything else (hex, rem, px, font stack) is used literally.
-  Aliases keep the palette consistent: chart-1 = "accent" means changing
-  the accent automatically changes the first categorical chart colour.
-"""
+- [primitive]: raw literals; [semantic]: the default tokens, sub-tables flattened to
+  dotted keys; [themes.<name>]: overrides (unknown keys fail fast).
+- A token may name a primitive or another token (resolved recursively, cycles detected);
+  anything else is literal."""
 
 from __future__ import annotations
 
@@ -56,12 +42,7 @@ def available_themes() -> list[str]:
 
 
 def active_theme() -> str:
-    """
-    The theme to use: env AIMAUDIT_THEME, default "violet".
-
-    Unknown names raise immediately: a silently wrong palette is much harder
-    to notice than a startup error with the list of valid names.
-    """
+    """env AIMAUDIT_THEME, default "violet"; unknown names raise."""
     name = (os.environ.get(ENV_THEME) or DEFAULT_THEME).strip().lower()
     themes = _raw().get("themes", {})
     if name not in themes:
@@ -135,13 +116,7 @@ def font_faces() -> list[dict]:
 
 
 def config_theme_dict(theme: str | None = None) -> dict:
-    """
-    The [theme] values .streamlit/config.toml must carry for a theme.
-
-    tools/sync_theme.py writes them; tests/test_static.py compares the live
-    config against the same dict, so "config matches tokens" can never
-    drift between the two.
-    """
+    """The [theme] values .streamlit/config.toml must carry."""
     tk = tokens(theme)
     return {
         "base": "dark",

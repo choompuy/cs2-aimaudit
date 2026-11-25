@@ -1,43 +1,13 @@
-"""
-A minimal protobuf wire-format reader for CMsgGCCStrike15_v2_MatchList.
+"""A minimal protobuf wire reader for CMsgGCCStrike15_v2_MatchList.
 
-boiler-writter writes the raw GC message; this module pulls out what the
-Matches page needs without a protobuf dependency. Field numbers come from
-the csgo proto definition
-(https://github.com/SteamDatabase/Protobufs, csgo/cstrike15_gcmessages.proto):
-
-    CMsgGCCStrike15_v2_MatchList
-      4  repeated CDataGCCStrike15_v2_MatchInfo matches
-    CDataGCCStrike15_v2_MatchInfo
-      1  uint64 matchid, 2 uint32 matchtime,
-      3  WatchableMatchInfo watchablematchinfo,
-      4  roundstats_legacy, 5 repeated roundstatsall
-    WatchableMatchInfo
-      1 uint32 server_ip, 2 uint32 tv_port, 8 uint32 game_type,
-      9 string game_mapgroup, 10 string game_map, 12 uint64 match_id
-    CMsgGCCStrike15_v2_MatchmakingServerRoundStats
-      1 uint64 reservationid, 2 reservation, 3 string map, 4 int32 round,
-      11 int32 match_result, 12 repeated int32 team_scores,
-      15 int32 match_duration, 27 bool b_switched_teams, 31 uint32 max_rounds
-    CMsgGCCStrike15_v2_MatchmakingGC2ServerReserve
-      1 repeated uint32 account_ids, 2 uint32 game_type
-
-Reading notes (verified against real MatchList captures - the CSDM
-fixtures and the per-player MVP sums, which equal the score of the
-player's slot group):
+Field numbers from github.com/SteamDatabase/Protobufs (csgo/cstrike15_gcmessages.proto).
+Verified against real captures:
 - the demo URL sits in the `map` field of the LAST roundstats entry;
-- team_scores[0] is the score of the accounts in slots 0-4 of the same
-  round's reservation, team_scores[1] the other team's;
-- match_result is a slot-team index: 1 = the slots 0-4 team won,
-  2 = the slots 5-9 team won, 0/3 = draw. It does NOT depend on
-  b_switched_teams: Valve never sends field 27 in match lists (real
-  captures 2016-2024 leave it out entirely, and in 2026 Premier data it
-  is set on every round including the first, so it only works as a
-  Premier hint);
-- the map comes from the reservation's game_type of the last roundstats
-  entry: the low byte is the mode (8 competitive, 10 wingman), the upper
-  bits the map id (hard-coded in the game).
-"""
+- team_scores[0] is the score of the accounts in slots 0-4 of the same round's
+  reservation, team_scores[1] the other team's;
+- match_result: 1 = the slots 0-4 team won, 2 = slots 5-9, 0/3 = draw. It does NOT
+  depend on b_switched_teams (only a Premier hint);
+- the map comes from the last entry's reservation game_type."""
 
 from __future__ import annotations
 

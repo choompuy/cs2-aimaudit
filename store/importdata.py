@@ -1,8 +1,4 @@
-"""
-Match-import settings and caches (accounts.json, matches.json): the
-same atomic-write rules as the library - a corrupt file counts as empty
-and is recreated, no secrets are ever stored.
-"""
+"""accounts.json (no secrets) and matches.json (the cached match lists)."""
 
 from __future__ import annotations
 

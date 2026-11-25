@@ -22,7 +22,7 @@ The app itself never touches the network: only this script does.
   * the icons are already there  -> does nothing, instantly;
   * AIMAUDIT_NO_ICONS=1 is set   -> does nothing (opt out of the download);
   * no internet / GitHub blocked -> says so, exits 0, and does not retry for
-    a day (the UI falls back to weapon names as text, like before).
+    a day (the UI falls back to weapon names as text).
 
 Every file is verified against a pinned SHA-256 before it is saved (the
 hash of the SANITIZED content - scripts, event handlers, external
