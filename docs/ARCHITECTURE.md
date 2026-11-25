@@ -216,11 +216,6 @@ formats a test number, `grade`/`best`/`bar`/`tone` values are legal
 `theme/`. It runs as part of `tests/check_ui.py`, so a broken edit to the
 TOML fails CI, not the browser.
 
-Four small tables remain plain `st.dataframe` calls on purpose (they show
-data the grids do not): the by-zone and openings tables in
-`views/duels.py` and the two Top-3 evidence popovers in
-`views/shooting.py`.
-
 ## Weapon and status icons (`ui/icons.py`)
 
 The tables (an `icon` cell shows the weapon silhouette) and the 2D replay

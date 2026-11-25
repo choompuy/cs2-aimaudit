@@ -239,10 +239,7 @@ def _top3_card(t, s, tips, name_of) -> None:
     the semantic palette: red HIGH / orange MED / blue INFO) + a text
     label, the sentence with its number, and the evidence behind
     a "show me" popover or a pointer to the chart below.
-
-    72 lines, under the 80 cap: the per-tip badge/text/evidence row is one
-    visual unit - splitting the popover arms from the badge row would
-    separate the layout from the data it renders."""
+"""
     sev_color = {
         2: ("sev_high", "red"),  # red    — bad / risky
         1: ("sev_med", "orange"),  # orange — warning
@@ -260,44 +257,10 @@ def _top3_card(t, s, tips, name_of) -> None:
             with ev_col:
                 if ev == "err":
                     ev_df = s.dd[s.dd["my_err"].notna()].nlargest(5, "my_err")
-                    _events_popover(
-                        t,
-                        t("top3_ev_err"),
-                        ev_df,
-                        {
-                            t("col_round"): ev_df["round"].to_numpy(),
-                            t("col_opponent"): [
-                                name_of.get(s, s) for s in ev_df["opponent"]
-                            ],
-                            t("col_weapon"): ev_df["weapon"].to_numpy(),
-                            t("col_err"): ev_df["my_err"].to_numpy(),
-                            t("col_result"): [
-                                fmt_result(v) for v in ev_df["result"]
-                            ],
-                        },
-                        {t("col_round"): "%d", t("col_err"): "%.1f°"},
-                    )
+                    _events_popover(t, "ev_err", ev_df, name_of)
                 elif ev == "lost":
                     ev_df = s.dth_df[s.dth_df["first"] == "opponent"]
-                    _events_popover(
-                        t,
-                        t("top3_ev_lost"),
-                        ev_df,
-                        {
-                            t("col_round"): ev_df["round"].to_numpy(),
-                            t("col_opponent"): [
-                                name_of.get(s, s) for s in ev_df["opponent"]
-                            ],
-                            t("col_weapon"): ev_df["weapon"].to_numpy(),
-                            t("col_err"): ev_df["my_err"].to_numpy(),
-                            t("col_duration"): ev_df["duration_s"].to_numpy(),
-                        },
-                        {
-                            t("col_round"): "%d",
-                            t("col_err"): "%.1f°",
-                            t("col_duration"): "%.2f s",
-                        },
-                    )
+                    _events_popover(t, "ev_lost", ev_df, name_of)
                 elif ev is not None:  # "risk" / "speed": chart is below
                     st.caption(
                         t(
@@ -556,20 +519,25 @@ def render(ctx) -> None:
     _weapons_grid(ctx)
 
 
-
-def _events_popover(t, caption: str, ev_df, cols: dict, numfmt: dict) -> None:
-    """The Top-3 evidence popover: a small localized events table behind
-    the "Show" button (started as the err/lost near-duplicate). Empty
-    evidence draws only the caption."""
+def _events_popover(t, table_id: str, ev_df, name_of) -> None:
+    """The Top-3 evidence behind the "Show" button; empty evidence draws
+    only the caption."""
     with st.popover(t("top3_show")):
-        st.caption(caption)
+        st.caption(t(f"top3_{table_id}"))
         if len(ev_df):
-            st.dataframe(
-                pd.DataFrame(cols),
-                column_config={
-                    k: st.column_config.NumberColumn(k, format=v)
-                    for k, v in numfmt.items()
+            w_vals, w_labels, w_icons = icons.weapon_cells(ev_df["weapon"])
+            schema.table(
+                table_id,
+                {
+                    "round": ev_df["round"].to_numpy(),
+                    "opponent": [name_of.get(s, s) for s in ev_df["opponent"]],
+                    "weapon": w_vals,
+                    "weapon_disp": w_labels,
+                    "aim_err": ev_df["my_err"].to_numpy(),
+                    "duration": ev_df["duration_s"].to_numpy(),
+                    "result": [fmt_result(v) for v in ev_df["result"]],
+                    "result_raw": ev_df["result"].astype(str).to_numpy(),
                 },
-                hide_index=True,
-                width="stretch",
+                key=f"sh_{table_id}",
+                icons=w_icons,
             )

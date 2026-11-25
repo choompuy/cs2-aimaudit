@@ -3,7 +3,6 @@
 import pandas as pd
 import streamlit as st
 
-import core
 import state
 from ui import icons
 from ui import schema
@@ -119,30 +118,15 @@ def _zone_table(my_duels: pd.DataFrame, t) -> None:
     st.divider()
     st.markdown(f"**{t('zone_title')}**")
     st.caption(t("zone_caption"))
-    st.dataframe(
-        pd.DataFrame(
-            {
-                t("col_zone"): zt["my_zone"].to_numpy(),
-                t("col_kills"): zt["kills"].to_numpy(),
-                t("col_deaths"): zt["deaths"].to_numpy(),
-                t("zone_kd"): zt["kd"].to_numpy(),
-            }
-        ),
-        column_config={
-            t("col_zone"): st.column_config.TextColumn(
-                t("col_zone"),
-                pinned=True,
-                width="medium",
-                help=t("col_zone_help"),
-            ),
-            t("col_kills"): st.column_config.NumberColumn(t("col_kills"), format="%d"),
-            t("col_deaths"): st.column_config.NumberColumn(
-                t("col_deaths"), format="%d"
-            ),
-            t("zone_kd"): st.column_config.NumberColumn(t("zone_kd"), format="%+d"),
+    schema.table(
+        "zones",
+        {
+            "zone": zt["my_zone"].to_numpy(),
+            "kills": zt["kills"].to_numpy(),
+            "deaths": zt["deaths"].to_numpy(),
+            "zone_kd": zt["kd"].to_numpy(),
         },
-        hide_index=True,
-        width="stretch",
+        key="du_zones",
     )
 
 
@@ -165,47 +149,27 @@ def _openings_table(op: pd.DataFrame, me: str, name_of: dict, t) -> None:
     st.divider()
     st.markdown(f"**{t('open_title')}**")
     st.caption(t("open_caption"))
-    st.dataframe(
-        pd.DataFrame(
-            {
-                t("col_round"): op["round"].to_numpy(),
-                t("col_round_sec"): op["round_sec"].to_numpy(),
-                t("col_killer"): [
-                    ("★ " if s == me else "") + name_of.get(s, s)
-                    for s in op["killer"]
-                ],
-                t("col_victim"): [
-                    ("★ " if s == me else "") + name_of.get(s, s)
-                    for s in op["victim"]
-                ],
-                t("col_weapon"): ["—" if w == core.NA else w for w in op["weapon"]],
-                t("col_hs"): ["✓" if v else "" for v in op["headshot"]],
-                t("col_zone_k"): [z if z else "—" for z in op["killer_zone"]],
-                t("col_zone_v"): [z if z else "—" for z in op["victim_zone"]],
-            }
-        ),
-        column_config={
-            t("col_round"): st.column_config.NumberColumn(
-                t("col_round"), format="%d"
-            ),
-            t("col_round_sec"): st.column_config.NumberColumn(
-                t("col_round_sec"), format="%.1f s", help=t("col_round_sec_help")
-            ),
-            t("col_killer"): st.column_config.TextColumn(
-                t("col_killer"), width="medium"
-            ),
-            t("col_victim"): st.column_config.TextColumn(
-                t("col_victim"), width="medium"
-            ),
-            t("col_weapon"): st.column_config.TextColumn(
-                t("col_weapon"), width="small"
-            ),
-            t("col_hs"): st.column_config.Column(t("col_hs"), width="small"),
-            t("col_zone_k"): st.column_config.TextColumn(t("col_zone_k")),
-            t("col_zone_v"): st.column_config.TextColumn(t("col_zone_v")),
+    w_vals, w_labels, w_icons = icons.weapon_cells(op["weapon"])
+
+    def _names(sids):
+        return [("★ " if s == me else "") + name_of.get(s, s) for s in sids]
+
+    schema.table(
+        "openings",
+        {
+            "round": op["round"].to_numpy(),
+            "round_sec": op["round_sec"].to_numpy(),
+            "killer": _names(op["killer"]),
+            "victim": _names(op["victim"]),
+            "weapon": w_vals,
+            "weapon_disp": w_labels,
+            "hs": ["✓" if v else "" for v in op["headshot"]],
+            "hs_raw": op["headshot"].astype(int).to_numpy(),
+            "zone_k": [z if z else "—" for z in op["killer_zone"]],
+            "zone_v": [z if z else "—" for z in op["victim_zone"]],
         },
-        hide_index=True,
-        width="stretch",
+        key="du_openings",
+        icons=w_icons,
     )
 
 

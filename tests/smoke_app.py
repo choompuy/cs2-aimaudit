@@ -47,6 +47,7 @@ os.environ["AIMAUDIT_DATA_DIR"] = os.path.realpath(tempfile.mkdtemp(prefix="cs2a
 import core  # noqa: E402
 import store  # noqa: E402
 from state import MATCH_TABS  # noqa: E402
+from ui import schema  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -388,17 +389,6 @@ def widget(at, kind, key):
         w = getattr(at, kind)(key=key)
         return w if w else None
     except Exception:  # noqa: BLE001 - missing key -> None
-        # st.dataframe learned `key` in AppTest only on streamlit 1.57:
-        # on older versions every dataframe reports key=None, so a keyed
-        # lookup always fails. Fall back to the first dataframe on the
-        # page when no dataframe carries a key.
-        if kind == "dataframe":
-            try:
-                dfs = list(at.dataframe)
-                if dfs and all(d.key is None for d in dfs):
-                    return dfs[0]
-            except Exception:  # noqa: BLE001
-                pass
         return None
 
 
@@ -408,6 +398,20 @@ def ctl(at, kind, key):
     if w is None:
         raise KeyError(f"{kind} widget {key!r} not rendered")
     return w
+
+
+GRIDS: dict[str, pd.DataFrame] = {}  # grid key -> what the app last drew
+
+
+def record_grids():
+    """AppTest cannot look inside a custom component: keep its rows here."""
+    draw = schema.data_table
+
+    def rec(rows, cols, *, key, **kw):
+        GRIDS[key] = pd.DataFrame({c.label: list(rows[c.key]) for c in cols})
+        draw(rows, cols, key=key, **kw)
+
+    schema.data_table = rec
 
 
 def ss_get(at, key, default=None):
@@ -1722,7 +1726,7 @@ def scenario_context():
     goto(at, "duels")
 
     # the by-zone table: Alpha = 25 kills from BombsiteA, 0 deaths
-    ztabs = [d.value for d in at.dataframe if "K-D" in list(d.value.columns)]
+    ztabs = [GRIDS.pop("du_zones")] if "du_zones" in GRIDS else []
     check("zone table rendered", len(ztabs) == 1, [list(v.columns) for v in ztabs])
     if ztabs:
         z = ztabs[0]
@@ -1743,7 +1747,7 @@ def scenario_context():
         "switch player (Charlie)",
         lambda: at.selectbox(key="me").select(S3).run(),
     )
-    ztabs = [d.value for d in at.dataframe if "K-D" in list(d.value.columns)]
+    ztabs = [GRIDS.pop("du_zones")] if "du_zones" in GRIDS else []
     if ztabs:
         z = ztabs[0]
         check(
@@ -1770,12 +1774,11 @@ def scenario_context():
         lambda: at.selectbox(key="lang").select("ru").run(),
     )
     check("ru: zone table renders", not at.exception, err_of(at))
-    ztabs = [
-        d.value
-        for d in at.dataframe
-        if list(d.value.columns) == ["Зона", "Килы", "Смерти", "К-С"]
-    ]
-    check("ru: zone table localized", len(ztabs) == 1, [list(v.columns) for v in ztabs])
+    check(
+        "ru: zone table localized",
+        list(GRIDS["du_zones"].columns) == ["Зона", "Килы", "Смерти", "К-С"],
+        list(GRIDS["du_zones"].columns),
+    )
 
 
 def scenario_first_shots():
@@ -1957,7 +1960,7 @@ def scenario_impact():
 
     # Duels page: the openings table (30 rows, Alpha starred as killer)
     goto(at, "duels")
-    otabs = [d.value for d in at.dataframe if "Killer" in list(d.value.columns)]
+    otabs = [GRIDS.pop("du_openings")] if "du_openings" in GRIDS else []
     check("openings table rendered", len(otabs) == 1, [list(v.columns) for v in otabs])
     if otabs:
         o = otabs[0]
@@ -1975,7 +1978,7 @@ def scenario_impact():
         "round preset first half",
         lambda: ctl(at, "segmented_control", "flt_preset").select("first").run(),
     )
-    otabs = [d.value for d in at.dataframe if "Killer" in list(d.value.columns)]
+    otabs = [GRIDS.pop("du_openings")] if "du_openings" in GRIDS else []
     check(
         "openings follow the round filter",
         len(otabs) == 1 and len(otabs[0]) == 12,
@@ -1993,11 +1996,10 @@ def scenario_impact():
         "impact tables in russian",
         lambda: at.selectbox(key="lang").select("ru").run(),
     )
-    otabs = [d.value for d in at.dataframe if "Убийца" in list(d.value.columns)]
     check(
         "ru: openings table localized",
-        len(otabs) == 1,
-        [list(v.columns) for v in otabs],
+        "Убийца" in GRIDS["du_openings"].columns,
+        list(GRIDS["du_openings"].columns),
     )
     goto(at, "shooting")
     act(
@@ -2734,6 +2736,7 @@ def main():
         # (load_demo) and core.replay (timeline/replay data); the facade
         # name is patched too for direct core.DemoParser calls.
         core.loader.DemoParser = core.replay.DemoParser = FakeParser
+        record_grids()
         scenario_one_round()
         scenario_nav()
         scenario_settings()
