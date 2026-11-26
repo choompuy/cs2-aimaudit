@@ -123,7 +123,7 @@ _rr_events = {
             "user_name": ["Charlie"],
             "weapon": ["weapon_ak47"],
             "headshot": [True],
-            "distance": [500],
+            "distance": [12.7],
             "total_rounds_played": [0],
             "is_warmup_period": [False],
         }
@@ -430,7 +430,7 @@ def test_round_winners():
                     "user_name": ["Delta"],
                     "weapon": ["weapon_ak47"],
                     "headshot": [False],
-                    "distance": [500],
+                    "distance": [12.7],
                     "total_rounds_played": [0],
                     "is_warmup_period": [False],
                 }
@@ -456,7 +456,7 @@ def test_round_winners():
                     "user_name": ["Delta"],
                     "weapon": ["world"],
                     "headshot": [False],
-                    "distance": [500],
+                    "distance": [12.7],
                     "total_rounds_played": [0],
                     "is_warmup_period": [False],
                 }

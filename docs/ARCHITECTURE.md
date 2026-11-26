@@ -11,8 +11,8 @@ written here, so the doc and the guardrails stay honest.
 | --- | --- |
 | `app.py` | Entry point only: page config, theme injection, the `st.Page` bodies (`_PAGE_FNS`) handed to `shell.navigation`, and `_match` - the only pipeline that loads a demo. |
 | `context.py` | Cached `core` calls (`get_demo`, `get_shots`, `get_duels`, `get_timeline`, `get_round_replay`) and the `Ctx` dataclass every page renders from. |
-| `shell.py` | App shell: `st.navigation` + the `st.page_link` rail + the language box (`navigation`), the URL state (`?m=&tab=`), `go_page`/`go_match`, demo loading, the match header (`st.badge`), the context row (incl. the identity ⋮ menu), the ask card / remember logic, the library panel. |
-| `filters_ui.py` | URL state (`_URL_KEYS`), presets, callbacks, the filter summary row + the Edit `st.popover`. |
+| `shell.py` | App shell: `st.navigation` + the `st.page_link` rail + the language box (`navigation`), the URL state (`?m=&tab=`), `go_page`/`go_match`, demo loading, the match header (`map · score`, the demo info popover), the player row (incl. the identity menu), the ask card / remember logic, the library panel. |
+| `filters_ui.py` | URL state (`_URL_KEYS`), presets, callbacks, the filter bar, the Duels page's kill/death control (`result_control`). |
 | `views/matches.py` | The Matches page: the unified table (filters, Refresh, Add match, row actions, the single / multi download + on-the-spot analysis flow). |
 | `views/_shared.py` | Helpers shared by the pages (`steam_cfg`, `show_error`). |
 | `views/dashboard.py` | The Dashboard stub (cross-match aggregates land in a future `core/aggregate.py`). |
@@ -31,7 +31,7 @@ written here, so the doc and the guardrails stay honest.
 | `core/unpack.py` | Compressed demos: `.bz2` / `.gz` / `.zip` / `.zst` stream-decompression into `cache/unpacked`, `.part` safety, ValueError contract. |
 | `core/phases.py` | The parse phases `load_demo` walks through (players, events, warmup / knife / restart exclusion, tick table, mouse, totals, round windows). |
 | `core/loader.py` | `load_demo` orchestration + `PARSE_VERSION` (hash of the core package), `state.json`, per-round sides, the parsed-demo cache. |
-| `core/shots.py` | `shots_table` (one row per gun shot: speed, dist, state, hit) + `add_stop_quality` / `add_risk`. |
+| `core/shots.py` | `shots_table` (one row per gun shot: speed, dist, state, hit), `hurts_table` (the hits with their round, side and the dist of their shot, for the filters) + `add_stop_quality` / `add_risk`. |
 | `core/duels.py` | `build_duels`, `duels_for`: the shots both duelists fired, aimed at each other, with the first-shot numbers. |
 | `core/openings.py` | Round structure: `round_outcomes` / `round_winners`, `openings_table`, the shared `_enemy_kill_rows` / `_round_side_keep` / `_top_weapon`. |
 | `core/impact.py` | `impact_stats`: openings, trades, multi-kills, assists from the enemy-kill rows. |
@@ -116,7 +116,7 @@ the match, a multi-download (the checkbox column + "Download selected")
 analyzes every finished entry on the spot and opens the newest one. Who
 "me" is: the `me_sid` remembered in the library entry first (the
 explicit per-match pick - the ask card without the "remember" checkbox,
-or the "this is not me" ⋮ menu of the player row), else the accounts'
+or the "this is not me" identity menu of the player row), else the accounts'
 SteamID64 when she played; the "remember" variant of either picker
 writes the SteamID into `accounts.json`, so future matches (downloads
 included) resolve on their own.
@@ -347,7 +347,7 @@ needed to start. `views/dashboard.py` is the stub that will host it.
 1. Pick the `session_state` key (`flt_<name>`) and, if the filter should
    survive shared links, add it to `_URL_KEYS` in `filters_ui.py` (URL
    short name → session key).
-2. Render the widget inside the Edit popover (`filters_ui._render_controls`)
+2. Render the widget in the filter bar (`filters_ui._controls`)
    and keep the widget `key` equal to the session key - plus
    `persist_state="session"`, so the value survives every page and tab
    switch (presets and URL restore rely on both).

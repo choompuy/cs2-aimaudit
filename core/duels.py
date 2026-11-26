@@ -235,7 +235,7 @@ def build_duels(
         k, v, t = r.attacker_steamid, r.user_steamid, int(r.tick)
         if demo.teams.get(k) == demo.teams.get(v):
             continue
-        # a post-round kill already counted in the next round still belongs to this one
+        # a demo without the round counter still has the windows
         rd = round_of_tick(getattr(demo, "round_windows", None) or {}, t)
         if rd is None:
             rd = _safe_int(getattr(r, "total_rounds_played", 0)) + 1
@@ -243,14 +243,17 @@ def build_duels(
     return pd.DataFrame(out)
 
 
-def duels_for(duels: pd.DataFrame, me: str) -> pd.DataFrame:
-    """Duels from one player's perspective (kills and deaths)."""
+def duels_for(duels: pd.DataFrame, me: str, side: str | None = None) -> pd.DataFrame:
+    """Duels from one player's perspective (kills and deaths). `side` keeps the rounds
+    the player spent on it: a raw duel has both sides, so apply_filters cannot."""
     parts = []
     for role, mine, opp in (
         ("kill", "killer", "victim"),
         ("death", "victim", "killer"),
     ):
         df = duels[duels[mine] == me]
+        if side is not None:
+            df = df[df[f"{mine}_side"] == side]
         if df.empty:
             continue
         parts.append(

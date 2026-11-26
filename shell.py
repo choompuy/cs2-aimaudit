@@ -3,11 +3,9 @@
 The functions fill the shared Ctx in a fixed call order (widget order, and so widget
 state, depends on it)."""
 
-import html
 import os
 import re
 
-import pandas as pd
 import streamlit as st
 
 import context
@@ -17,7 +15,7 @@ import nativedialog
 import state
 import store
 import ui.format
-from context import _status, get_demo, get_duels, get_shots
+from context import _status, get_demo, get_duels, get_hurts, get_shots
 
 # ------------------------------------------------------------- navigation
 
@@ -129,69 +127,66 @@ def navigation(ctx, page_fns: dict) -> "st.navigation":
 
 
 def match_shell(ctx) -> None:
-    """The match view header: back, the title, the badges and the tabs."""
+    """The match view header: back, "map · score", the meta line and the tabs. It renders
+    before the demo loads; context_bar() adds the demo info and the player to its rows."""
     t = ctx.t
-    entry = store.get_demo(state.MATCH.get()) or {}
-    m = entry.get("match") or {}
-    score = m.get("score") if isinstance(m.get("score"), (list, tuple)) else None
-    result = m.get("result")
-    # the score when it is known, else the map / file name
-    if score and len(score) == 2:
-        title = f"{score[0]}:{score[1]}"
-    else:
-        title = (
-            ui.format.map_name(entry.get("map")) or entry.get("name") or t("mt_title")
-        )
-    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+    ctx.back_row = st.container(
+        horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"
+    )
+    with ctx.back_row:
         st.button(
             t("back_to_matches"),
             key="mt_back",
             icon=":material/arrow_back:",
             on_click=state.leave_match,
             width="content",
+            type="tertiary",
         )
-        st.markdown(f"**{html.escape(str(title))}**")
-        _chips(t, entry, m, result)
+    ctx.title_slot = st.empty()
+    _match_title(ctx)
+    ctx.tabs_row = st.container(
+        horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"
+    )
     # not st.tabs: it executes EVERY tab body on every rerun, and code must be able to
     # switch the tab
-    state.MATCH_TAB.set(state.MATCH_TAB.get())  # a deselect means the default tab
-    ctx.tab = (
-        st.segmented_control(
+    state.MATCH_TAB.set(state.MATCH_TAB.get())  # no pick yet means the default tab
+    with ctx.tabs_row:
+        ctx.tab = st.segmented_control(
             t("nav_pages"),
             state.MATCH_TABS,
             format_func=lambda p: t(f"tab_{p}"),
             label_visibility="collapsed",
             key="match_tab",
+            required=True,
             persist_state="session",
         )
-        or "overview"
-    )
 
 
-def _chips(t, entry: dict, m: dict, result) -> None:
-    """The match badges; colour never stands alone, every badge has a label."""
-    from datetime import datetime
+def _match_title(ctx) -> None:
+    """"map · score", the result and the meta line."""
+    t = ctx.t
+    entry = store.get_demo(state.MATCH.get())
+    # the same merge the Matches table shows
+    row = core.build_rows([], [entry], stats_of=core.matchstats.cached_stats)[0]
+    title = [ui.format.map_name(row.map_name) or entry.get("name") or t("mt_title")]
+    if row.score:
+        title.append(f"{row.score[0]}:{row.score[1]}")
+    with ctx.title_slot.container(horizontal=True, vertical_alignment="center"):
+        st.header(" · ".join(title), anchor=False, width="content")
+        # colour never stands alone: the badge has its label
+        res_color = {"win": "green", "loss": "red", "tie": "gray"}.get(row.result or "")
+        if res_color:
+            st.badge(t(f"mt_result_{row.result}"), color=res_color)
+        st.caption(_meta_line(t, row))
 
-    res_color = {"win": "green", "loss": "red", "tie": "gray"}.get(result or "")
-    if res_color:
-        st.badge(t(f"mt_result_{result}"), color=res_color)
-    mp = ui.format.map_name(entry.get("map"))
-    if mp:
-        st.badge(mp, color="gray")
-    if m.get("mode"):
-        st.badge(str(m["mode"]), color="gray")
-    provider = str(m.get("provider") or "")
-    kind = core.kind_of(provider or None, m.get("mode"))
-    st.badge(t(f"kind_{kind}"), color="violet" if provider else "gray")
-    when = None
-    for iso in (m.get("played_at"), entry.get("opened"), entry.get("added")):
-        try:
-            when = datetime.fromisoformat(str(iso))
-            break
-        except (TypeError, ValueError):
-            continue
-    if when is not None:
-        st.badge(when.astimezone().strftime("%d.%m.%y %H:%M"), color="gray")
+
+def _meta_line(t, row: core.MatchRow) -> str:
+    """Mode, source and date of the match."""
+    parts = [str(row.mode)] if row.mode else []
+    parts.append(t(f"kind_{row.kind}"))
+    if row.played_at is not None:
+        parts.append(row.played_at.astimezone().strftime("%d.%m.%y %H:%M"))
+    return " · ".join(parts)
 
 
 def match_stats(ctx) -> None:
@@ -204,8 +199,11 @@ def match_stats(ctx) -> None:
     if me_sid is None:
         _ask_who(t, demo, entry)
         return
+    known = core.matchstats.read_cached(store.demo_path(entry))
     with st.spinner(t("mt_summarizing")):
         core.matchstats.ensure(demo, entry, me_sid)
+    if (known or {}).get("me_sid") != me_sid:
+        _match_title(ctx)  # the score is known only now
 
 
 def _remember_me(me_sid: str) -> None:
@@ -526,6 +524,7 @@ def open_demo(ctx) -> None:
     if status is not None:
         status.update(label=t("step_metrics"))
     shots = get_shots(path, mtime, thr, safe_dist, strict_dist)
+    hurts = get_hurts(path, mtime)
     duels_all = get_duels(path, mtime, window_s)
 
     ctx.state = saved
@@ -535,24 +534,23 @@ def open_demo(ctx) -> None:
     ctx.path = path
     ctx.mtime = mtime
     ctx.shots = shots
+    ctx.hurts = hurts
     ctx.duels_all = duels_all
 
 
-def _demo_info_line(entry: dict, demo: core.Demo, t) -> None:
-    """The compact demo row: one line with what matters about the file (the
-    way out is "← Матчи" in the match header, not a change-demo button)."""
-    info = [f"**{entry['name']}**"]
-    if demo.header.get("map_name"):
-        info.append(f"**{t('map')}:** {demo.header['map_name']}")
-    info.append(f"**{t('players_n')}:** {len(demo.players)}")
-    info.append(f"**{t('tickrate')}:** {demo.tickrate}")
-    trp = demo.deaths.get("total_rounds_played") if len(demo.deaths) else None
-    if trp is not None:
-        r_max = pd.to_numeric(trp, errors="coerce").max()
-        if pd.notna(r_max):
-            info.append(f"**{t('rounds_n')}:** {int(r_max) + 1}")
-    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
-        st.caption(" · ".join(info))
+def _demo_info(ctx) -> None:
+    """The file behind the match, out of the way in a popover."""
+    t, demo = ctx.t, ctx.demo
+    info = [
+        f"**{ctx.entry['name']}**",
+        f"{t('map')}: {demo.header.get('map_name') or '—'}",
+        f"{t('players_n')}: {len(demo.players)}",
+        f"{t('rounds_n')}: {len(demo.round_windows)}",
+        f"{t('tickrate')}: {demo.tickrate}",
+    ]
+    with ctx.back_row, st.popover(t("demo_info"), icon=":material/info:", type="tertiary"):
+        for line in info:
+            st.caption(line)
 
 
 def _excluded_line(demo: core.Demo, t) -> None:
@@ -566,15 +564,11 @@ def _excluded_line(demo: core.Demo, t) -> None:
     if _excl.get("restart"):
         _excl_parts.append(t("excl_restart", n=_excl["restart"]))
     if _excl_parts:
-        st.caption(
-            f'<span title="{html.escape(t("excl_help"))}">'
-            f"{html.escape(t('excluded_line', parts=', '.join(_excl_parts)))}</span>",
-            unsafe_allow_html=True,
-        )
+        st.caption(t("excluded_line", parts=", ".join(_excl_parts)), help=t("excl_help"))
 
 
 def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
-    """[label] [prev] [selectbox] [next]; Up/Down, since the duels use Left/Right."""
+    """[selectbox] [prev] [next] [identity]; Up/Down, since the duels use Left/Right."""
     name_of = dict(zip(demo.players["sid"], demo.players["name"], strict=True))
     team_of = dict(zip(demo.players["sid"], demo.players["team"], strict=True))
     plist = demo.players.assign(
@@ -595,35 +589,29 @@ def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
             i = 0 if delta > 0 else len(me_opts) - 1
         state.ME.set(me_opts[i])
 
-    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
-        st.caption(t("player"))
-        st.button(
-            "▲",
-            key="me_prev",
-            on_click=_me_step,
-            args=(-1,),
-            help=t("player_prev"),
-            shortcut="Up",
-            width="content",
-            type="tertiary",
-        )
+    with st.container(
+        horizontal=True, gap="xsmall", vertical_alignment="center", width="content"
+    ):
         me = st.selectbox(
             t("player"),
             me_opts,
             format_func=lambda s: f"{name_of.get(s, s)} ({team_of.get(s, '?')})",
             key="me",
             label_visibility="collapsed",
+            icon=":material/person:",
+            width=240,
         )
-        st.button(
-            "▼",
-            key="me_next",
-            on_click=_me_step,
-            args=(1,),
-            help=t("player_next"),
-            shortcut="Down",
-            width="content",
-            type="tertiary",
-        )
+        for delta, key, shortcut in ((-1, "me_prev", "Up"), (1, "me_next", "Down")):
+            # no label of its own: Streamlit draws the shortcut's arrow
+            st.button(
+                "",
+                key=key,
+                on_click=_me_step,
+                args=(delta,),
+                help=t("player_prev") if delta < 0 else t("player_next"),
+                shortcut=shortcut,
+                width="content",
+            )
         _who_menu(t, demo, me_opts, name_of)
     if saved.get("last_player") != me:
         saved["last_player"] = me
@@ -634,14 +622,14 @@ def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
 
 
 def _who_menu(t, demo, me_opts: list, name_of: dict) -> None:
-    """The ⋮ menu: "this is not me", for every match or only for this one."""
+    """The identity menu: "this is not me", for every match or only for this one."""
     entry = store.get_demo(state.MATCH.get()) or {}
     accounts = store.read_accounts()
     cur = core.matchstats.resolve_me(demo, entry, accounts)
     cur_name = name_of.get(cur, cur) if cur else None
     with st.popover(
         "",
-        icon=":material/more_vert:",
+        icon=":material/manage_accounts:",
         key="mt_who_pop",
         help=t("mt_me_title"),
         width="content",
@@ -684,9 +672,10 @@ def _who_menu(t, demo, me_opts: list, name_of: dict) -> None:
 
 
 def context_bar(ctx) -> None:
-    """The compact header: demo info, the player row, the excluded rounds."""
+    """The header parts that need the demo: its info, the player, the excluded rounds."""
     demo = ctx.demo
     t = ctx.t
-    _demo_info_line(ctx.entry, demo, t)
+    _demo_info(ctx)
+    with ctx.tabs_row:
+        _player_row(ctx, ctx.state, demo, t)
     _excluded_line(demo, t)
-    _player_row(ctx, ctx.state, demo, t)

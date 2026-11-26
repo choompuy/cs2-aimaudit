@@ -27,7 +27,7 @@ def test_live_match_start():
             return (tick, int(sid), NAMES[sid], w, trp, warm)
 
         def death(tick, a, u, w, trp, warm):
-            return (tick, int(a), NAMES[a], int(u), NAMES[u], w, trp, warm, True, 500)
+            return (tick, int(a), NAMES[a], int(u), NAMES[u], w, trp, warm, True, 12.7)
 
         def hurt(tick, a, u, w, trp, warm):
             return (tick, int(a), NAMES[a], int(u), NAMES[u], w, 1, trp, warm)
@@ -157,7 +157,7 @@ def test_live_match_start():
                     "total_rounds_played": trp,
                     "is_warmup_period": False,
                     "headshot": False,
-                    "distance": 500,
+                    "distance": 12.7,
                 }
             ],
         ).astype({"attacker_steamid": "float64", "user_steamid": "float64"})
@@ -317,7 +317,7 @@ def make_match_impact():
             "user_name": [imp_names[d[3]] for d in D],
             "weapon": [d[4] for d in D],
             "headshot": [False] * len(D),
-            "distance": [500] * len(D),
+            "distance": [12.7] * len(D),
             "total_rounds_played": [d[1] for d in D],
             "is_warmup_period": [False] * len(D),
             "assister_steamid": pd.array(

@@ -112,11 +112,11 @@ class _PlayerFrames(NamedTuple):
     risky: float
 
 
-def _player_frames(demo, shots, duels, hurts, p, thr, safe, strict) -> _PlayerFrames:
+def _player_frames(demo, shots, duels, hurts, p, thr, safe, strict, side) -> _PlayerFrames:
     """Slice the frames down to one player and derive the risky %."""
     sh = shots[shots["sid"] == p.sid]
     hi = _hurts_of(demo, p.sid, hurts)
-    dd = duels_for(duels, p.sid) if len(duels) else pd.DataFrame()
+    dd = duels_for(duels, p.sid, side) if len(duels) else pd.DataFrame()
     kd = dd[dd["result"] == "kill"] if len(dd) else dd
     fs = dd[dd["first"].isin(["me", "opponent"])] if len(dd) else dd
     fsh = sh[sh["first_shot"]] if len(sh) else sh
@@ -146,8 +146,9 @@ def _player_row(demo: Demo, p, fr: _PlayerFrames, kills: int, deaths: int, thr: 
         "deaths": deaths,
         "kd_ratio": round(kills / max(1, deaths), 2),
         "shots": len(sh),
-        "hits": len(hi),
-        "accuracy": round(len(hi) / len(sh) * 100, 1) if len(sh) else np.nan,
+        # shots that hit, not hurt rows: a shotgun shot hurts once per pellet
+        "hits": int(sh["hit"].sum()) if len(sh) else 0,
+        "accuracy": round(sh["hit"].mean() * 100, 1) if len(sh) else np.nan,
         "hs_hits": (
             round((hi["hitgroup"] == "head").mean() * 100, 1)
             if len(hi)
@@ -200,7 +201,9 @@ def player_summary(
     de = _enemy_kill_rows(demo) if have_d else pd.DataFrame()
     keep, kills_by, deaths_by, best_w, died_w = _kd_setup(demo, f, de, have_d)
     for p in demo.players.itertuples():
-        fr = _player_frames(demo, shots, duels, hurts, p, thr, safe, strict)
+        fr = _player_frames(
+            demo, shots, duels, hurts, p, thr, safe, strict, f.side if f else None
+        )
         kills, deaths = _player_kd(
             p.sid, demo, duels, have_d, keep, kills_by, deaths_by
         )
@@ -229,6 +232,7 @@ def weapon_stats(
         sh["_r"] = (sh["speed"] > sh["_a"]).fillna(False)
     g = sh.groupby("weapon").agg(
         shots=("tick", "size"),
+        hits=("hit", "sum"),
         median_speed=("speed", "median"),
         median_dist=("dist", "median"),
         moving=("speed", lambda s: (s > thr).mean() * 100),
@@ -241,15 +245,11 @@ def weapon_stats(
             g["first_acc"] = fsh.groupby("weapon")["hit"].mean() * 100
     hi = _hurts_of(demo, me, hurts)
     h = (
-        hi.groupby("weapon").agg(
-            hits=("tick", "size"), hs=("hitgroup", lambda s: (s == "head").mean() * 100)
-        )
+        hi.groupby("weapon").agg(hs=("hitgroup", lambda s: (s == "head").mean() * 100))
         if len(hi) and "weapon" in hi.columns
-        else pd.DataFrame(
-            {"hits": pd.Series(dtype=float), "hs": pd.Series(dtype=float)}
-        )
+        else pd.DataFrame({"hs": pd.Series(dtype=float)})
     )
-    out = g.join(h, how="left").fillna({"hits": 0})
+    out = g.join(h, how="left")
     out["accuracy"] = out["hits"] / out["shots"] * 100
     return out.sort_values("shots", ascending=False).round(1).reset_index()
 

@@ -17,31 +17,29 @@ def render(ctx) -> None:
 def _map_controls(radar, t):
     """The show / lines / level controls (their state persists per
     session). Returns (show, lines, level)."""
-    c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
-    show = (
-        c1.segmented_control(
+    level = "upper"
+    with st.container(horizontal=True, vertical_alignment="bottom"):
+        show = st.segmented_control(
             t("map_show"),
             ["both", "kills", "deaths"],
+            default="both",
             format_func=lambda v: t(f"map_show_{v}"),
             key="map_show",
+            required=True,
             persist_state="session",
         )
-        or "both"
-    )
-    lines = c2.toggle(
-        t("map_lines"), value=True, key="map_lines", persist_state="session"
-    )
-    level = "upper"
-    if radar and radar.get("lower"):
-        level = (
-            st.segmented_control(
+        if radar and radar.get("lower"):
+            level = st.segmented_control(
                 t("map_level"),
                 ["upper", "lower"],
+                default="upper",
                 format_func=lambda v: t(f"map_level_{v}"),
                 key="map_level",
+                required=True,
                 persist_state="session",
             )
-            or "upper"
+        lines = st.toggle(
+            t("map_lines"), value=True, key="map_lines", persist_state="session"
         )
     return show, lines, level
 

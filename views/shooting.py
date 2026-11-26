@@ -136,8 +136,8 @@ def _stats(ctx) -> _Stats:
     sh_me = shots_f[shots_f["sid"] == me]
     hg_me = core.hitgroup_counts(demo, me, ctx.hurts_f)
     dd = ctx.my_duels
-    hits_n = int(hg_me.sum()) if len(hg_me) else 0
-    hs_hits = hg_me.get("head", 0) / hits_n * 100 if hits_n else np.nan
+    hits_n = int(sh_me["hit"].sum()) if len(sh_me) else 0
+    hs_hits = hg_me.get("head", 0) / hg_me.sum() * 100 if len(hg_me) else np.nan
     (kills, dths, fs, imp_me, first_pct, dur, err, spd, dd_err,
      onhead_pct) = _duel_stats(dd, ctx.impact, me)
     (moving_pct, risky_pct, stops, cs_pct, fl_known, fl_n, sl_known, sl_n,

@@ -3,6 +3,7 @@
 import pandas as pd
 import streamlit as st
 
+import filters_ui
 import state
 from ui import icons
 from ui import schema
@@ -55,14 +56,11 @@ def _duel_cells(
     }
 
 
-def _duels_grid(ctx) -> None:
+def _duels_grid(ctx, du_full: bool) -> None:
     """The duel list table (row click opens the timeline window)."""
     t, ddf = ctx.t, ctx.my_duels
     w_vals, w_labels, w_icons = icons.weapon_cells(ddf["weapon"])
     du_cells = _duel_cells(ddf, ctx.name_of, t, w_vals, w_labels)
-    _tcol, _ = st.columns([1, 2])
-    with _tcol:
-        du_full = st.toggle(t("all_columns"), key="du_full", persist_state="session")
 
     def _duel_click_row(i):
         """Open that duel's window (at the bottom of the run)."""
@@ -166,12 +164,14 @@ def _openings_table(op: pd.DataFrame, me: str, name_of: dict, t) -> None:
 def render(ctx) -> None:
     """Draw the Duels page."""
     t = ctx.t
-    st.subheader(t("du_title"))
-    st.caption(t("du_caption"))
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.subheader(t("du_title"), help=t("du_caption"))
+        filters_ui.result_control(t)
+        du_full = st.toggle(t("all_columns"), key="du_full", persist_state="session")
     if not len(ctx.my_duels):
         st.info(t("du_none"))
     else:
-        _duels_grid(ctx)
+        _duels_grid(ctx, du_full)
         _zone_table(ctx.my_duels, t)
     # shown even when the player has no duels
     op = _openings_frame(ctx.openings, ctx.filters)

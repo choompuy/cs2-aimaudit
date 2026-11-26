@@ -23,6 +23,7 @@ from core.phases import (
     _parse_players,
     _parse_tick_table,
     _parse_totals,
+    _round_by_window,
 )
 
 __all__ = ["load_demo", "load_demo_cached", "load_state", "save_state"]
@@ -110,9 +111,6 @@ def load_demo(path: str, progress=None) -> Demo:
     ) = _exclude_preliminary(ev, deaths, fires, hurts, warmup_rows)
     fires, hurts = _filter_gun_events(players, deaths, fires, hurts)
 
-    # per-round sides (halftime swap), see _parse_round_sides
-    sides = _parse_round_sides(p, [deaths, fires, hurts], flookup, name_to_sid)
-
     td, _ticks_list, tickrate = _parse_tick_table(
         p, fires, flookup, name_to_sid, header, say
     )
@@ -121,6 +119,9 @@ def load_demo(path: str, progress=None) -> Demo:
     round_windows, round_info = _build_rounds(
         p, deaths, fires, hurts, fe_rows, live_start, tickrate
     )
+    _round_by_window(round_windows, deaths, fires, hurts)
+    # per-round sides (halftime swap), see _parse_round_sides
+    sides = _parse_round_sides(p, [deaths, fires, hurts], flookup, name_to_sid)
     return Demo(
         path,
         header,

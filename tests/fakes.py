@@ -103,7 +103,7 @@ def make_match():
                 "user_name": ["Delta", "Charlie"],
                 "weapon": ["weapon_ak47", "weapon_ak47"],
                 "headshot": [False, True],
-                "distance": [700, 800],
+                "distance": [17.78, 20.32],
                 "total_rounds_played": [0, 0],
                 "is_warmup_period": [True, False],
                 "attacker_last_place_name": ["TSpawn", "BombsiteA"],
@@ -212,7 +212,7 @@ def make_match_sides():
                 "user_name": ["Charlie", "Alpha"],
                 "weapon": ["weapon_ak47", "weapon_ak47"],
                 "headshot": [False, True],
-                "distance": [500, 500],
+                "distance": [12.7, 12.7],
                 "total_rounds_played": [0, 1],
                 "is_warmup_period": [False, False],
             }

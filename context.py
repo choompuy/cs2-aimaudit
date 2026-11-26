@@ -69,6 +69,12 @@ def get_shots(path: str, mtime: float, thr: int, safe_dist: int, strict_dist: in
 
 
 @st.cache_data(show_spinner=False)
+def get_hurts(path: str, mtime: float):
+    demo = get_demo(path, mtime)
+    return core.hurts_table(demo, core.shots_table(demo))
+
+
+@st.cache_data(show_spinner=False)
 def get_duels(path: str, mtime: float, window_s: float):
     demo = get_demo(path, mtime)
     return core.build_duels(demo, window_s)
@@ -93,6 +99,7 @@ class Ctx:
     path = None  # unpacked demo path (cache key part)
     mtime = None  # its mtime (cache key part)
     shots = None  # unfiltered shots table
+    hurts = None  # unfiltered hits (core.hurts_table)
     duels_all = None  # unfiltered duels table
     # context_bar(ctx)
     me = None  # the selected player sid
@@ -104,6 +111,9 @@ class Ctx:
     hurts_f = None
     res_sel = None  # kill/death filter (duels pages)
     # match_shell(ctx)
+    back_row = None  # the containers context_bar(ctx) adds to
+    title_slot = None  # redrawn when the score becomes known
+    tabs_row = None
     tab = None  # the active match tab (overview / shooting / ...)
     # page_metrics(ctx)
     summary = None
@@ -131,7 +141,7 @@ def page_metrics(ctx) -> None:
         demo, duels_f, shots_f, thr, safe_dist, strict_dist, hurts=hurts_f, f=filters
     )
 
-    my_duels = core.duels_for(duels_f, me) if len(duels_f) else pd.DataFrame()
+    my_duels = core.duels_for(duels_f, me, filters.side) if len(duels_f) else pd.DataFrame()
     # the kill/death filter is per player: the Overview keeps both
     if res_sel and len(my_duels):
         my_duels = my_duels[my_duels["result"].isin(res_sel)]

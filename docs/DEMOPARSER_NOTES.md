@@ -318,7 +318,11 @@ user_team_name` and warmup filter via `is_warmup_period == False`.
     as weapon_fire, but sometimes ±1–2. A naive merge on (tick, sid, weapon)
     or a ±window set loses hits or marks extra burst shots as hits.
     Fix: assign each hurt to the LAST shot of the same weapon with
-    tick ≤ hurt_tick within 3 ticks (core.\_match_hits, HIT_WINDOW=3).
+    tick ≤ hurt_tick within 3 ticks (core.\_shot_of_hurts, HIT_WINDOW=3).
+    The hurt's `weapon` is the BASE item: `m4a1` for the M4A1-S, `hkp2000` for
+    the USP-S, `mp7` for the MP5-SD, `deagle` for the R8 (688 of 2896 hurts of
+    7 demos); weapon_fire and player_death name the real one. Fix:
+    `phases._fired_weapon` takes the weapon the attacker fired last.
 11. **events after death**: a dead player has NO weapon_fire (verified on a
     real demo: shot at tick 29288 — death at 29295). But a dead pawn's buttons
     (m_nButtonDownMaskPrev) and positions are stale garbage: we cut the
@@ -542,7 +546,14 @@ was verified on every demo, not read from the docs.
   demos flashed instead of 685. An overlapping flash replaces the value with
   its own length from its own tick.
 - `thrusmoke` kills do exist (16/132, 10/147); `noscope` / `penetrated` /
-  `distance` are native player_death fields (all three demos).
+  `distance` are native player_death fields (all three demos). `distance` is in
+  METRES (position distance / event = 39.4 over 1774 kills of 7 demos);
+  `_parse_events_frames` converts it to game units.
+- `total_rounds_played` steps at the round END, not at the respawn: the shots
+  and kills after it would count as the next round (2-5% of the shots, the
+  "opening duel" of 4 rounds in 7 demos, a round that was never played).
+  `phases._round_by_window` renumbers them by the round windows.
+- `dmg_health` includes the overkill (up to 441): `phases._cap_damage`.
 
 ### 13.4 aggregates (kills_total ...) — the cross-check trap, CORRECTED in s.14
 

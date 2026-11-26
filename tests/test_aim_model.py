@@ -196,7 +196,7 @@ def test_duel_shots_by_proximity(duels):
                 "user_name": ["Charlie"],
                 "weapon": ["weapon_ak47"],
                 "headshot": [False],
-                "distance": [800],
+                "distance": [20.32],
                 "total_rounds_played": [0],
                 "is_warmup_period": [False],
             }

@@ -44,7 +44,7 @@ def test_one_round():
     assert not ss_get(at, "du_open"), "the row click flag is consumed"
     goto(at, "replay")
     assert not at.get("plotly_chart"), "2D replay: the canvas component draws it, no plotly chart"
-    assert widget(at, "segmented_control", "flt_preset") is None, "2D replay: the filter panel is hidden (the replay is the whole round)"
+    assert widget(at, "selectbox", "flt_preset") is None, "2D replay: the filter panel is hidden (the replay is the whole round)"
     # the payload behind the canvas: the whole round, every player, with
     # HP / weapon / keys - checked straight against the fake demo so the
     # data contract is asserted, not just "no exception"
@@ -239,7 +239,7 @@ def test_settings():
 
 
 def test_player_stepper():
-    """Compact header: the demo row and the ▲/▼ player stepper."""
+    """The header: the demo info and the player stepper."""
     at = open_demo(make_match([1, 2]), "stepper.dem", me=S1)
     assert not at.exception, err_of(at)
     assert (
@@ -250,11 +250,10 @@ def test_player_stepper():
         widget(at, "button", "mt_back") is not None
         and widget(at, "button", "demo_change_btn") is None
     ), "the match header offers the way back to the list"
-    # the compact row replaces the old add block after the first load
     act(at, "next player (Bravo)", lambda: at.button(key="me_next").click().run())
     assert ss_get(at, "me") == S2, "next moved the selection"
     caps = [c.value for c in at.caption]
-    assert any("**stepper**" in str(c) for c in caps), "compact demo row names the file"
+    assert any("**stepper**" in str(c) for c in caps), "the demo info names the file"
     act(
         at,
         "prev player (back to Alpha)",
@@ -318,7 +317,7 @@ def test_roundtrip():
     and nothing is lost on the way."""
     at = open_demo(make_match([1, 2, 13]), "roundtrip.dem")
     did = at.session_state["match"]
-    act(at, "roundtrip: first-half preset", lambda: ctl(at, "segmented_control", "flt_preset").select("first").run())
+    act(at, "roundtrip: first-half preset", lambda: ctl(at, "selectbox", "flt_preset").select("first").run())
     assert ss_get(at, "flt_preset") == "first", "roundtrip: preset set"
     act(at, "roundtrip: to the duels tab", lambda: ctl(at, "segmented_control", "match_tab").select("duels").run())
     assert ss_get(at, "match_tab") == "duels" and not at.exception, err_of(at)
@@ -354,13 +353,13 @@ def test_two_rounds():
     act(
         at,
         "pistols preset",
-        lambda: ctl(at, "segmented_control", "flt_preset").select("pistols").run(),
+        lambda: ctl(at, "selectbox", "flt_preset").select("pistols").run(),
     )
     assert ss_get(at, "flt_preset") == "pistols", "preset switched to pistols"
     act(
         at,
         "custom preset",
-        lambda: ctl(at, "segmented_control", "flt_preset").select("custom").run(),
+        lambda: ctl(at, "selectbox", "flt_preset").select("custom").run(),
     )
     assert widget(at, "slider", "flt_rounds") is not None, "custom shows the range slider"
     act(
@@ -371,7 +370,7 @@ def test_two_rounds():
     assert ss_get(at, "flt_preset") == "custom", "slider keeps Custom selected"
     act(
         at,
-        "weapon filter awp (More popover)",
+        "weapon filter awp",
         lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
     )
     act(
@@ -406,7 +405,7 @@ def test_long25():
         act(
             at,
             f"preset {p}",
-            lambda p=p: ctl(at, "segmented_control", "flt_preset").select(p).run(),
+            lambda p=p: ctl(at, "selectbox", "flt_preset").select(p).run(),
         )
     act(
         at,
@@ -417,17 +416,16 @@ def test_long25():
 
 
 def test_filter_panel():
-    """Popover panel: distance bands, reset, page scope, links."""
+    """The filter bar: distance bands, reset, page scope, links."""
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "panel.dem")
     assert not at.exception, err_of(at)
-    # the controls live behind the Edit popover, and Streamlit mounts a
-    # popover body on every run: they are reachable without opening it
     base = _shots_shown(at)
-    assert bool(base), "summary line shows the shot count"
-    for k in ("flt_side", "flt_preset", "flt_dist"):
-        assert widget(at, "segmented_control", k) is not None, f"{k} segmented control visible (behind the popover)"
-    assert widget(at, "pills", "flt_classes") is not None, "class pills visible (behind the popover)"
-    assert widget(at, "button", "flt_reset") is None, "no Reset without active filters"
+    assert bool(base), "the counts line shows the shot count"
+    for kind, k in (("selectbox", "flt_preset"), ("segmented_control", "flt_side"), ("selectbox", "flt_dist")):
+        assert widget(at, kind, k) is not None, f"{k} in the bar"
+    # Streamlit mounts a popover body on every run: reachable without opening it
+    assert widget(at, "pills", "flt_classes") is not None, "class pills in the weapons popover"
+    assert at.button(key="flt_reset").disabled, "nothing to reset without active filters"
     act(
         at,
         "weapon filter awp",
@@ -439,10 +437,10 @@ def test_filter_panel():
         act(
             at,
             f"distance band {band}",
-            lambda b=band: ctl(at, "segmented_control", "flt_dist").select(b).run(),
+            lambda b=band: ctl(at, "selectbox", "flt_dist").select(b).run(),
         )
         assert not at.exception, err_of(at)
-    assert widget(at, "button", "flt_reset") is not None, "reset button offered"
+    assert not at.button(key="flt_reset").disabled, "reset button offered"
     act(at, "reset filters", lambda: at.button(key="flt_reset").click().run())
     assert _shots_shown(at) == base, "reset restores the full view"
     # a closed popover keeps every selection (its widgets stay mounted)
@@ -458,16 +456,14 @@ def test_filter_panel():
     )
     open_match(at, at.session_state["demo_id"], "back into the match")
     assert ss_get(at, "flt_weapons") == ["awp"], "closed popover kept the weapon filter"
-    assert any("awp" in str(c.value) for c in at.caption), "summary names the filter"
-    assert widget(at, "button", "flt_reset") is not None, "Reset offered while filters are active"
+    assert not at.button(key="flt_reset").disabled, "Reset offered while filters are active"
     act(
         at,
-        "reset from the summary row",
+        "reset again",
         lambda: at.button(key="flt_reset").click().run(),
     )
-    assert ss_get(at, "flt_weapons") == [], "summary-row reset cleared the weapon filter"
-    assert ss_get(at, "flt_dist") == "all", "reset cleared the distance band"
     assert ss_get(at, "flt_weapons") == [], "reset cleared the weapon filter"
+    assert ss_get(at, "flt_dist") == "all", "reset cleared the distance band"
     # Result is a duels-page control; its value must survive page hops
     assert widget(at, "segmented_control", "flt_res") is None, "no result control on the overview page"
     goto(at, "duels")
@@ -486,7 +482,7 @@ def test_filter_panel():
         lambda: ctl(at, "segmented_control", "flt_side").select("T").run(),
     )
     goto(at, "guide")
-    assert widget(at, "segmented_control", "flt_preset") is None, "guide hides the panel"
+    assert widget(at, "selectbox", "flt_preset") is None, "guide hides the panel"
     goto(at, "overview")
     assert ss_get(at, "flt_side") == "T", "side filter survives the guide page"
     # link round-trip: filters -> URL -> fresh app
@@ -494,10 +490,10 @@ def test_filter_panel():
     act(
         at3,
         "distance band mid (for the link)",
-        lambda: ctl(at3, "segmented_control", "flt_dist").select("mid").run(),
+        lambda: ctl(at3, "selectbox", "flt_dist").select("mid").run(),
     )
     act(at3, "weapons for the link", lambda: at3.multiselect(key="flt_weapons").set_value(["ak47"]).run())
-    act(at3, "custom rounds for the link", lambda: ctl(at3, "segmented_control", "flt_preset").select("custom").run())
+    act(at3, "custom rounds for the link", lambda: ctl(at3, "selectbox", "flt_preset").select("custom").run())
     act(at3, "round 2 for the link", lambda: at3.slider(key="flt_rounds").set_value((2, 2)).run())
     link = dict(at3.query_params)
     assert link.get("dist") == ["mid"] or link.get("dist") == "mid", "the filtered view is in the URL"
@@ -513,12 +509,12 @@ def test_filter_panel():
          tuple(ss_get(at4, "flt_rounds")), ss_get(at4, "flt_res"), ss_get(at4, "lang"))
         == ("mid", ["ak47"], "custom", (2, 2), "both", "en")
     ), "link restores the filters, unknown values fall back"
-    # a chip click clears exactly its filter
+    # the result filter stays reachable when it leaves no duels, and Reset clears it
     goto(at4, "duels")
     act(at4, "deaths only", lambda: ctl(at4, "segmented_control", "flt_res").select("death").run())
-    chips = [b.key for b in at4.button if (b.key or "").startswith("flt_chip_")]
-    act(at4, "the result chip (the last one) clears it", lambda: at4.button(key=chips[-1]).click().run())
-    assert ss_get(at4, "flt_res") == "both", "the result filter is cleared by its chip"
+    assert widget(at4, "segmented_control", "flt_res") is not None
+    act(at4, "reset clears the result too", lambda: at4.button(key="flt_reset").click().run())
+    assert ss_get(at4, "flt_res") == "both", "the result filter is cleared by Reset"
 
 
 def test_knife_round():
@@ -555,7 +551,7 @@ def test_knife_round():
                         "user_name": [NAMES[S3]],
                         "weapon": ["knife"],
                         "headshot": [False],
-                        "distance": [500],
+                        "distance": [12.7],
                         "total_rounds_played": [0],
                         "is_warmup_period": [False],
                     }
@@ -578,7 +574,7 @@ def test_knife_round():
 
     at = open_demo(make_knife_match([1, 2]), "knife_round.dem")
     assert not at.exception, err_of(at)
-    banners = [c.value for c in at.caption if "span title=" in str(c.value)]
+    banners = [c.value for c in at.caption if "Excluded" in str(c.value)]
     assert len(banners) == 1, "excluded banner shown"
     assert any("knife round (1)" in b for b in banners), "banner says knife round (1)"
     # the knife kill must not leak into the live data: one duel per round
@@ -587,7 +583,7 @@ def test_knife_round():
     # the same banner in russian
     at = open_demo(make_knife_match([1, 2]), "knife_round.dem", lang="ru")
     assert not at.exception, err_of(at)
-    banners_ru = [c.value for c in at.caption if "span title=" in str(c.value)]
+    banners_ru = [c.value for c in at.caption if "Исключено" in str(c.value)]
     assert any("ножевой раунд (1)" in b for b in banners_ru), "ru: banner shown"
 
 
@@ -790,7 +786,7 @@ def test_matrix(pytestconfig):
                 act(
                     at,
                     f"preset {p}",
-                    lambda p=p: ctl(at, "segmented_control", "flt_preset")
+                    lambda p=p: ctl(at, "selectbox", "flt_preset")
                     .select(p)
                     .run(),
                 )
@@ -1114,14 +1110,14 @@ def test_impact():
     act(
         at,
         "round preset first half",
-        lambda: ctl(at, "segmented_control", "flt_preset").select("first").run(),
+        lambda: ctl(at, "selectbox", "flt_preset").select("first").run(),
     )
     otabs = [GRIDS.pop("du_openings")] if "du_openings" in GRIDS else []
     assert len(otabs) == 1 and len(otabs[0]) == 12, "openings follow the round filter"
     act(
         at,
         "round preset back to all",
-        lambda: ctl(at, "segmented_control", "flt_preset").select("all").run(),
+        lambda: ctl(at, "selectbox", "flt_preset").select("all").run(),
     )
 
     # russian labels render
@@ -1713,7 +1709,7 @@ def test_real_demo(pytestconfig, monkeypatch):
         monkeypatch.setattr(mod, "DemoParser", DemoParser)
     path = os.path.abspath(path)
     entry = store.add_demo(path)  # the real flow: the demo goes to the library
-    at = fresh_at(timeout=600, demo_id=entry["id"])
+    at = fresh_at(timeout=600, demo_id=entry["id"], match=entry["id"])
     assert not at.exception, err_of(at)
     # AppTest's select_index applies the app's format_func to the already
     # formatted label ("Name (T)" -> "Name (T) (?)"), so players are
@@ -1732,5 +1728,5 @@ def test_real_demo(pytestconfig, monkeypatch):
         act(
             at,
             f"preset {p}",
-            lambda p=p: ctl(at, "segmented_control", "flt_preset").select(p).run(),
+            lambda p=p: ctl(at, "selectbox", "flt_preset").select(p).run(),
         )

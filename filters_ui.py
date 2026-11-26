@@ -1,4 +1,4 @@
-"""The global filter bar: URL state, presets, the summary row, the popover.
+"""The global filter bar: URL state, presets, the controls, the counts.
 
 The controls render only inside the match view, so they carry persist_state="session"."""
 
@@ -139,7 +139,7 @@ def _preset_label(t, p: str, n_rounds: int, halves) -> str:
 
 
 def _on_preset_change(n_rounds, halves):
-    """Segmented-control on_change: park the preset's round range."""
+    """Preset on_change: park the preset's round range."""
 
     def _apply_preset():
         p = st.session_state.get("flt_preset", "all")
@@ -156,23 +156,6 @@ def _on_preset_change(n_rounds, halves):
 
 def _slider_custom():
     st.session_state["flt_preset"] = "custom"
-
-
-def _clear(key, value):
-    """A chip click clears one filter; on_click runs before widgets."""
-
-    def _fn():
-        st.session_state[key] = value
-
-    return _fn
-
-
-def _clear_rounds(n_rounds):
-    def _clr_rounds():
-        st.session_state["flt_rounds"] = (1, n_rounds)
-        st.session_state["flt_preset"] = "all"
-
-    return _clr_rounds
 
 
 def _reset_filters(n_rounds):
@@ -192,47 +175,26 @@ def _dist_label(t, v: str) -> str:
     return t("all") if v == "all" else t(f"flt_dist_{v}")
 
 
-def _active_chips(t, has_sides, show_result, n_rounds, halves):
-    """One dismissible chip per active filter: (label, clear callback)."""
-    # one dismissible chip per active filter: (label, clear callback)
-    _chips = []
-    if st.session_state.get("flt_weapons"):
-        _chips.append(
-            (", ".join(st.session_state["flt_weapons"]), _clear("flt_weapons", []))
-        )
-    if st.session_state.get("flt_classes"):
-        _chips.append(
-            (
-                ", ".join(t(f"wc_{c}") for c in st.session_state["flt_classes"]),
-                _clear("flt_classes", []),
-            )
-        )
-    if has_sides and st.session_state.get("flt_side") != "all":
-        _chips.append((st.session_state["flt_side"], _clear("flt_side", "all")))
-    if st.session_state.get("flt_preset", "all") == "custom":
-        _rv = tuple(st.session_state.get("flt_rounds") or ())
-        _chips.append(
-            (
-                t("flt_custom") + (f" {_rv[0]}–{_rv[1]}" if len(_rv) == 2 else ""),
-                _clear_rounds(n_rounds),
-            )
-        )
-    elif st.session_state.get("flt_preset", "all") != "all":
-        _chips.append(
-            (
-                _preset_label(t, st.session_state["flt_preset"], n_rounds, halves),
-                _clear_rounds(n_rounds),
-            )
-        )
-    if st.session_state.get("flt_dist", "all") != "all":
-        _chips.append(
-            (_dist_label(t, st.session_state["flt_dist"]), _clear("flt_dist", "all"))
-        )
-    if show_result and st.session_state.get("flt_res", "both") != "both":
-        _chips.append(
-            (fmt_result(st.session_state["flt_res"]), _clear("flt_res", "both"))
-        )
-    return _chips
+def _any_active(has_sides, show_result) -> bool:
+    """Is any filter of this tab narrowing the view?"""
+    ss = st.session_state
+    return bool(
+        ss.get("flt_weapons")
+        or ss.get("flt_classes")
+        or (has_sides and ss.get("flt_side") != "all")
+        or ss.get("flt_preset") != "all"
+        or ss.get("flt_dist") != "all"
+        or (show_result and ss.get("flt_res") != "both")
+    )
+
+
+def _weapons_label(t) -> str:
+    """The weapons button names its selection: the one pick, else how many."""
+    picks = [t(f"wc_{c}") for c in st.session_state.get("flt_classes") or []]
+    picks += st.session_state.get("flt_weapons") or []
+    if not picks:
+        return t("flt_weapons")
+    return f"{t('flt_weapons')}: {picks[0] if len(picks) == 1 else len(picks)}"
 
 
 def _round_kwargs(preset, n_rounds, halves) -> dict:
@@ -253,9 +215,8 @@ def _round_kwargs(preset, n_rounds, halves) -> dict:
 
 
 def _resolve_filters(ctx, preset, n_rounds, halves, has_sides, show_result):
-    """core.Filters from the session state, applied BEFORE the panel renders: the summary
-    line needs the counts."""
-    shots, duels_all, demo = ctx.shots, ctx.duels_all, ctx.demo
+    """core.Filters from the session state, applied BEFORE the panel renders: it
+    shows the counts."""
     filters = core.Filters(
         weapons=set(st.session_state.get("flt_weapons") or []) or None,
         classes=set(st.session_state.get("flt_classes") or []) or None,
@@ -268,7 +229,7 @@ def _resolve_filters(ctx, preset, n_rounds, halves, has_sides, show_result):
         **_round_kwargs(preset, n_rounds, halves),
     )
     shots_f, duels_f, hurts_f = core.apply_filters(
-        shots, duels_all, demo.hurts, filters
+        ctx.shots, ctx.duels_all, ctx.hurts, filters
     )
     # the kill/death filter applies only where its control is
     res_sel = set()
@@ -277,14 +238,10 @@ def _resolve_filters(ctx, preset, n_rounds, halves, has_sides, show_result):
     return filters, shots_f, duels_f, hurts_f, res_sel
 
 
-def _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves):
-    """Row 1: the round preset, the side, the duel result."""
-    _r1 = st.columns(
-        [3.9] + ([1.0] if has_sides else []) + ([1.4] if show_result else [])
-    )
-    _c = 0
-    with _r1[_c]:
-        st.segmented_control(
+def _controls(t, demo_weapons, present_classes, preset_opts, has_sides, n_rounds, halves):
+    """One row, every control showing its own value."""
+    with st.container(horizontal=True, vertical_alignment="bottom"):
+        st.selectbox(
             t("flt_rounds"),
             preset_opts,
             format_func=lambda p: _preset_label(t, p, n_rounds, halves),
@@ -292,123 +249,85 @@ def _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves
             on_change=_on_preset_change(n_rounds, halves),
             help=t("flt_rounds_help"),
             persist_state="session",
+            width=230,
         )
-    _c += 1
-    if has_sides:
-        with _r1[_c]:
+        if has_sides:
             st.segmented_control(
                 t("flt_side"),
                 ["all", "T", "CT"],
                 format_func=lambda v: t("all") if v == "all" else v,
                 key="flt_side",
                 help=t("flt_side_help"),
+                required=True,
                 persist_state="session",
             )
-        _c += 1
-    if show_result:
-        with _r1[_c]:
-            st.segmented_control(
-                t("flt_res"),
-                ["both", "kill", "death"],
-                format_func=lambda v: (
-                    t("res_both") if v == "both" else fmt_result(v)
-                ),
-                key="flt_res",
-                help=t("flt_res_help"),
-                persist_state="session",
-            )
-
-
-def _card_controls_row2(t, demo_weapons, present_classes):
-    """Row 2: distance and weapons (class pills OR single guns)."""
-    _r2 = st.columns([3.1, 2.2, 0.8], vertical_alignment="bottom")
-    with _r2[0]:
-        st.segmented_control(
+        st.selectbox(
             t("flt_dist"),
             list(_DIST_KEYS),
             format_func=lambda v: _dist_label(t, v),
             key="flt_dist",
             help=t("flt_dist_help"),
             persist_state="session",
+            width=180,
         )
-    with _r2[1]:
-        st.pills(
-            t("flt_classes"),
-            present_classes,
-            selection_mode="multi",
-            format_func=lambda c: t(f"wc_{c}"),
-            key="flt_classes",
-            help=t("flt_classes_help"),
-            persist_state="session",
-        )
-    with _r2[2]:
-        with st.popover(t("flt_more"), width="stretch"):
+        # the popover body stays mounted while closed, so the widgets keep their state
+        with st.popover(_weapons_label(t), icon=":material/tune:", key="flt_weapons_pop"):
+            st.pills(
+                t("flt_classes"),
+                present_classes,
+                selection_mode="multi",
+                format_func=lambda c: t(f"wc_{c}"),
+                key="flt_classes",
+                help=t("flt_classes_help"),
+                persist_state="session",
+            )
             st.multiselect(
                 t("flt_weapons"),
                 demo_weapons,
                 key="flt_weapons",
                 help=t("flt_weapons_help"),
+                placeholder=t("all"),
                 persist_state="session",
             )
-
-
-def _render_controls(t, demo_weapons, present_classes,
-                     preset_opts, has_sides, show_result, n_rounds, halves,
-                     counts):
-    """The popover body; it stays mounted while closed, so the widgets keep their state."""
-    _card_controls_row1(t, preset_opts, has_sides, show_result, n_rounds, halves)
-    _card_controls_row2(t, demo_weapons, present_classes)
     if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
         st.slider(
             t("flt_rounds"),
             1,
             n_rounds,
             key="flt_rounds",
-            help=t("flt_rounds_help"),
             on_change=_slider_custom,
+            label_visibility="collapsed",
             persist_state="session",
         )
-    # live feedback while editing: the same counts the summary line shows
-    st.caption(counts)
 
 
-def _render_summary_row(t, chips, counts, demo_weapons, present_classes,
-                        preset_opts, has_sides, show_result, n_rounds, halves):
-    """What is active, how much is in view, Reset, Edit; then the active filters as
-    dismissible chips (buttons: st.badge cannot be clicked)."""
-    _sum = (
-        t("flt_sum", parts=" · ".join(_label for _label, _ in chips))
-        if chips
-        else t("flt_sum_none")
+def _counts_row(t, counts: str, active: bool, n_rounds: int) -> None:
+    """How much is in view, and the way back to everything."""
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.caption(counts, width="content")
+        # always there: the page below must not jump when a filter is set
+        st.button(
+            t("flt_reset"),
+            on_click=_reset_filters(n_rounds),
+            key="flt_reset",
+            icon=":material/filter_alt_off:",
+            type="tertiary",
+            disabled=not active,
+            width="content",
+        )
+
+
+def result_control(t) -> None:
+    """The kill/death filter: the Duels page draws it over its table."""
+    st.segmented_control(
+        t("flt_res"),
+        ["both", "kill", "death"],
+        format_func=lambda v: t("res_both") if v == "both" else fmt_result(v),
+        key="flt_res",
+        label_visibility="collapsed",
+        required=True,
+        persist_state="session",
     )
-    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
-        st.caption(f"{_sum} · {counts}")
-        with st.popover(t("flt_edit"), icon=":material/tune:"):
-            st.caption(t("flt_title"))
-            _render_controls(
-                t, demo_weapons, present_classes, preset_opts, has_sides,
-                show_result, n_rounds, halves, counts,
-            )
-        if chips:
-            st.button(
-                t("flt_reset"),
-                on_click=_reset_filters(n_rounds),
-                key="flt_reset",
-                type="tertiary",
-                width="content",
-            )
-    # one dismissible chip per active filter
-    if chips:
-        with st.container(
-            horizontal=True, gap="small", vertical_alignment="center"
-        ):
-            for _i, (_label, _fn) in enumerate(chips):
-                st.button(
-                    f"{_label} ✕",
-                    on_click=_fn,
-                    key=f"flt_chip_{_i}",
-                    width="content",
-                )
 
 
 def _sync_filter_url(me, preset):
@@ -441,8 +360,6 @@ def render(ctx) -> None:
     _drop_stale_selections(demo_weapons, present_classes)
     _clamp_filter_state(preset_opts, n_rounds)
 
-    chips = _active_chips(t, has_sides, show_result, n_rounds, halves)
-
     preset = st.session_state.get("flt_preset", "all")
     filters, shots_f, duels_f, hurts_f, res_sel = _resolve_filters(
         ctx, preset, n_rounds, halves, has_sides, show_result
@@ -453,10 +370,11 @@ def render(ctx) -> None:
         counts += " " + t("flt_sum_of", shots=len(ctx.shots), duels=len(ctx.duels_all))
 
     if show_panel:
-        _render_summary_row(
-            t, chips, counts, demo_weapons, present_classes,
-            preset_opts, has_sides, show_result, n_rounds, halves,
-        )
+        with st.container(border=True):
+            _controls(
+                t, demo_weapons, present_classes, preset_opts, has_sides, n_rounds, halves
+            )
+            _counts_row(t, counts, _any_active(has_sides, show_result), n_rounds)
 
     _sync_filter_url(ctx.me, preset)
     ctx.filters = filters

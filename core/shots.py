@@ -25,7 +25,7 @@ from core.model import (
     weapon_class,
 )
 
-__all__ = ["add_risk", "add_stop_quality", "shots_table"]
+__all__ = ["add_risk", "add_stop_quality", "hurts_table", "shots_table"]
 
 
 def _nearest_enemy_dist(demo: Demo, shots: pd.DataFrame) -> pd.Series:
@@ -85,15 +85,15 @@ def _nearest_enemy_dist(demo: Demo, shots: pd.DataFrame) -> pd.Series:
     return res
 
 
-def _match_hits(shots: pd.DataFrame, hurts: pd.DataFrame) -> np.ndarray:
-    """hit[i] = this shot damaged an enemy: each hurt goes to the shooter's LATEST
-    same-weapon shot within HIT_WINDOW ticks before it."""
+def _shot_of_hurts(shots: pd.DataFrame, hurts: pd.DataFrame) -> np.ndarray:
+    """The row number of the shot behind every hurt, -1 when there is none: the shooter's
+    LATEST same-weapon shot within HIT_WINDOW ticks before it."""
 
-    hit = np.zeros(len(shots), dtype=bool)
+    res = np.full(len(hurts), -1, dtype=int)
     if not len(hurts) or not {"attacker_steamid", "weapon", "tick"}.issubset(
         hurts.columns
     ):
-        return hit
+        return res
     by_key: dict[tuple, list[tuple[int, int]]] = {}
     for i, (sid, w, t) in enumerate(
         zip(shots["sid"], shots["weapon"], shots["tick"].astype(int), strict=True)
@@ -101,15 +101,23 @@ def _match_hits(shots: pd.DataFrame, hurts: pd.DataFrame) -> np.ndarray:
         by_key.setdefault((sid, w), []).append((int(t), i))
     for lst in by_key.values():
         lst.sort()
-    for sid, w, th in zip(
-        hurts["attacker_steamid"], hurts["weapon"], hurts["tick"].astype(int)
-    , strict=True):
+    for n, (sid, w, th) in enumerate(
+        zip(hurts["attacker_steamid"], hurts["weapon"], hurts["tick"].astype(int), strict=True)
+    ):
         lst = by_key.get((sid, w))
         if not lst:
             continue
         j = bisect.bisect_right([t for t, _ in lst], int(th)) - 1
         if j >= 0 and int(th) - lst[j][0] <= HIT_WINDOW:
-            hit[lst[j][1]] = True
+            res[n] = lst[j][1]
+    return res
+
+
+def _match_hits(shots: pd.DataFrame, hurts: pd.DataFrame) -> np.ndarray:
+    """hit[i] = this shot damaged an enemy."""
+    hit = np.zeros(len(shots), dtype=bool)
+    ix = _shot_of_hurts(shots, hurts)
+    hit[ix[ix >= 0]] = True
     return hit
 
 
@@ -227,6 +235,23 @@ def shots_table(demo: Demo) -> pd.DataFrame:
         demo.side_at(int(r), sid) for r, sid in zip(out["round"], out["sid"], strict=True)
     ]
     out["weapon_class"] = out["weapon"].map(weapon_class)
+    return out
+
+
+def hurts_table(demo: Demo, shots: pd.DataFrame) -> pd.DataFrame:
+    """demo.hurts with the round, the attacker's side and the dist of the shot behind the
+    hit: a filter cuts the hits like the shots they are divided by."""
+    out = demo.hurts.copy()
+    if not len(out) or "attacker_steamid" not in out.columns:
+        return out
+    out["round"] = _round_col(out) + 1
+    out["side"] = [
+        demo.side_at(int(r), sid)
+        for r, sid in zip(out["round"], out["attacker_steamid"], strict=True)
+    ]
+    ix = _shot_of_hurts(shots, out)
+    dist = shots["dist"].to_numpy(dtype=float)
+    out["dist"] = np.where(ix >= 0, dist[ix], np.nan) if len(dist) else np.nan
     return out
 
 

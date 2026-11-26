@@ -122,7 +122,7 @@ def apply_filters(
     f: Filters | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
     """Cut shots / duels / hurts by the filter; None/empty selections do not constrain. Raw
-    duels keep a row when EITHER role matches the side."""
+    duels keep a row when EITHER role matches the side; hurts come from hurts_table."""
 
     if f is None or f.empty():
         return (

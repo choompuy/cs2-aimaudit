@@ -164,7 +164,7 @@ def make_match(rounds, weapons=("ak47",)):
                     "user_name": [NAMES[u] for _, _, u, _, _ in death_t],
                     "weapon": [w for _, _, _, w, _ in death_t],
                     "headshot": [True] * len(death_t),
-                    "distance": [500] * len(death_t),
+                    "distance": [12.7] * len(death_t),
                     "total_rounds_played": [r - 1 for _, _, _, _, r in death_t],
                     "is_warmup_period": [False] * len(death_t),
                     "attacker_last_place_name": ["BombsiteA"] * len(death_t),
@@ -400,11 +400,11 @@ def n_presets(at):
     so only the count and the selected raw value are language-neutral).
     """
 
-    sb = widget(at, "segmented_control", "flt_preset")
+    sb = widget(at, "selectbox", "flt_preset")
     return (len(sb.options), sb.value) if sb else (0, None)
 
 
-# preset segmented control contents by option count (see app.py:
+# preset selectbox contents by option count (see app.py:
 # preset_opts; Custom needs n_rounds >= 2 and is always last). 5 comes
 # from sides-derived halves without overtime (e.g. a 13-x FACEIT game).
 _PRESETS_BY_COUNT = {
@@ -416,7 +416,7 @@ _PRESETS_BY_COUNT = {
 
 
 def _shots_shown(at):
-    """Shot count from the filters summary line ('... N shots / M duels')."""
+    """Shot count from the filter bar ('... N shots / M duels')."""
     for c in at.caption:
         m = re.search(r"(\d+) shots", c.value)
         if m:
@@ -424,7 +424,5 @@ def _shots_shown(at):
     return None
 
 
-# the filter controls live inside the Edit popover, but Streamlit mounts
-# popover bodies on every run: the widgets are always reachable in
-# AppTest (no open step needed - the old open_filters collapsed-card
-# dance is gone with the card)
+# the weapon filters live inside a popover, but Streamlit mounts popover
+# bodies on every run: the widgets are always reachable in AppTest

@@ -160,6 +160,8 @@ HIT_WINDOW = 3
 
 
 MAX_DUEL_DIST = 10000.0
+# player_death.distance is in metres, everything else in game units (inches)
+UNITS_PER_M = 1 / 0.0254
 
 
 # ------------------------------------------------- shot context

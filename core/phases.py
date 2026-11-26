@@ -22,11 +22,13 @@ from core.model import (
     ALIVE_PROPS,
     BTN_NAMED,
     DUCK_PROPS,
+    HIT_WINDOW,
     NA,
     POS,
     PUNCH_PROPS,
     TEAMS,
     TICKRATE,
+    UNITS_PER_M,
     _decode_buttons,
     _first_shot_windows,
     _round_col,
@@ -35,6 +37,7 @@ from core.model import (
     hg_key,
     is_gun,
     norm_weapon,
+    round_of_tick,
 )
 
 __all__ = ["tickrate_from_header"]
@@ -173,6 +176,10 @@ def _parse_events_frames(p, flookup, name_to_sid):
                     df[nc] if nc in df.columns else None,
                     name_to_sid,
                 )
+    if "distance" in deaths.columns:
+        deaths["distance"] = (
+            pd.to_numeric(deaths["distance"], errors="coerce") * UNITS_PER_M
+        )
     return ev, deaths, fires, hurts
 
 
@@ -349,6 +356,56 @@ def _exclude_preliminary(ev, deaths, fires, hurts, warmup_rows):
     return deaths, fires, hurts, excluded, live_start, fe_rows
 
 
+def _cap_damage(hurts):
+    """dmg_health without the overkill (an AWP headshot reports 400+): a lethal hit took
+    the health that was left. Needs every hurt of the round, grenades included."""
+    if not {"user_steamid", "tick", "health", "dmg_health"} <= set(hurts.columns):
+        return
+    hp = pd.to_numeric(hurts["health"], errors="coerce")
+    order = hurts.assign(_hp=hp, _r=_round_col(hurts)).sort_values("tick", kind="stable")
+    left = order.groupby(["user_steamid", "_r"])["_hp"].shift().fillna(100)
+    dmg = pd.to_numeric(hurts["dmg_health"], errors="coerce")
+    hurts["dmg_health"] = dmg.where(hp != 0, dmg.clip(upper=left.reindex(hurts.index)))
+
+
+def _fired_weapon(hurts, fires):
+    """The weapon of every hurt. The event names the base item (m4a1 for the M4A1-S,
+    hkp2000 for the USP-S, mp7 for the MP5-SD, deagle for the R8), so it is the one the
+    attacker fired last, at most HIT_WINDOW ticks before."""
+    got = pd.merge_asof(
+        pd.DataFrame(
+            {
+                "tick": hurts["tick"].astype("int64"),
+                "sid": hurts["attacker_steamid"],
+                "ix": hurts.index,
+            }
+        ).sort_values("tick", kind="stable"),
+        pd.DataFrame(
+            {
+                "tick": fires["tick"].astype("int64"),
+                "sid": fires["user_steamid"],
+                "fired": fires["weapon"],
+            }
+        ).sort_values("tick", kind="stable"),
+        on="tick",
+        by="sid",
+        tolerance=HIT_WINDOW,
+    ).set_index("ix")["fired"]
+    return got.reindex(hurts.index).fillna(hurts["weapon"])
+
+
+def _round_by_window(windows, *frames) -> None:
+    """The round counter steps at the END of a round: events between it and the respawn
+    belong to the round that is still on."""
+    for df in frames:
+        if not len(df) or not {"tick", "total_rounds_played"} <= set(df.columns):
+            continue
+        rd = pd.to_numeric(df["tick"].map(lambda t: round_of_tick(windows, t)))
+        df["total_rounds_played"] = (rd - 1).fillna(
+            pd.to_numeric(df["total_rounds_played"], errors="coerce")
+        )
+
+
 def _filter_gun_events(players, deaths, fires, hurts):
     """Phase 4: gun-only fires and the hurts cleanup."""
     teams = dict(zip(players["sid"], players["team"], strict=True))
@@ -360,6 +417,7 @@ def _filter_gun_events(players, deaths, fires, hurts):
     if fires.empty:
         raise ValueError("no_events")
     if len(hurts) and "attacker_steamid" in hurts.columns:
+        _cap_damage(hurts)
         hurts = hurts[
             hurts["weapon"].map(is_gun)
             & (hurts["attacker_steamid"] != NA)
@@ -369,7 +427,9 @@ def _filter_gun_events(players, deaths, fires, hurts):
             hurts["user_steamid"].map(teams)
         ) & hurts["attacker_steamid"].isin(teams)
         hurts = hurts[~same_team].copy()
-        hurts["weapon"] = hurts["weapon"].map(norm_weapon)
+        hurts["weapon"] = _fired_weapon(
+            hurts.assign(weapon=hurts["weapon"].map(norm_weapon)), fires
+        )
         hurts["hitgroup"] = hurts["hitgroup"].map(hg_key)
     return fires, hurts
 

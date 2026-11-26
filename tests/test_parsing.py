@@ -15,6 +15,53 @@ import store
 from fakes import FakeParser, S1, S2, S3, S4, f64_sid, make_match
 
 
+def test_hurt_weapon_is_the_fired_one():
+    """A hurt names the base item: m4a1 for the M4A1-S."""
+    m = make_match()
+    fires, hurts = m["events"]["weapon_fire"], m["events"]["player_hurt"]
+    by_s1 = fires["user_name"] == "Alpha"
+    m["events"]["weapon_fire"] = fires.assign(
+        weapon=fires["weapon"].where(~by_s1, "weapon_m4a1_silencer")
+    )
+    m["events"]["player_hurt"] = hurts.assign(
+        weapon=hurts["weapon"].where(hurts["attacker_name"] != "Alpha", "weapon_m4a1")
+    )
+    FakeParser.demos["m4a1s.dem"] = m
+    d = core.load_demo("m4a1s.dem")
+    weapon = d.hurts.set_index("attacker_steamid")["weapon"]
+    assert weapon[S1] == "m4a1_silencer"
+    assert weapon[S3] == "ak47" and weapon[S4] == "ak47", "no shot behind the hit: its own name"
+    sh = core.shots_table(d)
+    assert sh.loc[sh["tick"] == 120, "hit"].all(), "the shot knows it hit"
+    ws = core.weapon_stats(d, sh, S1, 40.0).set_index("weapon")
+    assert list(ws.index) == ["m4a1_silencer"]
+    assert ws.loc["m4a1_silencer", "hits"] == 1 and ws.loc["m4a1_silencer", "accuracy"] > 0
+
+
+def test_round_by_window():
+    """The counter steps at the round end, the round lasts until the respawn."""
+    df = pd.DataFrame({"tick": [150, 190, 250, 350], "total_rounds_played": [0, 1, 1, 1]})
+    core.phases._round_by_window({1: (100, 200), 2: (300, 400)}, df)
+    assert df["total_rounds_played"].tolist() == [0, 0, 1, 1]
+    core.phases._round_by_window({}, df)
+    assert df["total_rounds_played"].tolist() == [0, 0, 1, 1], "no windows: untouched"
+
+
+def test_cap_damage():
+    hurts = pd.DataFrame(
+        {
+            "tick": [10, 20, 15, 99],
+            "user_steamid": ["a", "a", "b", "a"],
+            "health": [40, 0, 0, 0],
+            "dmg_health": [60, 431, 120, 431],
+            "total_rounds_played": [0, 0, 0, 1],
+        },
+        index=[5, 2, 9, 4],
+    )
+    core.phases._cap_damage(hurts)
+    assert hurts["dmg_health"].tolist() == [60, 40, 100, 100]
+
+
 def test_first_shots_and_flick(shots):
     # gap semantics: > ENGAGE_GAP_TICKS since the same sid's
     # previous shot = fresh aim event; the array is order-independent

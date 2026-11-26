@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import core
 from fakes import FakeParser, IDS, S1, S2, S3, S4, make_match
@@ -76,7 +77,7 @@ def test_build_duels(duels):
     assert abs(d0["duration_s"] - round(21 / 64, 2)) < 1e-9, "duration"
     assert 4.0 < d0["killer_err"] < 6.0, "killer_err ~ punch (4..6 deg)"
     assert d0["victim_err"] < 1.0, "victim_err < 1 deg"
-    assert float(d0["distance"]) == 800.0, "distance passthrough"
+    assert float(d0["distance"]) == pytest.approx(800.0), "metres in the event, units in the table"
 
 
 def test_duels_for_and_summary(demo, shots, duels):

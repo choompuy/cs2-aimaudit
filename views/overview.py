@@ -14,14 +14,11 @@ def render(ctx) -> None:
     me = ctx.me
     summary = ctx.summary
     filters = ctx.filters
-    st.subheader(t("ov_title"))
-    st.caption(t("ov_caption"))
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.subheader(t("ov_title"), help=t("ov_caption"))
+        ov_full = st.toggle(t("all_columns"), key="ov_full", persist_state="session")
     if filters.side or filters.rounds or filters.rounds_set:
         st.caption(t("ov_scope_note"))
-    _tcol, _ = st.columns([1, 2])
-    with _tcol:
-        ov_full = st.toggle(t("all_columns"), key="ov_full", persist_state="session")
-    st.caption(t("ov_click_hint"))
 
     team_order = ["T", "CT"] + sorted(set(summary["team"]) - {"T", "CT"})
     ov = (
@@ -81,3 +78,4 @@ def render(ctx) -> None:
         all_columns=ov_full,
         icons={**bw_icons, **dt_icons},
     )
+    st.caption(t("ov_click_hint"))

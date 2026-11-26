@@ -68,11 +68,64 @@ def test_per_round_sides():
     assert d2["killer_side"] == "T" and d2["victim_side"] == "CT", "duel 2 sides: T killed CT after swap"
     mine_s = core.duels_for(duels_s, S1)
     assert list(mine_s["my_side"]) == ["T", "CT"], "duels_for my_side follows rounds"
+    # the side is the player's own: the app's path, apply_filters -> duels_for / summary
+    f_ct = core.Filters(side="CT")
+    sh_ct, du_ct, _ = core.apply_filters(shots_s, duels_s, None, f_ct)
+    mine_ct = core.duels_for(du_ct, S1, f_ct.side)
+    assert list(mine_ct["my_side"]) == ["CT"], "only the round S1 played as CT"
+    opp_ct = core.duels_for(du_ct, S1, "T")
+    assert set(opp_ct["round"]).isdisjoint(mine_ct["round"]), "the sides split the duels"
+    own_ct = core.player_summary(demo_s, duels_s[duels_s["round"].isin(mine_ct["round"])], sh_ct, 40)
+    all_ct = core.player_summary(demo_s, du_ct, sh_ct, 40, f=f_ct)
+    cols = ["hs_kills", "first_shot", "aim_err", "duration"]
+    pd.testing.assert_frame_equal(
+        all_ct.loc[all_ct["sid"] == S1, cols].reset_index(drop=True),
+        own_ct.loc[own_ct["sid"] == S1, cols].reset_index(drop=True),
+    )
     summ_s = core.player_summary(demo_s, duels_s, shots_s, 40)
     a_row = summ_s[summ_s["sid"] == S1].iloc[0]
     assert a_row["sides"] == "T→CT", "summary sides T→CT"
     chk_s = {c["id"]: c for c in core.data_checks(demo_s, shots_s, duels_s)}
     assert chk_s["sides"]["level"] == "ok", "sides check ok when data present"
+    # the hits follow the Rounds and Side filters like the shots they are divided by:
+    # S3 (CT, then T) hits in both rounds, in round 2 with two pellets of one shot
+    m_h = make_match_sides()
+    m_h["events"]["player_hurt"] = pd.DataFrame(
+        {
+            "tick": [110, 300, 301],
+            "attacker_steamid": pd.array([int(S3)] * 3, dtype="float64"),
+            "attacker_name": ["Charlie"] * 3,
+            "user_steamid": pd.array([int(S1)] * 3, dtype="float64"),
+            "user_name": ["Alpha"] * 3,
+            "weapon": ["weapon_ak47"] * 3,
+            "hitgroup": [1, 2, 2],
+            "total_rounds_played": [0, 1, 1],
+            "is_warmup_period": [False] * 3,
+        }
+    )
+    FakeParser.demos["sides_hurts.dem"] = m_h
+    demo_h = core.load_demo("sides_hurts.dem")
+    shots_h, duels_h = core.shots_table(demo_h), core.build_duels(demo_h, 3.0)
+    hurts_h = core.hurts_table(demo_h, shots_h)
+    assert list(hurts_h["round"]) == [1, 2, 2] and list(hurts_h["side"]) == ["CT", "T", "T"]
+    assert "round" not in demo_h.hurts.columns, "the demo's own frame is untouched"
+    for flt, n_hits, hs in (
+        (None, 2, 33.3),
+        (core.Filters(side="CT"), 1, 100.0),
+        (core.Filters(side="T"), 1, 0.0),
+        (core.Filters(rounds=(1, 1)), 1, 100.0),
+        (core.Filters(rounds_set={2}), 1, 0.0),
+    ):
+        s_h, d_h, h_h = core.apply_filters(shots_h, duels_h, hurts_h, flt)
+        row = core.player_summary(demo_h, d_h, s_h, 40, hurts=h_h, f=flt)
+        row = row[row["sid"] == S3].iloc[0]
+        assert (row["hits"], row["hs_hits"]) == (n_hits, hs), flt
+        assert row["accuracy"] == round(n_hits / row["shots"] * 100, 1) <= 100, flt
+    # the distance is the one of the shot behind the hit
+    by_tick = shots_h.set_index("tick")["dist"]
+    assert list(hurts_h["dist"]) == [by_tick[110], by_tick[300], by_tick[300]]
+    far = core.Filters(dist=(float(by_tick.max()) + 1, float("inf")))
+    assert [len(x) for x in core.apply_filters(shots_h, duels_h, hurts_h, far)] == [0, 0, 0]
     # team_num unavailable -> static fallback + warn check
     m_s2 = make_match_sides()
     m_s2["unsupported"] = {"team_num"}

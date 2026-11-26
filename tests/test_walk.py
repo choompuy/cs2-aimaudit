@@ -105,11 +105,12 @@ def _do_sliders(at, rng, page: str, tab: str) -> str:
 
 
 def _act_flt_panel(at, rng, which: str) -> str:
-    """Drive one control of the open analysis-filter card."""
+    """Drive one control of the filter bar."""
     kind = (
         "slider" if which == "flt_rounds"
         else "multiselect" if which == "flt_weapons"
         else "pills" if which == "flt_classes"
+        else "selectbox" if which in ("flt_preset", "flt_dist")
         else "segmented_control"
     )
     w = widget(at, kind, which)
@@ -211,13 +212,11 @@ def _do_mflt_reset(at, rng, page: str, tab: str) -> str:
 
 
 def _do_filters(at, rng, page: str, tab: str) -> str:
-    """Reset the analysis filters / dismiss a chip (the Edit popover's
-    controls are covered by the flt_panel handler)."""
-    for key in ("flt_reset", "flt_chip_0"):
-        button = widget(at, "button", key)
-        if button:
-            button.click().run()
-            return key
+    """Reset the analysis filters (flt_panel drives the controls)."""
+    button = widget(at, "button", "flt_reset")
+    if button and not button.disabled:
+        button.click().run()
+        return "flt_reset"
     return "filters:absent"
 
 
