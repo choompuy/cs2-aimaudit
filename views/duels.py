@@ -1,4 +1,4 @@
-"""The Duels page: the duel list (a row opens the duel window).
+"""The Duels page: the duel list (a row opens that duel in the 2D replay).
 
 Only what the player can train on: where the duels happened is on the Map page
 (its tooltips name the zone)."""
@@ -6,6 +6,7 @@ Only what the player can train on: where the duels happened is on the Map page
 import pandas as pd
 import streamlit as st
 
+import core
 import filters_ui
 import state
 from ui import icons
@@ -59,6 +60,15 @@ def _duel_cells(
     }
 
 
+def handover(round_windows, row, me: str) -> tuple[int, int, str]:
+    """(round, tick, victim) of a duel row for the 2D replay: the round is the one
+    whose window the replay plays (round_of_tick), else the row's own."""
+    tick = int(row["tick"])
+    rnd = core.round_of_tick(round_windows, tick) or int(row["round"])
+    victim = me if row["result"] == "death" else str(row["opponent"])
+    return int(rnd), tick, str(victim)
+
+
 def _duels_grid(ctx, du_full: bool) -> None:
     """The duel list table (row click opens the timeline window)."""
     t, ddf = ctx.t, ctx.my_duels
@@ -66,10 +76,9 @@ def _duels_grid(ctx, du_full: bool) -> None:
     du_cells = _duel_cells(ddf, ctx.name_of, t, w_vals, w_labels)
 
     def _duel_click_row(i):
-        """Open that duel's window (at the bottom of the run)."""
+        """Show that duel in the 2D replay (its round, the duel picked)."""
         if 0 <= i < len(ctx.my_duels):
-            state.TL_DUEL.set(i)
-            state.DU_OPEN.set(True)
+            state.open_in_replay(*handover(ctx.demo.round_windows, ctx.my_duels.iloc[i], ctx.me))
 
     schema.table(
         "duels",
@@ -82,7 +91,7 @@ def _duels_grid(ctx, du_full: bool) -> None:
         key="du_grid",
         on_click=_duel_click_row,
         all_columns=du_full,
-        icons=w_icons,
+        icons={**w_icons, **icons.payload(["skull"])},
     )
     st.caption(t("du_click_hint"))
 

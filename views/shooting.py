@@ -119,21 +119,32 @@ def _discipline_stats(sh_me, thr):
     )
 
 
-def _stats(ctx) -> _Stats:
+def _only(df, weapon):
+    """The rows of one weapon (all of them without a focus)."""
+    if weapon is None or df is None or not len(df) or "weapon" not in df.columns:
+        return df
+    return df[df["weapon"] == weapon]
+
+
+def _stats(ctx, weapon=None) -> _Stats:
     """Compute the page's numbers once from ctx (hit stats, duel stats,
-    shot discipline, first-shot discipline, the round-impact row)."""
+    shot discipline, first-shot discipline, the round-impact row); ``weapon``
+    narrows the shots, hits and duels to that gun (round impact has no weapon:
+    it is left out then)."""
     demo = ctx.demo
     me = ctx.me
     thr = ctx.thr
-    shots_f = ctx.shots_f
+    shots_f = _only(ctx.shots_f, weapon)
 
     sh_me = shots_f[shots_f["sid"] == me]
-    hg_me = core.hitgroup_counts(demo, me, ctx.hurts_f)
-    dd = ctx.my_duels
+    hurts = _only(ctx.hurts_f if ctx.hurts_f is not None else demo.hurts, weapon)
+    hg_me = core.hitgroup_counts(demo, me, hurts)
+    dd = _only(ctx.my_duels, weapon)
     hits_n = int(sh_me["hit"].sum()) if len(sh_me) else 0
     hs_hits = hg_me.get("head", 0) / hg_me.sum() * 100 if len(hg_me) else np.nan
+    impact = ctx.impact if weapon is None else ctx.impact.iloc[0:0]
     (kills, dths, fs, imp_me, first_pct, dur, err, spd, dd_err,
-     onhead_pct) = _duel_stats(dd, ctx.impact, me)
+     onhead_pct) = _duel_stats(dd, impact, me)
     (moving_pct, risky_pct, stops, cs_pct, fl_known, fl_n, sl_known, sl_n,
      fs_me, fu_me, first_n, first_acc, follow_acc, fm, fm_known, swing_med,
      swing_n) = _discipline_stats(sh_me, thr)
@@ -330,15 +341,19 @@ def _duel_impact_rows(t, s) -> dict:
         else t("none_val")
     )
     rate_txt, rate = _imp(t, s, "open_rate", pct)
+    duels = [
+        _tile(t, "m_kd", "m_kd_help", f"{s.kills} / {s.dths}", kd, _SPEC["kd"]),
+        # the W / L count, the bar and the colour read the winrate
+        _tile(t, "m_open", ("m_open_help", "m_open_rate_help"), open_wl, rate,
+              _SPEC["open_rate"],
+              sub=f"{t('m_open_rate')}: {rate_txt}"),
+        _tile(t, "m_dur", "m_dur_help", num(s.dur, 2)),
+    ]
+    if s.imp_me is None:
+        # one weapon in focus: openings, multi-kills, trades are per round, not per gun
+        return {"sec_duels": [duels[0], duels[2]]}
     return {
-        "sec_duels": [
-            _tile(t, "m_kd", "m_kd_help", f"{s.kills} / {s.dths}", kd, _SPEC["kd"]),
-            # the W / L count, the bar and the colour read the winrate
-            _tile(t, "m_open", ("m_open_help", "m_open_rate_help"), open_wl, rate,
-                  _SPEC["open_rate"],
-                  sub=f"{t('m_open_rate')}: {rate_txt}"),
-            _tile(t, "m_dur", "m_dur_help", num(s.dur, 2)),
-        ],
+        "sec_duels": duels,
         "sec_impact": [
             _group(t, "m_multi", ["m_k2_help"], [
                 ("m_k2", _imp(t, s, "k2")[0]),
@@ -474,32 +489,66 @@ def _charts(t, s) -> None:
     _risk_chart(t, s)
 
 
-def _weapons_grid(ctx) -> None:
-    """The per-weapon table."""
-    t = ctx.t
-    st.markdown(f"**{t('weapons')}**")
-    w = core.weapon_stats(
+_FOCUS = "sh_weapon"  # the weapon the page is narrowed to (this page only)
+
+
+def _weapon_table(ctx):
+    return core.weapon_stats(
         ctx.demo, ctx.shots_f, ctx.me, ctx.thr, ctx.safe_dist, ctx.strict_dist,
         hurts=ctx.hurts_f,
     )
-    if len(w):
-        w_vals, w_labels, w_icons = icons.weapon_cells(w["weapon"])
-        cells = {c: w[c].to_numpy() for c in schema.columns("weapons")}
-        schema.table(
-            "weapons",
-            {**cells, "weapon": w_vals, "weapon_disp": w_labels},
-            key="w_grid",
-            icons=w_icons,
-        )
+
+
+def _weapons_grid(ctx, w, focus) -> None:
+    """The per-weapon table: a row click narrows the page to that weapon, a second
+    click (or "All weapons") widens it back."""
+    t = ctx.t
+    names = w["weapon"].astype(str).tolist()
+
+    def _pick(i):
+        if 0 <= i < len(names):
+            st.session_state[_FOCUS] = None if focus == names[i] else names[i]
+
+    w_vals, w_labels, w_icons = icons.weapon_cells(w["weapon"])
+    cells = {c: w[c].to_numpy() for c in schema.columns("weapons")}
+    schema.table(
+        "weapons",
+        {**cells, "weapon": w_vals, "weapon_disp": w_labels},
+        key="w_grid",
+        icons=w_icons,
+        selected=names.index(focus) if focus in names else None,
+        on_click=_pick,
+    )
+
+
+def _focus_bar(t, focus) -> None:
+    """What the numbers below describe: every weapon or the picked one."""
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+        if focus is None:
+            st.markdown(f"**{t('sh_scope_all')}**")
+            st.caption(t("sh_scope_hint"))
+        else:
+            st.markdown(f"**{t('sh_scope_one', w=icons.weapon_label(focus))}**")
+            st.button(
+                t("sh_scope_clear"), key="sh_weapon_clear", icon=":material/close:",
+                type="tertiary", on_click=lambda: st.session_state.update({_FOCUS: None}),
+            )
 
 
 def render(ctx) -> None:
-    """Draw the Shooting page: the coaching card, the graded metric tiles, the
-    shooting charts, the weapons grid."""
+    """Draw the Shooting page: the coaching card, the weapons (a row narrows the
+    page to that gun), the graded metric tiles and the shooting charts."""
     t = ctx.t
-    s = _stats(ctx)
-    _top3_card(t, _build_tips(t, s))
+    _top3_card(t, _build_tips(t, _stats(ctx)))
+    w = _weapon_table(ctx)
+    focus = st.session_state.get(_FOCUS)
+    if focus not in set(w["weapon"].astype(str)):
+        focus = st.session_state[_FOCUS] = None
+    if len(w):
+        st.markdown(f"**{t('weapons')}**", help=t("sh_weapons_help"))
+        _weapons_grid(ctx, w, focus)
+    _focus_bar(t, focus)
+    s = _stats(ctx, focus)
     _metric_tiles(t, s)
     _angles_warning(t, s)
     _charts(t, s)
-    _weapons_grid(ctx)

@@ -50,7 +50,7 @@ def test_used_keys_exist():
 # strings that are the same in both languages
 SAME_IN_RU = {
     "col_hs", "first_none", "k_BACK", "k_FORWARD", "k_LEFT", "k_RIGHT", "kind_faceit",
-    "none_val", "m_k2", "m_k3", "m_k4", "rr_pt_hp", "rr_pt_money", "rr_u_s", "tl_ax_speed", "tl_label", "weapon_none",
+    "none_val", "m_k2", "m_k3", "m_k4", "rr_pt_hp", "rr_pt_money", "rr_u_s", "weapon_none",
 }
 
 
@@ -83,8 +83,6 @@ def test_placeholders_match():
 @pytest.mark.parametrize("lang", i18n.LANGS)
 def test_formatting(lang):
     t = i18n.make_t(lang)
-    t("tl_label", round=1, result="r", weapon="w", opp="o")
-    t("tl_summary", res="r", opp="o", weapon="w", first="f", shots=1, dur=1.0)
     t("step_ticks", n=5)
     t("tip_risky", pct=10.0)
     t("tip_err", err=1.0)
@@ -94,9 +92,6 @@ def test_formatting(lang):
     t("chk_na_ids", n=1, pct=1.0)
     t("chk_angles", med=1.0, n=1)
     t("chk_hitgroups", n=1, vals="x")
-    t("tl_no_buttons", keys="k")
-    t("tl_buttons", keys="k")
-    t("tl_first", speed="1", err="1")
     t("err_path_missing", path="x")
     t("chk_sides", n=1, pct=1.0)
 

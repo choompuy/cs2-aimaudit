@@ -382,6 +382,28 @@ def test_timeline_buttons():
     assert abs(sp_tl.max() - 512.0) < 1e-6, "timeline speed at 128 tick = 512"
 
 
+def test_keys_from_pawn_state():
+    """Recent CS2 demos carry neither `buttons` nor WALK: Shift / crouch / jump come from
+    the pawn state instead; a real bitfield still wins."""
+    from core.model import _decode_buttons
+
+    df = _decode_buttons(
+        pd.DataFrame(
+            {
+                "FORWARD": [True, False, False],
+                "is_walking": [True, False, None],
+                "duck_amount": [0.0, 0.7, 1.0],
+                "is_airborne": [False, True, False],
+            }
+        )
+    )
+    assert list(df["WALK"]) == [True, False, False], "WALK = is_walking"
+    assert list(df["DUCK"]) == [False, True, True], "DUCK = crouched past half way"
+    assert list(df["JUMP"]) == [False, True, False], "JUMP = in the air"
+    bits = _decode_buttons(pd.DataFrame({"buttons": [1 << 2], "is_airborne": [True]}))
+    assert bool(bits["DUCK"].iloc[0]) and not bool(bits["JUMP"].iloc[0]), "the bitfield wins"
+
+
 def test_decompressed_demo():
     payload = b"FAKEDEMO-PAYLOAD-" * 256
     tdir = tempfile.mkdtemp(prefix="cs2aa_test_")

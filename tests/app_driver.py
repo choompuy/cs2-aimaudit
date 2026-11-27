@@ -14,6 +14,7 @@ import store
 from fakes import FakeParser, IDS, S1, S2, S3, S4, f64_sid
 from state import MATCH_TABS
 from ui import meters, schema
+from views.duels import handover
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -412,15 +413,29 @@ def open_match(at, did, name="open the match again"):
 
 
 def open_duel(at, i, name=None):
-    """A Duels row click: the duel window (st.dialog) opens over the page."""
+    """A Duels row click: that duel opens in the 2D replay. AppTest cannot click inside
+    the grid component, so this hands the row over the way its callback does
+    (views.duels.handover -> state.open_in_replay), from the rows the grid drew."""
     goto(at, "duels")
-    act(
-        at,
-        name or f"duel window #{i}",
-        lambda: at.session_state.__setitem__("tl_duel", i)
-        or at.session_state.__setitem__("du_open", True)
-        or at.run(),
-    )
+    rows = RAWS["du_grid"]
+    i = min(int(i), len(rows["tick"]) - 1)
+    by_name = {v: k for k, v in NAMES.items()}
+    me = at.session_state["me"]
+    row = {
+        "tick": int(rows["tick"][i]),
+        "round": int(rows["round"][i]),
+        "result": str(rows["result_raw"][i]),
+        "opponent": by_name.get(str(rows["opponent"][i]), str(rows["opponent"][i])),
+    }
+    rnd, tick, victim = handover({}, row, me)
+
+    def _click():
+        at.session_state["rr_round"] = rnd
+        at.session_state["rr_sel"] = (rnd, tick, victim)
+        at.session_state["match_tab"] = "replay"
+        at.run()
+
+    act(at, name or f"duel #{i} in the replay", _click)
 
 
 def act(at, name, fn):
@@ -439,14 +454,12 @@ def n_presets(at):
     return (len(sb.options), sb.value) if sb else (0, None)
 
 
-# preset selectbox contents by option count (see app.py:
-# preset_opts; Custom needs n_rounds >= 2 and is always last). 5 comes
-# from sides-derived halves without overtime (e.g. a 13-x FACEIT game).
+# preset pills by option count (filters_ui._preset_options; Custom needs
+# n_rounds >= 2 and is always last; no halves: the T / CT switch is that cut).
 _PRESETS_BY_COUNT = {
     1: ("all",),
     3: ("all", "pistols", "custom"),
-    5: ("all", "first", "second", "pistols", "custom"),
-    6: ("all", "first", "second", "ot", "pistols", "custom"),
+    4: ("all", "ot", "pistols", "custom"),
 }
 
 

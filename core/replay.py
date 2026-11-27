@@ -21,6 +21,7 @@ from core.model import (
     HEAD_STAND,
     NA,
     POS,
+    STATE_KEY_PROPS,
     TICKRATE,
     _decode_buttons,
     _safe_int,
@@ -256,6 +257,7 @@ def timeline_data(
     df = _parse_ticks_tiered(
         parser,
         (
+            POS + BTN_NAMED + ["buttons"] + STATE_KEY_PROPS + ALIVE_PROPS,
             POS + BTN_NAMED + ["buttons"] + ALIVE_PROPS,
             POS + ["buttons"] + ALIVE_PROPS,
             POS + ALIVE_PROPS,
@@ -291,6 +293,13 @@ def _round_frames(parser, lo: int, hi: int, max_samples: int):
     df = _parse_ticks_tiered(
         parser,
         (
+            POS
+            + BTN_NAMED
+            + ["buttons"]
+            + STATE_KEY_PROPS
+            + ALIVE_PROPS
+            + ["health", "active_weapon_name", "flash_duration"]
+            + ECONOMY_PROPS,
             POS
             + BTN_NAMED
             + ["buttons"]

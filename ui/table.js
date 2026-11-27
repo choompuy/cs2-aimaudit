@@ -1,5 +1,25 @@
+// the 2D replay's kill / death marks (Lucide, ISC): a crosshair, a skull - the
+// game's own skull silhouette when the icon set is installed
+const MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+const MARKS = {
+  kill: MARK_SVG + '<circle cx="12" cy="12" r="9"/><path d="M22 12h-4M6 12H2M12 6V2M12 22v-4"/></svg>',
+  death: MARK_SVG + '<path d="m12.5 17-.5-1-.5 1h1z"/><path d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="12" r="1"/></svg>',
+};
+
 export default function (component) {
   const { data, parentElement, setTriggerValue } = component;
+  const markEl = (raw) => {
+    if (raw === "death" && data.icons && data.icons.skull) {
+      const im = el("span", "mk ic");
+      im.style.setProperty("--ico", 'url("' + data.icons.skull[0] + '")');
+      im.style.setProperty("--ar", "1");
+      return im;
+    }
+    if (!MARKS[raw]) return null;
+    const m = el("span", "mk");
+    m.innerHTML = MARKS[raw];
+    return m;
+  };
   const root = parentElement;
   const S = root.__aa || (root.__aa = { sig: "", col: -1, dir: 0, top: 0, left: 0 });
   let host = root.querySelector(".aa-host");
@@ -52,7 +72,8 @@ export default function (component) {
     const prev = host.querySelector(".aa-wrap");
     if (prev) { S.top = prev.scrollTop; S.left = prev.scrollLeft; }
     const wrap = el("div", "aa-wrap");
-    wrap.style.maxHeight = data.maxh + "px";
+    // 0 = no cap: the page scrolls, never a second scrollbar inside it
+    if (data.maxh > 0) wrap.style.maxHeight = data.maxh + "px";
     if (!data.rows.length) {
       wrap.appendChild(el("div", "aa-empty", data.empty || ""));
       host.replaceChildren(wrap);
@@ -147,8 +168,13 @@ export default function (component) {
           im.setAttribute("aria-label", cell[1]);
           im.setAttribute("role", "img");
           box.appendChild(im);
+          if (c.n) box.appendChild(el("span", "val nm", cell[1]));
         } else if (c.t === "badge" && cell[1] !== "") {
-          box.appendChild(el("span", "badge" + (cell[3] ? " tone-" + cell[3] : ""), cell[1]));
+          const bd = el("span", "badge" + (cell[3] ? " tone-" + cell[3] : ""));
+          const mk = c.mk ? markEl(cell[0]) : null;
+          if (mk) bd.appendChild(mk);
+          bd.appendChild(document.createTextNode(cell[1]));
+          box.appendChild(bd);
         } else {
           const val = el("span", "val", cell[1]);
           if (cell[4] != null) val.style.color = gradeColor(cell[4]);

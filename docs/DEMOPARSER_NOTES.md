@@ -198,6 +198,16 @@ harmless for the bitmask.
 
 In JS the bitmask comes as a STRING (no u64) — keep in mind when porting.
 
+### Recent CS2 demos: no `buttons`, no WALK (checked on 2026 Premier / MM demos)
+
+With demoparser2 0.42.2 on current Valve demos, `parse_ticks(["buttons"])` and
+`["WALK"]` return NO column (no error either), while FORWARD / LEFT / BACK /
+RIGHT / FIRE / RIGHTCLICK / RELOAD still come back. So Shift, crouch and jump were
+silently missing everywhere. `_decode_buttons` now falls back to the pawn state
+(`STATE_KEY_PROPS`): WALK = `is_walking`, DUCK = `duck_amount >= 0.5` (the crouched
+posture, not the key itself), JUMP = `is_airborne` (a fall off a ledge reads as a
+jump too). A real bitfield, when a demo has one, still wins.
+
 ## 5. Game state (for other= in events)
 
 - `total_rounds_played (m_totalRoundsPlayed)` — we use it (0-based).

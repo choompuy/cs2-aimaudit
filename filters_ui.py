@@ -70,19 +70,15 @@ def _filter_data(ctx):
 
 
 def _preset_options(n_rounds, halves) -> list[str]:
-    """Presets this match can offer (sides decide, else MR12 heuristics)."""
+    """Presets this match can offer (sides decide, else MR12 heuristics). No first /
+    second half: for a player a half IS a side, and the T / CT switch cuts it without
+    swapping the teams around."""
     # a preset is offered only when the match has that part (Custom: 2+ rounds)
-    preset_opts = ["all"] + (["pistols"] if n_rounds >= 2 else [])
-    if len(halves) >= 2:
-        preset_opts = ["all", "first", "second"] + preset_opts[1:]
-        if len(halves) >= 3:
-            preset_opts.insert(3, "ot")
-    elif n_rounds >= 2 * core.ROUNDS_PER_HALF + 1:
-        preset_opts = ["all", "first", "second", "ot", "pistols"]
-    elif n_rounds >= core.ROUNDS_PER_HALF + 1:
-        preset_opts = ["all", "first", "second", "pistols"]
+    preset_opts = ["all"]
+    if len(halves) >= 3 or (not halves and n_rounds >= 2 * core.ROUNDS_PER_HALF + 1):
+        preset_opts.append("ot")
     if n_rounds >= 2:
-        preset_opts.append("custom")
+        preset_opts += ["pistols", "custom"]
     return preset_opts
 
 
@@ -124,16 +120,6 @@ def _clamp_filter_state(preset_opts, n_rounds):
 def _preset_label(t, p: str, n_rounds: int, halves) -> str:
     """Preset option label with the actual round numbers of this match."""
     h = halves or []
-    if p == "first":
-        lo, hi = h[0] if h else (1, core.ROUNDS_PER_HALF)
-        return t("fp_first", lo=lo, hi=hi)
-    if p == "second":
-        lo, hi = (
-            h[1]
-            if len(h) > 1
-            else (core.ROUNDS_PER_HALF + 1, 2 * core.ROUNDS_PER_HALF)
-        )
-        return t("fp_second", lo=lo, hi=hi)
     if p == "ot":
         lo = h[2][0] if len(h) > 2 else 2 * core.ROUNDS_PER_HALF + 1
         return t("fp_ot", lo=lo)
@@ -146,8 +132,16 @@ def _preset_label(t, p: str, n_rounds: int, halves) -> str:
     return t("fp_all")
 
 
+# The widgets inside a CLOSED popover are not mounted in the browser: a value Reset sets
+# from Python never reaches them, and the browser would send the old value back on the
+# next rerun. So the run right after Reset leaves the popover bodies out: the browser
+# drops those widgets, and the next run draws them again from the reset values.
+_SKIP_POP = "_flt_skip_pop"
+
+
 def _reset_filters(n_rounds):
     def _do_reset():
+        st.session_state[_SKIP_POP] = True
         st.session_state["flt_weapons"] = []
         st.session_state["flt_classes"] = []
         st.session_state["flt_res"] = "both"
@@ -205,7 +199,7 @@ def _round_kwargs(preset, n_rounds, halves) -> dict:
         picked = set(st.session_state.get("flt_rounds") or [])
         if picked and len(picked) < n_rounds:
             round_kwargs["rounds_set"] = picked
-    elif preset in ("first", "second", "ot"):
+    elif preset == "ot":
         # from the preset itself: a URL-restored one never fired its on_change
         rv = core.round_bounds(n_rounds, preset, halves or None)
         if rv != (1, n_rounds):
@@ -293,26 +287,27 @@ def _controls(ctx, demo_weapons, present_classes, preset_opts, has_sides, n_roun
     """One row: every control shows its own value, labels live in the tooltips."""
     t = ctx.t
     preset = st.session_state.get("flt_preset", "all")
+    skip_bodies = st.session_state.pop(_SKIP_POP, False)  # the run right after Reset
     with st.container(horizontal=True, vertical_alignment="center", gap="small"):
-        # the popover bodies stay mounted while closed, so the widgets keep their state
         with st.popover(
             _rounds_label(t, preset, n_rounds, halves),
             icon=":material/flag:",
             key="flt_rounds_pop",
             help=t("flt_rounds_help"),
         ):
-            st.pills(
-                t("flt_rounds"),
-                preset_opts,
-                format_func=lambda p: _preset_label(t, p, n_rounds, halves),
-                key="flt_preset",
-                required=True,
-                label_visibility="collapsed",
-                persist_state="session",
-            )
-            if preset == "custom" and n_rounds >= 2:
-                st.caption(t("flt_custom_hint"))
-                _round_chips(t, ctx.demo, ctx.me, n_rounds, halves)
+            if not skip_bodies:
+                st.pills(
+                    t("flt_rounds"),
+                    preset_opts,
+                    format_func=lambda p: _preset_label(t, p, n_rounds, halves),
+                    key="flt_preset",
+                    required=True,
+                    label_visibility="collapsed",
+                    persist_state="session",
+                )
+                if preset == "custom" and n_rounds >= 2:
+                    st.caption(t("flt_custom_hint"))
+                    _round_chips(t, ctx.demo, ctx.me, n_rounds, halves)
         if has_sides:
             st.segmented_control(
                 t("flt_side"),
@@ -340,17 +335,18 @@ def _controls(ctx, demo_weapons, present_classes, preset_opts, has_sides, n_roun
             key="flt_weapons_pop",
             help=t("flt_weapons_help"),
         ):
-            st.pills(
-                t("flt_classes"),
-                present_classes,
-                selection_mode="multi",
-                format_func=lambda c: t(f"wc_{c}"),
-                key="flt_classes",
-                help=t("flt_classes_help"),
-                persist_state="session",
-            )
-            st.caption(t("flt_weapons"))
-            _weapon_chips(t, demo_weapons)
+            if not skip_bodies:
+                st.pills(
+                    t("flt_classes"),
+                    present_classes,
+                    selection_mode="multi",
+                    format_func=lambda c: t(f"wc_{c}"),
+                    key="flt_classes",
+                    help=t("flt_classes_help"),
+                    persist_state="session",
+                )
+                st.caption(t("flt_weapons"))
+                _weapon_chips(t, demo_weapons)
         # always there: the row must not jump when a filter is set
         st.button(
             t("flt_reset"),

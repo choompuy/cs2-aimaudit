@@ -22,7 +22,9 @@
   border-bottom: 1px solid var(--border-strong);
   padding: 0.5rem 0.75rem;
   text-align: start;
-  white-space: nowrap;
+  vertical-align: bottom;
+  /* a two-word label wraps before the grid needs a horizontal scrollbar */
+  white-space: normal;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   letter-spacing: 0.06em;
@@ -40,7 +42,7 @@
 .aa-t td:not(:last-child) { border-right: 1px solid var(--border-subtle); }
 .aa-t tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border-subtle); }
 .aa-t .cell { display: flex; position: relative; padding: 0.5rem 0.75rem; }
-.aa-t th.bar, .aa-t td.bar { min-width: 5rem; }
+.aa-t th.bar, .aa-t td.bar { min-width: 4.5rem; }
 .aa-t .val { position: relative; z-index: 1; }
 .aa-t .bar-fill {
   position: absolute;
@@ -68,6 +70,16 @@
   -webkit-mask: var(--ico) center / contain no-repeat;
   mask: var(--ico) center / contain no-repeat;
 }
+.aa-t .cell:has(> .nm) { align-items: center; gap: 0.6rem; }
+/* one icon box for every row, so the names line up */
+.aa-t .cell:has(> .nm) .ic { flex: none; width: 4.2em; -webkit-mask-position: left center; mask-position: left center; }
+.aa-t .ic + .nm { color: var(--text-secondary); }
+.aa-t tbody tr.sel .ic + .nm, .aa-t tbody tr:hover .ic + .nm { color: var(--text-primary); }
+/* the kill / death mark inside a result badge, in the badge's own colour */
+.aa-t .badge:has(> .mk) { display: inline-flex; align-items: center; gap: 0.35rem; }
+.aa-t .badge .mk { display: inline-flex; width: 0.95em; height: 0.95em; flex: none; }
+.aa-t .badge .mk svg { width: 100%; height: 100%; }
+.aa-t .badge .mk.ic { background-color: currentColor; }
 .aa-t tbody tr:hover td { background: var(--surface-2); }
 .aa-t tbody tr.clk { cursor: pointer; }
 /* the checkbox column: narrow, centred, its own accent; a click must not

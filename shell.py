@@ -570,7 +570,6 @@ def _excluded_line(demo: core.Demo, t) -> None:
 def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
     """[selectbox] [prev] [next] [identity]; Up/Down, since the duels use Left/Right."""
     name_of = dict(zip(demo.players["sid"], demo.players["name"], strict=True))
-    team_of = dict(zip(demo.players["sid"], demo.players["team"], strict=True))
     plist = demo.players.assign(
         _n=demo.players["name"].astype(str).str.lower()
     ).sort_values(["team", "_n"])
@@ -595,7 +594,9 @@ def _player_row(ctx, saved: dict, demo: core.Demo, t) -> None:
         me = st.selectbox(
             t("player"),
             me_opts,
-            format_func=lambda s: f"{name_of.get(s, s)} ({team_of.get(s, '?')})",
+            # the sides in order (T→CT): the starting team alone reads wrong on
+            # the second half
+            format_func=lambda s: f"{name_of.get(s, s)} ({'→'.join(demo.side_history(s))})",
             key="me",
             label_visibility="collapsed",
             icon=":material/person:",

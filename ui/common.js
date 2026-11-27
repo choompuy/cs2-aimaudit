@@ -1,4 +1,4 @@
-// Shared by table.js, strip.js, chips.js, meters.js and roundrep.js: ui/component.py puts this file
+// Shared by table.js, chips.js, meters.js and roundrep.js: ui/component.py puts this file
 // in front of each of them, so everything here is in their scope.
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);

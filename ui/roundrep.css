@@ -664,24 +664,6 @@
   display: inline-block;
   flex: none;
 }
-.rr-kp { display: none; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
-.rr-kp.on { display: flex; }
-.rr-k {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.9rem;
-  height: 1.9rem;
-  padding: 0 0.45rem;
-  box-sizing: border-box;
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  color: var(--text-secondary);
-  font-size: var(--rr-md);
-  font-weight: var(--font-weight-semibold);
-  line-height: 1;
-}
-.rr-k.on { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 26%, var(--surface-2)); }
 
 /* ---------- legend + howto: folded under one line --------------------------- */
 .rr-help { margin-top: 0.4rem; color: var(--text-secondary); font-size: var(--rr-md); }

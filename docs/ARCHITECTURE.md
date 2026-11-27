@@ -19,8 +19,8 @@ written here, so the doc and the guardrails stay honest.
 | `views/settings.py` | The Settings page: language note, analysis sliders (`persist_state="session"`), accounts + Steam helper, Library and storage, privacy + the version / issues line. |
 | `views/overview.py` | Overview page (one grid for both teams). |
 | `views/shooting.py` | Shooting page: Top-3 issues (inline badge severities), graded metric tiles (`_SPEC` norms), hit placement / speed split / risk charts, the weapons grid. |
-| `views/duels.py` | Duels page: the duels grid (zones are on the Map tooltips). |
-| `views/replay.py` | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart). |
+| `views/duels.py` | Duels page: the duels grid; a row opens that duel in the 2D replay (`handover` -> `state.open_in_replay`). |
+| `views/replay.py` | The 2D replay page (`@st.fragment`); its duel panel is where a duel is read (speed, aim error, key lanes). |
 | `views/map.py` | Map page (`@st.fragment`, radar plot). |
 | `views/extras.py` | Guide page (reference text + metric glossary). |
 | `core/matchlist.py` | The unified match list: provider records + library entries + summaries merged into `MatchRow`s (no Streamlit, no parsing). |
@@ -40,11 +40,10 @@ written here, so the doc and the guardrails stay honest.
 | `core/checks.py` | `data_checks`, `debug_report`. |
 | `core/__init__.py` | Facade: star-imports the `__all__` of every submodule. |
 | `ui/table.py` + `.js` / `.css` | The universal grid renderer: `Col`, `table_payload` (num / text / badge / icon cells + the checkbox column), `data_table` (custom component). |
-| `ui/component.py` | Custom-component glue shared by table / strip / roundrep: declares `ui/X.js` + `ui/X.css` with `ui/common.js` in front, wires the event callbacks, renders the payload. |
+| `ui/component.py` | Custom-component glue shared by table / chips / meters / roundrep: declares `ui/X.js` + `ui/X.css` with `ui/common.js` in front, wires the event callbacks, renders the payload. |
 | `ui/schema.py` + `ui/tables.toml` | The table schema: loader, `build_cols`, `table` (selected/on_click + the checkbox column passthrough), `validate`; the TOML is the single source of truth for grids (incl. `[table.matches]`). |
 | `ui/charts.py` | `style_figure` and shared chart builders. |
 | `ui/format.py` | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`, `map_name`. |
-| `ui/strip.py` + `.js` / `.css` | The duel navigation strip (Timeline). |
 | `ui/meters.py` + `.js` / `.css` | Metric tiles: value, fill bar on a fixed scale, a tick at the norm, the grade colour (`gradeColor` in `common.js`). |
 | `ui/chips.py` + `.js` / `.css` | Toggle chips (multi-select): the filter bar's weapon silhouettes and hand-picked rounds tinted by side. |
 | `ui/icons.py` | The icon set loader: SVG sanitizer, SHA-256 verification, weapon-name aliases, `weapon_cells` for grids, `bundle` / `weapon_labels` for the replay. |

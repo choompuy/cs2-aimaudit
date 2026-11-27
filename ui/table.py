@@ -31,6 +31,10 @@ class Col:
     sticky: bool = False
     # rows[title_by]: an icon cell's tooltip and text fallback
     title_by: str | None = None
+    # an icon cell also shows its name as text (where the name is the point)
+    named: bool = False
+    # a kill / death badge leads with the 2D replay's mark: crosshair / skull
+    marks: bool = False
     # colour of the VALUE by quality (tier tokens):
     #   None            no colouring
     #   "auto"          position inside this column (>= 3 distinct values)
@@ -116,6 +120,8 @@ def _col_payload(c: Col) -> dict:
         "h": c.help or "",
         "f": first,
         "s": bool(c.sticky),
+        "n": bool(c.named),
+        "mk": bool(c.marks),
     }
 
 

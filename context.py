@@ -40,13 +40,6 @@ def get_demo(path: str, mtime: float) -> core.Demo:
 
 
 @st.cache_data(show_spinner=False)
-def get_timeline(
-    path: str, mtime: float, me: str, tick: int, before_s: float, tickrate: int
-):
-    return core.timeline_data(path, me, tick, before_s=before_s, tickrate=tickrate)
-
-
-@st.cache_data(show_spinner=False)
 def get_round_replay(path: str, mtime: float, round_no: int):
     """Tick data of the WHOLE round for the 2D replay (ui/roundrep.py)."""
     return core.round_replay_data(get_demo(path, mtime), round_no)

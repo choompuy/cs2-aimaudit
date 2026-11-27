@@ -79,9 +79,6 @@ def _match(ctx) -> None:
         views.map.render(ctx)
     if tab == "replay":
         views.replay.render(ctx)
-    # a Duels row click asks for the duel window: it is a modal over the page
-    if tab == "duels" and state.DU_OPEN.pop():
-        views.replay.open_duel_dialog(ctx)
 
 
 def main() -> None:

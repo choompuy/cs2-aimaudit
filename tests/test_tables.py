@@ -1,7 +1,6 @@
-"""The table / strip payload models and the tables.toml schema."""
+"""The table payload model and the tables.toml schema."""
 
 import ui.schema as schema
-from ui.strip import strip_payload
 from ui.table import Col, table_payload
 
 
@@ -52,40 +51,6 @@ def test_table_grade():
         _scores([None, 3.0], grade=(0, 6)) == [None, 0.5]
         and _scores([1.0, 2.0]) == [None, None]
     ), "grade: none / empty cell -> no colour"
-
-
-def test_strip_payload():
-    _s_items = [
-        {"round": 3, "result": "kill", "tip": "a"},
-        {"round": 3.0, "result": "death", "tip": "b"},
-        {"round": 7, "result": "kill", "tip": "c"},
-        {"round": None, "result": "kill", "tip": "d"},
-        {"round": 7, "result": "kill", "tip": "e"},
-    ]
-    _s_pl = strip_payload(_s_items, 2, round_label=lambda r, n: f"R{r}x{n}")
-    assert (
-        [g["r"] for g in _s_pl["groups"]] == [3, 7, None, 7]
-        and [it["i"] for it in _s_pl["groups"][0]["items"]] == [0, 1]
-    ), "strip: consecutive rounds share one badge (3.0 == 3)"
-    assert _s_pl["rstarts"] == [0, 2, 3, 4], "strip: rstarts = first duel of every group"
-    assert (
-        _s_pl["groups"][0]["items"][1]["w"] == "death"
-        and _s_pl["groups"][0]["items"][0]["w"] == "kill"
-        and _s_pl["groups"][0]["items"][0]["tip"] == "a"
-    ), "strip: chips keep their index and a kill/death tone"
-    assert _s_pl["groups"][0]["tip"] == "R3x2" and _s_pl["groups"][2]["tip"] == "RNonex1", "strip: group tooltip from round_label(r, n)"
-    assert (
-        _s_pl["sel"] == 2
-        and strip_payload(_s_items, 99, round_label=lambda r, n: "")["sel"] == 0
-        and strip_payload([], 5, round_label=lambda r, n: "")["n"] == 0
-    ), "strip: selection clamped into range (empty -> 0)"
-    assert (
-        strip_payload(_s_items, 0, round_label=lambda r, n: "", labels={"prev": None})[
-            "lab"
-        ]
-        == {"prev": ""}
-        and strip_payload(_s_items, 0, round_label=lambda r, n: "")["lab"] == {}
-    ), "strip: labels normalized to strings, empty default"
 
 
 def test_table_schema():

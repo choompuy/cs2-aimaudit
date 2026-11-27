@@ -129,6 +129,12 @@ PUNCH_PROPS = ["aim_punch_angle"]
 DUCK_PROPS = ["duck_amount"]
 
 
+# The pawn's state behind WALK / DUCK / JUMP when the demo has no button mask
+# (recent CS2 demos: neither `buttons` nor WALK come back from the parser):
+# m_bIsWalking (Shift held), the crouch amount, in the air (a jump - or a fall).
+STATE_KEY_PROPS = ["is_walking", "duck_amount", "is_airborne"]
+
+
 TEAMS = {2: "T", 3: "CT"}
 
 
@@ -293,14 +299,21 @@ def _round_col(df: pd.DataFrame) -> pd.Series:
 
 
 def _decode_buttons(df: pd.DataFrame) -> pd.DataFrame:
-    """DUCK / JUMP from the raw `buttons` bitfield (far below 2^53: float64 is safe)."""
+    """DUCK / JUMP from the raw `buttons` bitfield (far below 2^53: float64 is safe);
+    without the bitfield (or WALK), from the pawn state (STATE_KEY_PROPS)."""
 
-    if "buttons" not in df.columns:
-        return df
-    b = pd.to_numeric(df["buttons"], errors="coerce").fillna(0).astype("int64")
-    for name, bit in BTN_BITS.items():
-        if name not in df.columns:
-            df[name] = (b & bit) != 0
+    if "buttons" in df.columns:
+        b = pd.to_numeric(df["buttons"], errors="coerce").fillna(0).astype("int64")
+        for name, bit in BTN_BITS.items():
+            if name not in df.columns:
+                df[name] = (b & bit) != 0
+
+    def _flag(col: str, cut: float = 0.5) -> pd.Series:
+        return pd.to_numeric(df[col], errors="coerce").fillna(0).astype(float) >= cut
+
+    for name, col in (("WALK", "is_walking"), ("DUCK", "duck_amount"), ("JUMP", "is_airborne")):
+        if name not in df.columns and col in df.columns:
+            df[name] = _flag(col)
     return df
 
 

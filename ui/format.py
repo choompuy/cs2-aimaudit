@@ -27,16 +27,6 @@ def fmt_first(v: str) -> str:
     }.get(v, str(v))
 
 
-def duel_label(r) -> str:
-    return t(
-        "tl_label",
-        round=int(r["round"]),
-        result=fmt_result(r["result"]),
-        weapon=str(r["weapon"]),
-        opp=name_of.get(r["opponent"], r["opponent"]),
-    )
-
-
 def pct(v) -> str:
     return f"{v:.0f}%" if pd.notna(v) else t("none_val")
 

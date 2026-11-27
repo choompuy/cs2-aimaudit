@@ -328,16 +328,19 @@ selectable = true
 [table.overview.override.kdr]
 grade = [0.7, 1.0, 1.4]
 
-# Weapons of the selected player: no Basic/All split, no selection.
+# Weapons of the selected player: no Basic/All split; a row click picks the weapon.
 [table.weapons]
 columns = [
   "weapon", "shots", "median_speed", "median_dist", "moving", "risky",
   "hits", "hs", "accuracy", "first_acc",
 ]
 extra = ["weapon_disp"]
+# a row narrows the Shooting page to that weapon
+selectable = true
 
 [table.weapons.override.weapon]
 sticky = true
+named = true
 
 [table.weapons.override.moving]
 label = "col_moving_w"
@@ -373,8 +376,12 @@ basic = [
 ]
 stripe = { field = "result_raw", map = { kill = "positive", death = "negative" }, default = "negative" }
 extra = ["result_raw", "first_raw", "hs_raw", "weapon_disp"]
-max_height = 720
+max_height = 0
 selectable = true
+
+# kill / death led by the 2D replay's crosshair / skull
+[table.duels.override.result]
+marks = true
 
 [table.duels.override.aim_err]
 label = "col_err"

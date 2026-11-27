@@ -29,6 +29,8 @@ _ATTRS = (
     "sticky",
     "tones",
     "title_by",
+    "named",
+    "marks",
 )
 _KINDS = ("num", "text", "badge", "icon")
 _BARS = ("none", "pct", "rel")
@@ -102,6 +104,8 @@ def build_cols(table_id: str, *, all_columns: bool = False, t=None) -> list[Col]
                 sticky=bool(m.get("sticky", False)),
                 grade=_grade(m.get("grade")),
                 title_by=_norm(m.get("title_by"), "none"),
+                named=bool(m.get("named", False)),
+                marks=bool(m.get("marks", False)),
             )
         )
     return cols
@@ -273,6 +277,14 @@ def _validate_metric(mid: str, m: dict, errs: list[str], en: set) -> None:
     _metric_tone_errs(mid, m, kind, errs)
     if not isinstance(m.get("sticky", False), bool):
         errs.append(f"{where}: sticky must be a boolean")
+    if not isinstance(m.get("named", False), bool):
+        errs.append(f"{where}: named must be a boolean")
+    elif m.get("named") and kind != "icon":
+        errs.append(f"{where}: named is for kind=icon only")
+    if not isinstance(m.get("marks", False), bool):
+        errs.append(f"{where}: marks must be a boolean")
+    elif m.get("marks") and kind != "badge":
+        errs.append(f"{where}: marks is for kind=badge only")
     if kind == "icon":
         # an icon cell needs its text fallback in every table that shows it
         tb = _norm(m.get("title_by"), "none")
@@ -321,8 +333,8 @@ def _validate_table(tid: str, tbl: dict, metrics: dict, errs: list[str]) -> None
     avail = set(tbl.get("columns", [])) | set(tbl.get("extra", []))
     _validate_stripe(where, tbl.get("stripe"), avail, errs)
     mh = tbl.get("max_height", 620)
-    if not (isinstance(mh, int) and mh > 0):
-        errs.append(f"{where}: max_height must be a positive int")
+    if not (isinstance(mh, int) and mh >= 0):
+        errs.append(f"{where}: max_height must be an int >= 0 (0 = no cap)")
     if not isinstance(tbl.get("selectable", False), bool):
         errs.append(f"{where}: selectable must be a boolean")
     # the metric alone does not know which tables show it

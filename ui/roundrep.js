@@ -977,20 +977,36 @@ export default function (component) {
     dpBtn.setAttribute("aria-label", dpBtn.title);
   }
 
-  // ---------- key panels (one per player; moved into the duel panel) ----------------------------------
-  const keyPanels = {};  // player index -> { el, boxes, p }
-  if (d.keys && d.keys.length) {
-    P.forEach((p, pi) => {
-      if (!p.kb) return;
-      const kp = el("div", "rr-kp");
-      const boxes = d.keys.map((k) => {
-        const b = el("span", "rr-k", lab["k_" + k] || k);
-        b.title = k;
-        kp.appendChild(b);
-        return b;
-      });
-      keyPanels[pi] = { el: kp, boxes: boxes, p: p };
+  // ---------- key lanes: what each duelist held, on the chart's time axis -------------------------------
+  // One lane per key under the speed chart, so a counter-strafe (A let go, D
+  // tapped) or a spray reads against the speed line and the first shot.
+  // Groups: movement, body, mouse; WASD and Fire always shown (the two
+  // columns keep the same lanes, so they line up side by side).
+  const KEY_GROUP = { FORWARD: 0, LEFT: 0, BACK: 0, RIGHT: 0, WALK: 1, DUCK: 1, JUMP: 1, RIGHTCLICK: 2, FIRE: 2, RELOAD: 2 };
+  const KEY_ALWAYS = { FORWARD: 1, LEFT: 1, BACK: 1, RIGHT: 1, FIRE: 1 };
+  const LANE_H = 11, LANE_GAP = 5, LANE_TOP = 10;
+  const keyLabel = (k) => String(lab["k_" + k] || k).replace(/\s*\(.*\)\s*$/, "");
+  function duelLanes(z, pis) {
+    const keys = d.keys || [];
+    if (!keys.length || !pis.some((pi) => pi >= 0 && P[pi] && P[pi].kb)) return [];
+    const j0 = Math.max(0, sampleIdx(z.a)), j1 = sampleIdx(z.b);
+    let used = 0;
+    for (const pi of pis) {
+      const kb = pi >= 0 && P[pi] ? P[pi].kb : null;
+      if (kb) for (let j = j0; j <= j1 && j < kb.length; j++) used |= kb[j] || 0;
+    }
+    const out = [];
+    let y = LANE_TOP, grp = null;
+    keys.forEach((k, bit) => {
+      if (!KEY_ALWAYS[k] && !((used >> bit) & 1)) return;
+      const g = KEY_GROUP[k] != null ? KEY_GROUP[k] : 3;
+      if (grp != null && g !== grp) y += LANE_GAP;
+      grp = g;
+      out.push({ k: k, bit: bit, g: g, y: y, label: keyLabel(k) });
+      y += LANE_H;
     });
+    out.h = out.length ? y + 2 : 0;
+    return out;
   }
 
   // ---------- the duel panel: live aim numbers + chart + keys of BOTH duelists ----------------------------
@@ -1009,7 +1025,7 @@ export default function (component) {
     dp = null;
     const z = duelAt(sel);
     if (!z) { duelWrap.classList.add("hid"); return; }
-    dp = { sel: sel, cols: [] };
+    dp = { sel: sel, cols: [], lanes: duelLanes(z, [z.ki, z.vi]) };
     const tel = z.tel || null;
     const sides = [
       { who: "k", pi: z.ki, name: z.kn, role: lab.role_killer || "killer", sp: z.ksp, er: z.ker, sh: z.ksh, ft: z.kft },
@@ -1073,8 +1089,8 @@ export default function (component) {
         col.appendChild(cv);
         cx = cv.getContext("2d");
         const seekFrom = (e) => {
-          const r = cv.getBoundingClientRect();
-          const f = Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)));
+          const r = cv.getBoundingClientRect(), g = (dp && dp.gut) || 0;
+          const f = Math.max(0, Math.min(1, (e.clientX - r.left - g) / Math.max(1, r.width - g)));
           seek(Math.round(z.a + f * (z.b - z.a)));
         };
         let down = false;
@@ -1087,10 +1103,8 @@ export default function (component) {
         cv.addEventListener("pointerup", () => { down = false; });
         cv.addEventListener("pointercancel", () => { down = false; });
       }
-      const kp = sd.pi >= 0 ? keyPanels[sd.pi] : null;
-      if (kp) { kp.el.classList.add("on"); col.appendChild(kp.el); }
       cols.appendChild(col);
-      dp.cols.push({ side: sd, live: live, cv: cv, cx: cx, kp: kp, vmax: vmax, p: p });
+      dp.cols.push({ side: sd, live: live, cv: cv, cx: cx, vmax: vmax, p: p });
     }
     // legend of the chart lines
     if (tel) {
@@ -1109,10 +1123,19 @@ export default function (component) {
   function sizeCharts() {
     if (!dp) return;
     const k = DPR();
+    // the lane labels' gutter: the chart starts after it too, so both share one time axis
+    let gut = 0;
+    if (dp.lanes.length && dp.cols[0] && dp.cols[0].cx) {
+      const m = dp.cols[0].cx;
+      m.font = "600 11px " + FF;
+      for (const ln of dp.lanes) gut = Math.max(gut, m.measureText(ln.label).width);
+      gut = Math.ceil(gut) + 10;
+    }
+    dp.gut = gut;
     for (const c of dp.cols) {
       if (!c.cv) continue;
       const w = Math.max(160, Math.round(c.cv.getBoundingClientRect().width || 300));
-      c.w = w; c.h = 124;
+      c.w = w; c.h = 124 + (dp.lanes.h || 0);
       c.cv.width = Math.round(w * k); c.cv.height = Math.round(c.h * k);
       c.cv.style.height = c.h + "px";
       c.cx.setTransform(k, 0, 0, k, 0, 0);
@@ -1132,11 +1155,12 @@ export default function (component) {
       c.live.tn.textContent = tn == null ? "\u2014" : tn + "\u00B0/s";
       c.live.er.textContent = er == null ? "\u2014" : er + "\u00B0";
       if (!c.cx || !tel) continue;
-      const cx = c.cx, W2 = c.w, H2 = c.h, padB = 14, hh = H2 - padB;
+      const G = dp.gut || 0, CH = 124;
+      const cx = c.cx, W2 = c.w, H2 = c.h, padB = 14, hh = CH - padB;
       cx.clearRect(0, 0, W2, H2);
       cx.fillStyle = rgba(C.text2, 0.07);
-      cx.fillRect(0, 0, W2, hh);
-      const xOf = (tick) => ((tick - z.a) / Math.max(1, z.b - z.a)) * (W2 - 2) + 1;
+      cx.fillRect(G, 0, W2 - G, hh);
+      const xOf = (tick) => G + ((tick - z.a) / Math.max(1, z.b - z.a)) * (W2 - G - 2) + 1;
       const ySp = (v) => hh - Math.min(1, v / c.vmax) * (hh - 3) - 1;
       const yEr = (v) => hh - Math.min(1, v / ERR_MAX) * (hh - 3) - 1;
       const line = (arr, yf, col) => {
@@ -1155,7 +1179,7 @@ export default function (component) {
       // the moving threshold: shots above it are the moving shots
       if (THR != null && THR <= c.vmax) {
         cx.setLineDash([4, 3]); cx.strokeStyle = rgba(C.text2, 0.8); cx.lineWidth = 1;
-        cx.beginPath(); cx.moveTo(0, ySp(THR)); cx.lineTo(W2, ySp(THR)); cx.stroke();
+        cx.beginPath(); cx.moveTo(G, ySp(THR)); cx.lineTo(W2, ySp(THR)); cx.stroke();
         cx.setLineDash([]);
       }
       // this player's shots (ticks along the bottom), the first shot taller
@@ -1168,31 +1192,58 @@ export default function (component) {
           cx.beginPath(); cx.moveTo(x, hh); cx.lineTo(x, hh + 7); cx.stroke();
         }
       }
+      drawLanes(c, z, xOf, CH, G, W2);
+      // the first shot, the kill and the playhead cross the chart AND the lanes
       if (c.side.ft != null && c.side.ft >= z.a && c.side.ft <= z.b) {
         const x = Math.round(xOf(c.side.ft)) + 0.5;
         cx.strokeStyle = C.good; cx.lineWidth = 1.5;
-        cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x, hh + 10); cx.stroke();
+        cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x, H2); cx.stroke();
       }
-      // the kill
       const xk = Math.round(xOf(z.tk)) + 0.5;
       cx.strokeStyle = rgba(C.text2, 0.9); cx.lineWidth = 1.5;
-      cx.beginPath(); cx.moveTo(xk, 0); cx.lineTo(xk, hh); cx.stroke();
-      // playhead
+      cx.beginPath(); cx.moveTo(xk, 0); cx.lineTo(xk, H2); cx.stroke();
       const xp = xOf(t);
       cx.strokeStyle = C.text; cx.lineWidth = 2;
       cx.beginPath(); cx.moveTo(xp, 0); cx.lineTo(xp, H2); cx.stroke();
       // axis hints
       cx.font = "11px " + FF; cx.fillStyle = C.text2; cx.textAlign = "left";
-      cx.fillText(Math.round(c.vmax) + " " + (lab.u_s || "u/s"), 6, 14);
+      cx.fillText(Math.round(c.vmax) + " " + (lab.u_s || "u/s"), G + 6, 14);
       cx.textAlign = "right";
       cx.fillText(ERR_MAX + "\u00B0", W2 - 6, 14);
     }
-    for (const c of dp.cols) {
-      if (!c.kp) continue;
-      const j = sampleIdx(t);
-      const mask = c.kp.p.kb ? (c.kp.p.kb[j] || 0) : 0;
-      c.kp.boxes.forEach((b, bit) => b.classList.toggle("on", ((mask >> bit) & 1) === 1));
+  }
+  // the held-key runs of one duelist: movement and body keys in the side colour,
+  // the mouse in the text colour; a label lights up while its key is held
+  function drawLanes(c, z, xOf, top, G, W2) {
+    const lanes = dp.lanes;
+    const kb = c.p && c.p.kb;
+    if (!lanes.length) return;
+    const cx = c.cx;
+    const j0 = Math.max(0, sampleIdx(z.a)), j1 = sampleIdx(z.b), jNow = sampleIdx(t);
+    const sideC = sideCol(c.p ? c.p.side : "?");
+    const now = kb ? (kb[jNow] || 0) : 0;
+    cx.font = "600 11px " + FF; cx.textAlign = "right"; cx.textBaseline = "middle";
+    for (const ln of lanes) {
+      const y = top + ln.y, bh = LANE_H - 4;
+      cx.fillStyle = rgba(C.text2, 0.06);
+      cx.fillRect(G, y, W2 - G, bh);
+      const held = ((now >> ln.bit) & 1) === 1;
+      cx.fillStyle = held ? C.text : rgba(C.text2, 0.85);
+      cx.fillText(ln.label, G - 8, y + bh / 2 + 0.5);
+      if (!kb) continue;
+      cx.fillStyle = ln.g === 2 ? rgba(C.text, 0.85) : sideC;
+      let run = -1;
+      for (let j = j0; j <= j1 + 1; j++) {
+        const on = j <= j1 && j < kb.length && ((kb[j] >> ln.bit) & 1) === 1;
+        if (on && run < 0) run = j;
+        if (!on && run >= 0) {
+          const xa = xOf(d.t0 + run * d.step), xb = xOf(d.t0 + j * d.step);
+          cx.fillRect(xa, y, Math.max(2, xb - xa), bh);
+          run = -1;
+        }
+      }
     }
+    cx.textBaseline = "alphabetic";
   }
 
   // ---------- radar geometry + zoom / pan --------------------------------------------------------------------
@@ -1268,12 +1319,15 @@ export default function (component) {
     W = Math.max(240, r.width);
     lastW = W;
     // the map as high as the screen allows: what is left of the viewport after
-    // the rest of the player (controls, timeline, rounds) and the page
-    // header, never under 360 and never over 900
+    // the page header above the player and the rest of the player (controls,
+    // timeline, rounds) under the map - play / round / duel stay on screen
+    // without scrolling; never under 360 and never over 900
     const vh = window.innerHeight || 900;
     lastVH = vh;
     const narrow = box.classList.contains("narrow");
-    const cap = Math.max(360, Math.min(900, vh - 272));
+    const under = (ctl.offsetHeight + tl.offsetHeight + roundsEl.offsetHeight) || 200;
+    const above = Math.max(0, Math.min(400, box.getBoundingClientRect().top + (window.scrollY || 0)));
+    const cap = Math.max(360, Math.min(900, vh - under - above - 40));
     H = Math.max(300, Math.min(cap, Math.round(W * (narrow ? 0.85 : 0.62))));
     // full screen: everything the controls leave
     clearClock();

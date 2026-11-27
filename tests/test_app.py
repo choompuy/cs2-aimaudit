@@ -12,7 +12,7 @@ from streamlit.testing.v1 import AppTest
 
 import core
 import store
-from app_driver import DEMO_DIR, GRIDS, NAMES, metric_map, set_chips, ROOT, _DEMO_IDS, _PRESETS_BY_COUNT, _demo_n, _shots_shown, act, ctl, err_of, fresh_at, goto, make_match, n_presets, open_demo, open_duel, open_match, pick, register_demo, ss_get, widget
+from app_driver import DEMO_DIR, GRIDS, NAMES, RAWS, metric_map, set_chips, ROOT, _DEMO_IDS, _PRESETS_BY_COUNT, _demo_n, _shots_shown, act, ctl, err_of, fresh_at, goto, make_match, n_presets, open_demo, open_duel, open_match, pick, register_demo, ss_get, widget
 from demoparser2 import DemoParser
 from fakes import FakeParser, IDS, S1, S2, S3, S4
 
@@ -37,10 +37,8 @@ def test_one_round():
         lambda: at.selectbox(key="me").select(S1).run(),
     )
     act(at, "language ru", lambda: at.selectbox(key="lang").select("ru").run())
-    open_duel(at, 0, "duel window renders")
-    assert len(at.get("plotly_chart")) == 1, "duel window: the speed/aim/keys chart now lives in Duels (one plotly chart)"
-    assert widget(at, "button", "du_to_replay") is not None, "duel window: 'show in 2D replay' button"
-    assert not ss_get(at, "du_open"), "the row click flag is consumed"
+    open_duel(at, 0, "a duel row opens the replay")
+    assert ss_get(at, "match_tab") == "replay" and ss_get(at, "rr_sel") is not None, "the duel is in the replay"
     goto(at, "replay")
     assert not at.get("plotly_chart"), "2D replay: the canvas component draws it, no plotly chart"
     assert widget(at, "pills", "flt_preset") is None, "2D replay: the filter panel is hidden (the replay is the whole round)"
@@ -118,9 +116,8 @@ def test_round_replay():
         lambda: at.session_state.__setitem__("rr_round", 77) or at.run(),
     )
     assert ss_get(at, "rr_round") == 1, "fell back to round 1"
-    # the duel window's button hands the duel over: page, round, selection
+    # a Duels row hands the duel over: page, round, selection
     open_duel(at, 1, "open the round-2 duel")
-    act(at, "show it in the 2D replay", lambda: at.button(key="du_to_replay").click().run())
     assert ss_get(at, "match_tab") == "replay", "switched to the replay tab"
     assert ss_get(at, "rr_round") == 2, "on the duel's own round"
     sel = ss_get(at, "rr_sel")
@@ -287,28 +284,20 @@ def test_player_stepper():
     ), err_of(at)
 
 
-def test_duel_strip():
-    """Fast duel/round navigation: the strip (in the duel window) owns the selection."""
+def test_duel_opens_replay():
+    """A Duels row is a link into the 2D replay: no duel window any more."""
+    from views.duels import handover
+
+    win = {1: (100, 900), 2: (1000, 1900)}
+    assert handover(win, {"tick": 1200, "round": 7, "result": "kill", "opponent": S3}, S1) == (2, 1200, S3), "the replay's window decides the round"
+    assert handover({}, {"tick": 50, "round": 3, "result": "death", "opponent": S3}, S1) == (3, 50, S1), "a death: I am the victim; no window -> the row's round"
     at = open_demo(make_match([1, 2, 13]), "strip.dem")
     assert not at.exception, err_of(at)
-    open_duel(at, 0, "open the duel window")
-    # the old long "pick a duel" selectbox and the round selectbox are
-    # gone: the strip chips, its hotkeys and the Duels row click move the
-    # selection now, and they all write the plain tl_duel session key
-    assert widget(at, "selectbox", "tl_duel") is None, "no tl_duel selectbox anymore"
-    assert widget(at, "selectbox", "tl_round") is None, "no tl_round selectbox anymore"
-    assert any("Shift+←" in str(c.value) for c in at.caption), "hotkey hint rendered under the strip"
-    act(
-        at,
-        "open duel 1 (a chip click writes the same key)",
-        lambda: at.session_state.__setitem__("tl_duel", 1) or at.run(),
-    )
-    assert ss_get(at, "tl_duel") == 1, "moved to duel 1"
-    open_duel(at, 99, "stale pick beyond the duel list clamps")
-    assert ss_get(at, "tl_duel") == 0, "clamped back to duel 0"
+    open_duel(at, 0, "row 0 -> the replay")
+    assert ss_get(at, "match_tab") == "replay" and not at.get("plotly_chart"), "the replay, not a chart window"
     act(at, "language ru", lambda: at.selectbox(key="lang").select("ru").run())
-    open_duel(at, 0, "ru: reopen the duel window")
-    assert any("Shift+←" in str(c.value) for c in at.caption), "ru: hotkey hint rendered"
+    open_duel(at, 1, "ru: row 1 -> the replay")
+    assert ss_get(at, "rr_sel")[1] == int(RAWS["du_grid"]["tick"][1]), "ru: the picked duel is handed over"
 
 
 def test_roundtrip():
@@ -316,8 +305,8 @@ def test_roundtrip():
     and nothing is lost on the way."""
     at = open_demo(make_match([1, 2, 13]), "roundtrip.dem")
     did = at.session_state["match"]
-    act(at, "roundtrip: first-half preset", lambda: ctl(at, "pills", "flt_preset").select("first").run())
-    assert ss_get(at, "flt_preset") == "first", "roundtrip: preset set"
+    act(at, "roundtrip: pistol-rounds preset", lambda: ctl(at, "pills", "flt_preset").select("pistols").run())
+    assert ss_get(at, "flt_preset") == "pistols", "roundtrip: preset set"
     act(at, "roundtrip: to the duels tab", lambda: ctl(at, "segmented_control", "match_tab").select("duels").run())
     assert ss_get(at, "match_tab") == "duels" and not at.exception, err_of(at)
     act(at, "roundtrip: back to the list", lambda: at.button(key="mt_back").click().run())
@@ -331,7 +320,7 @@ def test_roundtrip():
     # back into the match: the analysis filter survived the trip through the
     # list (a fresh row click opens it on the overview tab)
     open_match(at, did, "roundtrip: reopen the match")
-    assert ss_get(at, "flt_preset") == "first" and ss_get(at, "match") == did and not at.exception, (ss_get(at, "flt_preset"), ss_get(at, "match"), err_of(at))
+    assert ss_get(at, "flt_preset") == "pistols" and ss_get(at, "match") == did and not at.exception, (ss_get(at, "flt_preset"), ss_get(at, "match"), err_of(at))
     assert at.query_params.get("m") == did and at.query_params.get("fres") == "tie", "roundtrip: ?m and the list filters ride in the URL"
     # a copied link reopens the exact screen: the match on its tab
     at2 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
@@ -393,8 +382,8 @@ def test_long25():
         make_match([1, 13, 25], weapons=("ak47", "awp", "deagle")), "long25.dem"
     )
     assert not at.exception, err_of(at)
-    assert n_presets(at) == (6, "all"), "all six presets offered"
-    for p in ("first", "second", "ot", "pistols"):
+    assert n_presets(at) == (4, "all"), "all four presets offered (no halves: the side switch)"
+    for p in ("ot", "pistols"):
         act(
             at,
             f"preset {p}",
@@ -787,9 +776,7 @@ def test_matrix(pytestconfig):
                 act(
                     at,
                     f"weapon {wep}",
-                    lambda w=wep: at.multiselect(key="flt_weapons")
-                    .set_value([w])
-                    .run(),
+                    lambda w=wep: set_chips(at, "flt_weapons", [w]),
                 )
             for cls in ("rifle", "sniper", "pistol"):
                 act(

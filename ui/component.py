@@ -1,4 +1,4 @@
-"""Custom component glue shared by ui/table, ui/strip and ui/roundrep.
+"""Custom component glue shared by ui/table, ui/chips, ui/meters and ui/roundrep.
 
 The front end of component X is ui/X.js + ui/X.css, with ui/common.js in front."""
 
