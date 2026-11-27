@@ -13,7 +13,7 @@ import core
 import store
 from fakes import FakeParser, IDS, S1, S2, S3, S4, f64_sid
 from state import MATCH_TABS
-from ui import schema
+from ui import meters, schema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -265,13 +265,48 @@ GRIDS: dict[str, pd.DataFrame] = {}  # grid key -> what the app last drew
 _draw = schema.data_table
 
 
+RAWS: dict[str, dict] = {}  # grid key -> every data column the app passed
+
+
 def _record_grid(rows, cols, *, key, **kw):
     """AppTest cannot look inside a custom component: keep its rows here."""
     GRIDS[key] = pd.DataFrame({c.label: list(rows[c.key]) for c in cols})
+    RAWS[key] = rows
     _draw(rows, cols, key=key, **kw)
 
 
 schema.data_table = _record_grid
+
+
+METERS: dict[str, list] = {}  # tile row key -> the tiles the app last drew
+_draw_meters = meters.meters
+
+
+def _record_meters(tiles, *, key, **kw):
+    """The metric tiles are a custom component too: keep label -> shown value."""
+    METERS[key] = list(tiles)
+    _draw_meters(tiles, key=key, **kw)
+
+
+meters.meters = _record_meters
+
+
+def metric_map():
+    """{label: tile} of the tiles drawn so far; ``.value`` is the shown text."""
+    from types import SimpleNamespace
+
+    out = {}
+    for tiles in METERS.values():
+        for tl in tiles:
+            out[tl["l"]] = SimpleNamespace(
+                label=tl["l"], value=tl["v"], quality=tl["q"], delta=tl["s"] or None
+            )
+            # a group tile: every part is reachable under its own label too
+            for part_label, part_value in tl.get("p") or []:
+                out[part_label] = SimpleNamespace(
+                    label=part_label, value=part_value, quality=None, delta=None
+                )
+    return out
 
 
 def ss_get(at, key, default=None):
@@ -400,7 +435,7 @@ def n_presets(at):
     so only the count and the selected raw value are language-neutral).
     """
 
-    sb = widget(at, "selectbox", "flt_preset")
+    sb = widget(at, "pills", "flt_preset")
     return (len(sb.options), sb.value) if sb else (0, None)
 
 
@@ -416,12 +451,17 @@ _PRESETS_BY_COUNT = {
 
 
 def _shots_shown(at):
-    """Shot count from the filter bar ('... N shots / M duels')."""
-    for c in at.caption:
-        m = re.search(r"(\d+) shots", c.value)
-        if m:
-            return int(m.group(1))
-    return None
+    """Shots in view: the Shots data column of the Overview grid, every player summed
+    (the filter bar no longer prints counts)."""
+    rows = RAWS.get("ov_grid")
+    return int(sum(rows["shots"])) if rows is not None else None
+
+
+def set_chips(at, key, values):
+    """Pick chips (weapons / rounds) like a click would: the chips' callback writes the
+    plain session key, AppTest cannot click inside a custom component."""
+    at.session_state[key] = list(values)
+    return at.run()
 
 
 # the weapon filters live inside a popover, but Streamlit mounts popover

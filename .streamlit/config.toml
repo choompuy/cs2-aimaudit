@@ -10,6 +10,8 @@ borderColor = "#34313f"
 baseRadius = "0.25rem"
 font = "Inter"
 chartCategoricalColors = ["#e8507f", "#7c4fd0", "#56b4e9", "#4fd1b0", "#e6c34a", "#8899aa"]
+paddingTop = "1.5rem"
+paddingBottom = "2rem"
 
 [[theme.fontFaces]]
 family = "Inter"
@@ -23,7 +25,15 @@ style = "normal"
 # the first-run "welcome / email" prompt in the terminal).
 gatherUsageStats = false
 
+[client]
+# The app is a local tool, not something to publish: no Deploy / Rerun /
+# Print / Settings menu at all (the "⋮" in the top right is hidden).
+toolbarMode = "minimal"
+
 [server]
+# Listen on this computer only. Streamlit's default accepts connections on
+# every network interface, so anyone on the same Wi-Fi/LAN could open the app.
+address = "127.0.0.1"
 # CS2 match demos can be large; the default upload limit is 1024 MB
 maxUploadSize = 1024
 enableStaticServing = true

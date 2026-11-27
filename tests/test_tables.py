@@ -122,10 +122,6 @@ def test_table_schema():
         ("weapons", 10, 10),
         ("duels", 9, 18),
         ("matches", 9, 9),
-        ("zones", 4, 4),
-        ("openings", 8, 8),
-        ("ev_err", 5, 5),
-        ("ev_lost", 5, 5),
     ):
         cols = schema.build_cols(tid, t=lambda k, **kw: k)
         cols_all = schema.build_cols(tid, all_columns=True, t=lambda k, **kw: k)

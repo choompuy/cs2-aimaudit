@@ -12,17 +12,17 @@ written here, so the doc and the guardrails stay honest.
 | `app.py` | Entry point only: page config, theme injection, the `st.Page` bodies (`_PAGE_FNS`) handed to `shell.navigation`, and `_match` - the only pipeline that loads a demo. |
 | `context.py` | Cached `core` calls (`get_demo`, `get_shots`, `get_duels`, `get_timeline`, `get_round_replay`) and the `Ctx` dataclass every page renders from. |
 | `shell.py` | App shell: `st.navigation` + the `st.page_link` rail + the language box (`navigation`), the URL state (`?m=&tab=`), `go_page`/`go_match`, demo loading, the match header (`map · score`, the demo info popover), the player row (incl. the identity menu), the ask card / remember logic, the library panel. |
-| `filters_ui.py` | URL state (`_URL_KEYS`), presets, callbacks, the filter bar, the Duels page's kill/death control (`result_control`). |
+| `filters_ui.py` | URL state (`_URL_KEYS`), presets, callbacks, the one-row filter bar (rounds and weapons in popovers, picked through `ui/chips.py`), the Duels page's kill/death control (`result_control`). |
 | `views/matches.py` | The Matches page: the unified table (filters, Refresh, Add match, row actions, the single / multi download + on-the-spot analysis flow). |
 | `views/_shared.py` | Helpers shared by the pages (`steam_cfg`, `show_error`). |
 | `views/dashboard.py` | The Dashboard stub (cross-match aggregates land in a future `core/aggregate.py`). |
-| `views/settings.py` | The Settings page: language note, analysis sliders (`persist_state="session"`), accounts + Steam helper, Library and storage, privacy. |
+| `views/settings.py` | The Settings page: language note, analysis sliders (`persist_state="session"`), accounts + Steam helper, Library and storage, privacy + the version / issues line. |
 | `views/overview.py` | Overview page (one grid for both teams). |
-| `views/shooting.py` | Shooting page: metric tiles, Top-3 issues (`st.badge` severities), charts, the weapons grid. |
-| `views/duels.py` | Duels page: the duels grid, the by-zone table, the openings table. |
+| `views/shooting.py` | Shooting page: Top-3 issues (inline badge severities), graded metric tiles (`_SPEC` norms), hit placement / speed split / risk charts, the weapons grid. |
+| `views/duels.py` | Duels page: the duels grid (zones are on the Map tooltips). |
 | `views/replay.py` | The 2D replay page (`@st.fragment`) and the duel window (`st.dialog`: verdict + chart). |
 | `views/map.py` | Map page (`@st.fragment`, radar plot). |
-| `views/extras.py` | Guide page and the debug expander rendered under every match tab. |
+| `views/extras.py` | Guide page (reference text + metric glossary). |
 | `core/matchlist.py` | The unified match list: provider records + library entries + summaries merged into `MatchRow`s (no Streamlit, no parsing). |
 | `core/matchstats.py` | The per-match summary cache behind the Matches table (compute from a parsed demo, read/write/drop the JSON cache, resolve "me"). |
 | `core/model.py` | Constants, the `Demo` container, pure helpers (weapons, angles, `wilson_ci`, `rank_in_lobby`). |
@@ -45,6 +45,8 @@ written here, so the doc and the guardrails stay honest.
 | `ui/charts.py` | `style_figure` and shared chart builders. |
 | `ui/format.py` | `fmt_result`, `fmt_first`, `pct`, `num`, `duel_label`, `map_name`. |
 | `ui/strip.py` + `.js` / `.css` | The duel navigation strip (Timeline). |
+| `ui/meters.py` + `.js` / `.css` | Metric tiles: value, fill bar on a fixed scale, a tick at the norm, the grade colour (`gradeColor` in `common.js`). |
+| `ui/chips.py` + `.js` / `.css` | Toggle chips (multi-select): the filter bar's weapon silhouettes and hand-picked rounds tinted by side. |
 | `ui/icons.py` | The icon set loader: SVG sanitizer, SHA-256 verification, weapon-name aliases, `weapon_cells` for grids, `bundle` / `weapon_labels` for the replay. |
 | `ui/roundrep.py` | 2D replay component: `round_payload` (pure JSON model, carries the whole `icons` / `wlab` set, economy runs, `thr`) + `round_replay`; front end in `roundrep.js` / `.css`. |
 | `theme/` | Design tokens (`tokens.toml`), `overrides.css` (tabular digits only), the loader; `tools/sync_theme.py` regenerates `.streamlit/config.toml` from the same tokens. |

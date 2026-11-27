@@ -12,7 +12,7 @@ from streamlit.testing.v1 import AppTest
 
 import core
 import store
-from app_driver import DEMO_DIR, GRIDS, NAMES, ROOT, _DEMO_IDS, _PRESETS_BY_COUNT, _demo_n, _shots_shown, act, ctl, err_of, fresh_at, goto, make_match, n_presets, open_demo, open_duel, open_match, pick, register_demo, ss_get, widget
+from app_driver import DEMO_DIR, GRIDS, NAMES, metric_map, set_chips, ROOT, _DEMO_IDS, _PRESETS_BY_COUNT, _demo_n, _shots_shown, act, ctl, err_of, fresh_at, goto, make_match, n_presets, open_demo, open_duel, open_match, pick, register_demo, ss_get, widget
 from demoparser2 import DemoParser
 from fakes import FakeParser, IDS, S1, S2, S3, S4
 
@@ -25,7 +25,6 @@ def test_one_round():
     at = open_demo(make_match([1]), "one_round.dem")
     assert not at.exception, err_of(at)
     assert not at.error, "no st.error on load"
-    assert widget(at, "slider", "flt_rounds") is None, "no round-range slider on a single round"
     assert n_presets(at) == (1, "all"), "only the 'all' preset offered"
     act(
         at,
@@ -44,7 +43,7 @@ def test_one_round():
     assert not ss_get(at, "du_open"), "the row click flag is consumed"
     goto(at, "replay")
     assert not at.get("plotly_chart"), "2D replay: the canvas component draws it, no plotly chart"
-    assert widget(at, "selectbox", "flt_preset") is None, "2D replay: the filter panel is hidden (the replay is the whole round)"
+    assert widget(at, "pills", "flt_preset") is None, "2D replay: the filter panel is hidden (the replay is the whole round)"
     # the payload behind the canvas: the whole round, every player, with
     # HP / weapon / keys - checked straight against the fake demo so the
     # data contract is asserted, not just "no exception"
@@ -317,7 +316,7 @@ def test_roundtrip():
     and nothing is lost on the way."""
     at = open_demo(make_match([1, 2, 13]), "roundtrip.dem")
     did = at.session_state["match"]
-    act(at, "roundtrip: first-half preset", lambda: ctl(at, "selectbox", "flt_preset").select("first").run())
+    act(at, "roundtrip: first-half preset", lambda: ctl(at, "pills", "flt_preset").select("first").run())
     assert ss_get(at, "flt_preset") == "first", "roundtrip: preset set"
     act(at, "roundtrip: to the duels tab", lambda: ctl(at, "segmented_control", "match_tab").select("duels").run())
     assert ss_get(at, "match_tab") == "duels" and not at.exception, err_of(at)
@@ -348,30 +347,24 @@ def test_roundtrip():
 def test_two_rounds():
     at = open_demo(make_match([1, 2], weapons=("ak47", "awp")), "two_rounds.dem")
     assert not at.exception, err_of(at)
-    assert widget(at, "slider", "flt_rounds") is None, "no slider while preset=All (slider lives in Custom)"
     assert n_presets(at) == (3, "all"), "presets all+pistols+custom"
     act(
         at,
         "pistols preset",
-        lambda: ctl(at, "selectbox", "flt_preset").select("pistols").run(),
+        lambda: ctl(at, "pills", "flt_preset").select("pistols").run(),
     )
     assert ss_get(at, "flt_preset") == "pistols", "preset switched to pistols"
     act(
         at,
         "custom preset",
-        lambda: ctl(at, "selectbox", "flt_preset").select("custom").run(),
+        lambda: ctl(at, "pills", "flt_preset").select("custom").run(),
     )
-    assert widget(at, "slider", "flt_rounds") is not None, "custom shows the range slider"
-    act(
-        at,
-        "manual range (2,2)",
-        lambda: at.slider(key="flt_rounds").set_value((2, 2)).run(),
-    )
-    assert ss_get(at, "flt_preset") == "custom", "slider keeps Custom selected"
+    act(at, "pick round 2", lambda: set_chips(at, "flt_rounds", [2]))
+    assert ss_get(at, "flt_preset") == "custom" and ss_get(at, "flt_rounds") == [2], "picked rounds keep Custom selected"
     act(
         at,
         "weapon filter awp",
-        lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
+        lambda: set_chips(at, "flt_weapons", ["awp"]),
     )
     act(
         at,
@@ -405,7 +398,7 @@ def test_long25():
         act(
             at,
             f"preset {p}",
-            lambda p=p: ctl(at, "selectbox", "flt_preset").select(p).run(),
+            lambda p=p: ctl(at, "pills", "flt_preset").select(p).run(),
         )
     act(
         at,
@@ -421,7 +414,7 @@ def test_filter_panel():
     assert not at.exception, err_of(at)
     base = _shots_shown(at)
     assert bool(base), "the counts line shows the shot count"
-    for kind, k in (("selectbox", "flt_preset"), ("segmented_control", "flt_side"), ("selectbox", "flt_dist")):
+    for kind, k in (("pills", "flt_preset"), ("segmented_control", "flt_side"), ("selectbox", "flt_dist")):
         assert widget(at, kind, k) is not None, f"{k} in the bar"
     # Streamlit mounts a popover body on every run: reachable without opening it
     assert widget(at, "pills", "flt_classes") is not None, "class pills in the weapons popover"
@@ -429,7 +422,7 @@ def test_filter_panel():
     act(
         at,
         "weapon filter awp",
-        lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
+        lambda: set_chips(at, "flt_weapons", ["awp"]),
     )
     filtered = _shots_shown(at)
     assert filtered is not None and 0 <= filtered < base, "filtered count reported and smaller"
@@ -447,7 +440,7 @@ def test_filter_panel():
     act(
         at,
         "weapon filter awp again",
-        lambda: at.multiselect(key="flt_weapons").set_value(["awp"]).run(),
+        lambda: set_chips(at, "flt_weapons", ["awp"]),
     )
     act(
         at,
@@ -482,7 +475,7 @@ def test_filter_panel():
         lambda: ctl(at, "segmented_control", "flt_side").select("T").run(),
     )
     goto(at, "guide")
-    assert widget(at, "selectbox", "flt_preset") is None, "guide hides the panel"
+    assert widget(at, "pills", "flt_preset") is None, "guide hides the panel"
     goto(at, "overview")
     assert ss_get(at, "flt_side") == "T", "side filter survives the guide page"
     # link round-trip: filters -> URL -> fresh app
@@ -492,9 +485,9 @@ def test_filter_panel():
         "distance band mid (for the link)",
         lambda: ctl(at3, "selectbox", "flt_dist").select("mid").run(),
     )
-    act(at3, "weapons for the link", lambda: at3.multiselect(key="flt_weapons").set_value(["ak47"]).run())
-    act(at3, "custom rounds for the link", lambda: ctl(at3, "selectbox", "flt_preset").select("custom").run())
-    act(at3, "round 2 for the link", lambda: at3.slider(key="flt_rounds").set_value((2, 2)).run())
+    act(at3, "weapons for the link", lambda: set_chips(at3, "flt_weapons", ["ak47"]))
+    act(at3, "custom rounds for the link", lambda: ctl(at3, "pills", "flt_preset").select("custom").run())
+    act(at3, "round 2 for the link", lambda: set_chips(at3, "flt_rounds", [2]))
     link = dict(at3.query_params)
     assert link.get("dist") == ["mid"] or link.get("dist") == "mid", "the filtered view is in the URL"
     at4 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
@@ -507,7 +500,7 @@ def test_filter_panel():
     assert (
         (ss_get(at4, "flt_dist"), ss_get(at4, "flt_weapons"), ss_get(at4, "flt_preset"),
          tuple(ss_get(at4, "flt_rounds")), ss_get(at4, "flt_res"), ss_get(at4, "lang"))
-        == ("mid", ["ak47"], "custom", (2, 2), "both", "en")
+        == ("mid", ["ak47"], "custom", (2,), "both", "en")
     ), "link restores the filters, unknown values fall back"
     # the result filter stays reachable when it leaves no duels, and Reset clears it
     goto(at4, "duels")
@@ -786,7 +779,7 @@ def test_matrix(pytestconfig):
                 act(
                     at,
                     f"preset {p}",
-                    lambda p=p: ctl(at, "selectbox", "flt_preset")
+                    lambda p=p: ctl(at, "pills", "flt_preset")
                     .select(p)
                     .run(),
                 )
@@ -910,18 +903,10 @@ def test_context():
 
     goto(at, "duels")
 
-    # the by-zone table: Alpha = 25 kills from BombsiteA, 0 deaths
-    ztabs = [GRIDS.pop("du_zones")] if "du_zones" in GRIDS else []
-    assert len(ztabs) == 1, "zone table rendered"
-    if ztabs:
-        z = ztabs[0]
-        assert (
-            len(z) == 1
-            and z.iloc[0]["Zone"] == "BombsiteA"
-            and z.iloc[0]["Kills"] == 25
-            and z.iloc[0]["Deaths"] == 0
-            and z.iloc[0]["K-D"] == 25
-        ), "zone table: BombsiteA 25/0 +25"
+    # the zone of every duel (all columns): Alpha = 25 kills from BombsiteA
+    act(at, "duels: all columns", lambda: at.toggle(key="du_full").set_value(True).run())
+    z = GRIDS["du_grid"]
+    assert len(z) == 25 and (z["Zone"] == "BombsiteA").all(), "duels: Alpha's zone BombsiteA"
 
     # Charlie: his zone table flips to the victim zones (deaths in Middle),
     # and every answer shot is damage-slowed -> the slowed verdict
@@ -930,16 +915,8 @@ def test_context():
         "switch player (Charlie)",
         lambda: at.selectbox(key="me").select(S3).run(),
     )
-    ztabs = [GRIDS.pop("du_zones")] if "du_zones" in GRIDS else []
-    if ztabs:
-        z = ztabs[0]
-        assert (
-            len(z) == 1
-            and z.iloc[0]["Zone"] == "Middle"
-            and z.iloc[0]["Kills"] == 0
-            and z.iloc[0]["Deaths"] == 25
-            and z.iloc[0]["K-D"] == -25
-        ), "zone table (Charlie): Middle 0/25 -25"
+    z = GRIDS["du_grid"]
+    assert len(z) == 25 and (z["Zone"] == "Middle").all(), "duels (Charlie): died in Middle"
     goto(at, "shooting")
     tips_txt = "\n".join(m.value for m in at.markdown)
     assert "slowed by recent damage" in tips_txt, "slowed tip shown for Charlie"
@@ -953,7 +930,7 @@ def test_context():
         lambda: at.selectbox(key="lang").select("ru").run(),
     )
     assert not at.exception, err_of(at)
-    assert list(GRIDS["du_zones"].columns) == ["Зона", "Килы", "Смерти", "К-С"], "ru: zone table localized"
+    assert "Зона" in GRIDS["du_grid"].columns, "ru: zone column localized"
 
 
 def test_first_shots():
@@ -990,7 +967,7 @@ def test_first_shots():
     assert "still swinging fast" in tips_txt, "swing tip shown for Alpha"
 
     act(at, "all metrics", lambda: at.toggle(key="sh_all").set_value(True).run())
-    labels = {m.label: m for m in at.metric}
+    labels = metric_map()
     assert "1st-shot accuracy" in labels, "first-acc tile present"
     m = labels.get("1st-shot accuracy")
     if m:
@@ -1009,7 +986,7 @@ def test_first_shots():
     )
     tips_txt = "\n".join(m.value for m in at.markdown)
     assert "still swinging fast" not in tips_txt, "no swing tip without mouse data"
-    labels = {m.label: m for m in at.metric}
+    labels = metric_map()
     m = labels.get("Mouse move before 1st shot")
     assert m is not None and m.value == "—", "swing tile degrades to dash"
 
@@ -1029,7 +1006,7 @@ def test_first_shots():
     )
     tips_txt = "\n".join(m.value for m in at.markdown)
     assert "still swinging fast" not in tips_txt, "no swing tip on old demo"
-    labels = {m.label: m for m in at.metric}
+    labels = metric_map()
     m = labels.get("Mouse move before 1st shot")
     assert m is not None and m.value == "—", "no-mouse swing tile dash"
 
@@ -1039,7 +1016,7 @@ def test_first_shots():
         "first shots in russian",
         lambda: at.selectbox(key="lang").select("ru").run(),
     )
-    labels = {m.label: m for m in at.metric}
+    labels = metric_map()
     assert "Точность 1-го выстрела" in labels and "Движение мыши перед 1-м" in labels, "ru first-acc tile"
 
 
@@ -1069,11 +1046,11 @@ def test_impact():
         "all metrics",
         lambda: at.toggle(key="sh_all").set_value(True).run(),
     )
-    labels = {m.label: m for m in at.metric}
+    labels = metric_map()
     m = labels.get("Opening duels (W / L)")
     assert m is not None and m.value == "0 / 30", "opening tile 0 / 30"
-    m = labels.get("Opening winrate")
-    assert m is not None and m.value == "0%", "opening winrate 0%"
+    m = labels.get("Opening duels (W / L)")
+    assert m is not None and m.delta == "Opening winrate: 0%", "opening winrate 0%"
     m = labels.get("Trade kills")
     assert m is not None and m.value == "0", "trade kills 0"
     m = labels.get("Traded deaths")
@@ -1088,37 +1065,11 @@ def test_impact():
     )
     tips_txt = "\n".join(m.value for m in at.markdown)
     assert "opening duel and keep losing" not in tips_txt, "no openings tip for Alpha (100%)"
-    labels = {m.label: m for m in at.metric}
+    labels = metric_map()
     m = labels.get("Opening duels (W / L)")
     assert m is not None and m.value == "30 / 0", "opening tile 30 / 0"
-    m = labels.get("Opening winrate")
-    assert m is not None and m.value == "100%", "opening winrate 100%"
-
-    # Duels page: the openings table (30 rows, Alpha starred as killer)
-    goto(at, "duels")
-    otabs = [GRIDS.pop("du_openings")] if "du_openings" in GRIDS else []
-    assert len(otabs) == 1, "openings table rendered"
-    if otabs:
-        o = otabs[0]
-        assert (
-            len(o) == 30
-            and (o["Killer"] == "★ Alpha").all()
-            and (o["Victim"] == "Charlie").all()
-        ), "openings: 30 rows, Alpha starred, Charlie victim"
-
-    # round filter: first half preset -> 12 opening rows
-    act(
-        at,
-        "round preset first half",
-        lambda: ctl(at, "selectbox", "flt_preset").select("first").run(),
-    )
-    otabs = [GRIDS.pop("du_openings")] if "du_openings" in GRIDS else []
-    assert len(otabs) == 1 and len(otabs[0]) == 12, "openings follow the round filter"
-    act(
-        at,
-        "round preset back to all",
-        lambda: ctl(at, "selectbox", "flt_preset").select("all").run(),
-    )
+    m = labels.get("Opening duels (W / L)")
+    assert m is not None and m.delta == "Opening winrate: 100%", "opening winrate 100%"
 
     # russian labels render
     act(
@@ -1126,23 +1077,33 @@ def test_impact():
         "impact tables in russian",
         lambda: at.selectbox(key="lang").select("ru").run(),
     )
-    assert "Убийца" in GRIDS["du_openings"].columns, "ru: openings table localized"
     goto(at, "shooting")
     act(
         at,
         "all metrics (ru)",
         lambda: at.toggle(key="sh_all").set_value(True).run(),
     )
-    labels = {m.label: m for m in at.metric}
-    assert "Первые дуэли (W / L)" in labels and "Процент входов" in labels, "ru impact tiles"
+    labels = metric_map()
+    assert labels["Первые дуэли (W / L)"].delta.startswith("Процент входов: "), "ru impact tiles"
+    assert {"Трейды", "Мульти-килл раунды", "Эйс"} <= set(labels), "ru grouped tiles"
 
 
 def test_scoreboard():
     """
-    The debug expander gets the scoreboard cross-check: the game's own
-    kills_total / deaths_total aggregates vs our tables (2-round match,
-    Alpha kills Charlie in both rounds).
+    The scoreboard cross-check of core.data_checks: the game's own kills_total /
+    deaths_total aggregates vs our tables (2-round match, Alpha kills Charlie in both
+    rounds).
     """
+
+    def _scoreboard(d, name):
+        at = open_demo(d, name)
+        assert not at.exception, err_of(at)
+        path = store.demo_path(store.get_demo(at.session_state["demo_id"]))
+        demo = core.load_demo(os.path.realpath(path))
+        shots = core.shots_table(demo)
+        checks = core.data_checks(demo, shots, core.build_duels(demo, 3.0))
+        return next(c for c in checks if c["id"] == "scoreboard")
+
     d = make_match([1, 2])
     d["totals"] = {
         S1: ("Alpha", 2, 0),
@@ -1150,11 +1111,8 @@ def test_scoreboard():
         S3: ("Charlie", 0, 2),
         S4: ("Delta", 0, 0),
     }
-    at = open_demo(d, "score_ok.dem")
-    assert not at.exception, err_of(at)
-    dbg = "\n".join(m.value for m in at.markdown)
-    assert "scoreboard counters" in dbg, "scoreboard line rendered"
-    assert "0 players with a K/D mismatch" in dbg, "scoreboard reports 0 mismatches"
+    sb = _scoreboard(d, "score_ok.dem")
+    assert sb["level"] == "ok" and sb.get("n", 0) == 0, sb
 
     # the game claims a kill we never found -> the check flags the player
     d2 = make_match([1, 2])
@@ -1164,11 +1122,9 @@ def test_scoreboard():
         S3: ("Charlie", 0, 2),
         S4: ("Delta", 0, 0),
     }
-    at = open_demo(d2, "score_bad.dem")
-    assert not at.exception, err_of(at)
-    dbg = "\n".join(m.value for m in at.markdown)
-    assert "1 players with a K/D mismatch" in dbg, "scoreboard flags the mismatch"
-    assert "Alpha: K 2 vs 3" in dbg, "scoreboard names the player"
+    sb = _scoreboard(d2, "score_bad.dem")
+    assert sb["level"] != "ok" and sb["n"] == 1, sb
+    assert any(v.startswith("Alpha: K 2 vs 3") for v in sb.get("vals") or []), sb
 
 
 def test_map():
@@ -1728,5 +1684,5 @@ def test_real_demo(pytestconfig, monkeypatch):
         act(
             at,
             f"preset {p}",
-            lambda p=p: ctl(at, "selectbox", "flt_preset").select(p).run(),
+            lambda p=p: ctl(at, "pills", "flt_preset").select(p).run(),
         )

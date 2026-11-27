@@ -25,6 +25,7 @@ from core.model import (
     _decode_buttons,
     _safe_int,
     _speed_from_positions,
+    _zone,
     norm_weapon,
 )
 
@@ -164,6 +165,7 @@ KILL_POINT_COLS = [
     "weapon",
     "headshot",
     "distance",
+    "zone",
     "my_side",
     "my_x",
     "my_y",
@@ -216,6 +218,8 @@ def kill_points(demo: Demo, me: str, f: "Filters | None" = None) -> pd.DataFrame
                 "weapon": norm_weapon(r.weapon) if hasattr(r, "weapon") else NA,
                 "headshot": bool(getattr(r, "headshot", False)),
                 "distance": dist,
+                # where I stood: the game's own place name ("" when unknown)
+                "zone": _zone(getattr(r, f"{mine}_last_place_name", None)),
                 "my_side": demo.side_at(rd, me),
                 "my_x": mx,
                 "my_y": my,

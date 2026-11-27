@@ -1,4 +1,5 @@
-"""The Shooting page: accuracy, hit groups, first shots, weapons."""
+"""The Shooting page: the coaching card, graded metric tiles, hit placement, speed at
+every shot, the speed-vs-distance risk chart, weapons."""
 
 import numpy as np
 import pandas as pd
@@ -7,21 +8,14 @@ import streamlit as st
 from dataclasses import dataclass
 
 import core
-from ui import icons
+from ui import icons, meters
 from ui import schema
 from ui.charts import PAL, style_figure
-from ui.format import fmt_result, num, pct
+from ui.format import num, pct
 
 HG_ORDER = [
-    "head",
-    "neck",
-    "chest",
-    "stomach",
-    "left_arm",
-    "right_arm",
-    "left_leg",
-    "right_leg",
-    "other",
+    "head", "neck", "chest", "stomach", "left_arm", "right_arm", "left_leg",
+    "right_leg", "other",
 ]
 
 
@@ -222,239 +216,267 @@ def _build_tips(t, s) -> list:
     return tips
 
 
-def _top3_card(t, s, tips, name_of) -> None:
-    """The "Top 3 things to work on" card: severity, the sentence, the evidence."""
+def _top3_card(t, tips) -> None:
+    """The "Top 3 things to work on" card: severity badge + the sentence, one line each
+    (the duels behind a tip are on the Duels page)."""
     sev_color = {
         2: ("sev_high", "red"),  # red    — bad / risky
         1: ("sev_med", "orange"),  # orange — warning
         0: ("sev_info", "blue"),  # blue   — info / good
     }
-
-    with st.container(border=True):
-        st.markdown(f"**{t('top3_title')}**")
-        st.caption(t("tips_caption"))
-        for sev, tip_text, ev in tips[:3]:
+    with st.container(border=True, gap="small"):
+        st.markdown(f"**{t('top3_title')}**", help=t("tips_caption"))
+        for sev, tip_text, _ev in tips[:3]:
             sev_key, sev_badge = sev_color[sev]
-            chip, text_col, ev_col = st.columns([1, 6, 2])
-            chip.badge(t(sev_key), color=sev_badge)
-            text_col.markdown(tip_text)
-            with ev_col:
-                if ev == "err":
-                    ev_df = s.dd[s.dd["my_err"].notna()].nlargest(5, "my_err")
-                    _events_popover(t, "ev_err", ev_df, name_of)
-                elif ev == "lost":
-                    ev_df = s.dth_df[s.dth_df["first"] == "opponent"]
-                    _events_popover(t, "ev_lost", ev_df, name_of)
-                elif ev is not None:  # "risk" / "speed": chart is below
-                    st.caption(
-                        t(
-                            "top3_see_chart",
-                            chart=(
-                                t("risk_title") if ev == "risk" else t("speed_hist")
-                            ),
-                        )
-                    )
+            st.markdown(f":{sev_badge}-badge[{t(sev_key)}] {tip_text}")
+
+
+# How each tile is judged: grade (bad, ok, good) and the bar's scale. Rough club-level
+# norms for matchmaking / FACEIT, not pro benchmarks: the colour says "worth a look",
+# the tick on the bar is the "ok" line.
+_SPEC = {
+    "acc": meters.Spec("high", (10, 18, 28), (0, 50)),
+    "risky": meters.Spec("low", (30, 15, 5), (0, 60)),
+    "err": meters.Spec("low", (6, 3, 1.5), (0, 10), "°"),
+    "first": meters.Spec("high", (35, 50, 65)),
+    "hs": meters.Spec("high", (15, 25, 40), (0, 80)),
+    "moving": meters.Spec("low", (50, 30, 15)),
+    "speed": meters.Spec("low", (100, 40, 15), (0, 250), " u/s"),
+    "cs": meters.Spec("high", (30, 50, 70)),
+    "onhead": meters.Spec("high", (15, 30, 45)),
+    "first_acc": meters.Spec("high", (15, 25, 40), (0, 80)),
+    "kd": meters.Spec("high", (0.7, 1.0, 1.4), (0, 2.5), ""),
+    "open_rate": meters.Spec("high", (35, 50, 65)),
+    "traded": meters.Spec("high", (15, 30, 50)),
+}
+
+
+def _tile(t, label_key, help_key, text, value=None, spec=None, sub="") -> dict:
+    norm = ""
+    if spec is not None and spec.grade is not None:
+        norm = t("m_norm_low" if spec.best == "low" else "m_norm_high")
+    helps = help_key if isinstance(help_key, tuple) else (help_key,)
+    return meters.tile(
+        t(label_key), text, value, spec, help="\n\n".join(t(h) for h in helps), sub=sub,
+        norm_label=norm,
+    )
 
 
 def _metric_tiles(t, s) -> None:
     """One headline tile per theme; the rest behind "All metrics"."""
-
-    c = st.columns(4)
-    c[0].metric(t("m_acc"), pct(s.acc_pct), help=t("m_acc_help"))
-    c[1].metric(t("m_risky"), pct(s.risky_pct), help=t("m_risky_help"))
-    c[2].metric(t("m_err"), num(s.err, 1), help=t("m_err_help"))
-    c[3].metric(t("m_first"), pct(s.first_pct), help=t("m_first_help"))
-
-
+    meters.meters(
+        [
+            _tile(t, "m_acc", "m_acc_help", pct(s.acc_pct), s.acc_pct, _SPEC["acc"]),
+            _tile(t, "m_risky", "m_risky_help", pct(s.risky_pct), s.risky_pct, _SPEC["risky"]),
+            _tile(t, "m_err", "m_err_help", num(s.err, 1), s.err, _SPEC["err"]),
+            _tile(t, "m_first", "m_first_help", pct(s.first_pct), s.first_pct, _SPEC["first"]),
+        ],
+        key="sh_m_head",
+    )
     if st.toggle(t("all_metrics"), key="sh_all", persist_state="session"):
         _all_metrics_tiles(t, s)
 
 
+def _imp(t, s, field, fmt=num):
+    """An impact-row value formatted, "—" without the row."""
+    if s.imp_me is None:
+        return t("none_val"), None
+    v = s.imp_me[field]
+    return (fmt(v) if fmt is pct else fmt(v, 0)), v
+
+
+def _group(t, label_key, help_keys, parts, span=2) -> dict:
+    """One tile for several related counts: a row of small value / label cells."""
+    return meters.group(
+        t(label_key),
+        [(t(k), v) for k, v in parts],
+        help="\n\n".join(t(h) for h in help_keys),
+        span=span,
+    )
+
+
+def _accuracy_movement_rows(t, s) -> dict:
+    return {
+        "sec_accuracy": [
+            _tile(t, "m_hits", "m_hits_help", str(s.hits_n),
+                  sub=t("m_of_shots", n=len(s.sh_me))),
+            _tile(t, "m_hs", "m_hs_help", pct(s.hs_hits), s.hs_hits, _SPEC["hs"]),
+            _tile(t, "m_onhead", "m_onhead_help", pct(s.onhead_pct), s.onhead_pct,
+                  _SPEC["onhead"]),
+        ],
+        "sec_movement": [
+            _tile(t, "m_moving", "m_moving_help", pct(s.moving_pct), s.moving_pct,
+                  _SPEC["moving"]),
+            _tile(t, "m_speed", "m_speed_help", num(s.spd, 0), s.spd, _SPEC["speed"]),
+            _tile(t, "m_cs", "m_cs_help", pct(s.cs_pct), s.cs_pct, _SPEC["cs"]),
+        ],
+        "sec_first": [
+            _tile(t, "m_first_acc", "m_first_acc_help", pct(s.first_acc), s.first_acc,
+                  _SPEC["first_acc"],
+                  sub=(f"{s.first_acc - s.follow_acc:+.0f} pp"
+                       if pd.notna(s.first_acc) and pd.notna(s.follow_acc) else "")),
+            _tile(t, "m_first_n", "m_first_n_help", str(s.first_n)),
+            _tile(t, "m_swing_med", "m_swing_med_help", num(s.swing_med, 0)),
+        ],
+    }
+
+
+def _duel_impact_rows(t, s) -> dict:
+    kd = s.kills / s.dths if s.dths else (float(s.kills) if s.kills else None)
+    open_wl = (
+        f"{int(s.imp_me['open_wins'])} / "
+        f"{int(s.imp_me['open_attempts'] - s.imp_me['open_wins'])}"
+        if s.imp_me is not None
+        else t("none_val")
+    )
+    rate_txt, rate = _imp(t, s, "open_rate", pct)
+    return {
+        "sec_duels": [
+            _tile(t, "m_kd", "m_kd_help", f"{s.kills} / {s.dths}", kd, _SPEC["kd"]),
+            # the W / L count, the bar and the colour read the winrate
+            _tile(t, "m_open", ("m_open_help", "m_open_rate_help"), open_wl, rate,
+                  _SPEC["open_rate"],
+                  sub=f"{t('m_open_rate')}: {rate_txt}"),
+            _tile(t, "m_dur", "m_dur_help", num(s.dur, 2)),
+        ],
+        "sec_impact": [
+            _group(t, "m_multi", ["m_k2_help"], [
+                ("m_k2", _imp(t, s, "k2")[0]),
+                ("m_k3", _imp(t, s, "k3")[0]),
+                ("m_k4", _imp(t, s, "k4")[0]),
+                ("m_k5", _imp(t, s, "k5")[0]),
+            ]),
+            _group(t, "m_trades", ["m_trade_kills_help", "m_traded_help"], [
+                ("m_trade_kills", _imp(t, s, "trade_kills")[0]),
+                ("m_traded", _imp(t, s, "traded_pct", pct)[0]),
+            ], span=1),
+            _group(t, "m_assists", ["m_assists_help", "m_flash_help"], [
+                ("m_assists", _imp(t, s, "assists")[0]),
+                ("m_flash", _imp(t, s, "flash_assists")[0]),
+            ], span=1),
+        ],
+    }
+
+
 def _all_metrics_tiles(t, s) -> None:
-    """The full tile list behind "All metrics", grouped by section header
-    (kept whole under the 80-line cap: a flat table of metric cells)."""
-    st.markdown(f"**{t('sec_accuracy')}**")
-    c = st.columns(4)
-    c[0].metric(t("m_shots"), len(s.sh_me), help=t("m_shots_help"))
-    c[1].metric(t("m_hits"), s.hits_n, help=t("m_hits_help"))
-    c[2].metric(t("m_hs"), pct(s.hs_hits), help=t("m_hs_help"))
-    st.markdown(f"**{t('sec_movement')}**")
-    c = st.columns(4)
-    c[0].metric(t("m_moving"), pct(s.moving_pct), help=t("m_moving_help"))
-    c[1].metric(t("m_speed"), num(s.spd, 0), help=t("m_speed_help"))
-    c[2].metric(t("m_cs"), pct(s.cs_pct), help=t("m_cs_help"), delta=None)
-    st.markdown(f"**{t('sec_crosshair')}**")
-    c = st.columns(4)
-    c[0].metric(t("m_onhead"), pct(s.onhead_pct), help=t("m_onhead_help"))
-    st.markdown(f"**{t('sec_first')}**")
-    c = st.columns(4)
-    c[0].metric(
-        t("m_first_acc"),
-        pct(s.first_acc),
-        help=t("m_first_acc_help"),
-        delta=(
-            f"{s.first_acc - s.follow_acc:+.0f} pp"
-            if pd.notna(s.first_acc) and pd.notna(s.follow_acc)
-            else None
-        ),
-    )
-    c[1].metric(t("m_first_n"), s.first_n, help=t("m_first_n_help"))
-    c[2].metric(t("m_swing_med"), num(s.swing_med, 0), help=t("m_swing_med_help"))
-    st.markdown(f"**{t('sec_duels')}**")
-    c = st.columns(4)
-    c[0].metric(t("m_kd"), f"{s.kills} / {s.dths}", help=t("m_kd_help"))
-    c[1].metric(t("m_dur"), num(s.dur, 2), help=t("m_dur_help"))
-    st.markdown(f"**{t('sec_impact')}**")
-    c = st.columns(4)
-    c[0].metric(
-        t("m_open"),
-        (
-            f"{int(s.imp_me['open_wins'])} / "
-            f"{int(s.imp_me['open_attempts'] - s.imp_me['open_wins'])}"
-            if s.imp_me is not None
-            else t("none_val")
-        ),
-        help=t("m_open_help"),
-    )
-    c[1].metric(
-        t("m_open_rate"),
-        pct(s.imp_me["open_rate"]) if s.imp_me is not None else t("none_val"),
-        help=t("m_open_rate_help"),
-    )
-    c[2].metric(
-        t("m_trade_kills"),
-        num(s.imp_me["trade_kills"], 0) if s.imp_me is not None else t("none_val"),
-        help=t("m_trade_kills_help"),
-    )
-    c[3].metric(
-        t("m_traded"),
-        pct(s.imp_me["traded_pct"]) if s.imp_me is not None else t("none_val"),
-        help=t("m_traded_help"),
-    )
-    c = st.columns(4)
-    for _i, _mk in enumerate(("m_k2", "m_k3", "m_k4", "m_k5")):
-        c[_i].metric(
-            t(_mk),
-            num(s.imp_me[_mk[2:]], 0) if s.imp_me is not None else t("none_val"),
-            help=t("m_k2_help"),
-        )
-    c = st.columns(2)
-    c[0].metric(
-        t("m_assists"),
-        num(s.imp_me["assists"], 0) if s.imp_me is not None else t("none_val"),
-        help=t("m_assists_help"),
-    )
-    c[1].metric(
-        t("m_flash"),
-        num(s.imp_me["flash_assists"], 0) if s.imp_me is not None else t("none_val"),
-        help=t("m_flash_help"),
-    )
+    """The full tile list behind "All metrics", one titled row per theme; related counts
+    (multi-kills, trades, assists) share one tile."""
+    rows = {**_accuracy_movement_rows(t, s), **_duel_impact_rows(t, s)}
+    for sec, tiles in rows.items():
+        meters.meters(tiles, key=f"sh_m_{sec}", title=t(sec))
 
 
-def _charts(t, s) -> None:
-    """Hit placement, speed histogram and the risk chart."""
-
+def _angles_warning(t, s) -> None:
+    """Kills land with a wide aim error: most of them are close-range sprays."""
     if len(s.dd):
         k_err = s.dd.loc[s.dd["result"] == "kill", "my_err"].median()
         if pd.notna(k_err) and k_err > 25:
             st.warning(t("warn_angles"))
 
 
-    st.divider()
-    left, right = st.columns(2)
-    with left:
-        st.markdown(f"**{t('hit_where')}**")
-        if s.hg_me.empty:
-            st.info(t("hit_none"))
-        else:
-            idx = [k for k in HG_ORDER if k in s.hg_me.index]
-            idx += [k for k in s.hg_me.index if k not in HG_ORDER]
-            fig = go.Figure(
-                go.Bar(
-                    x=[t(f"hg_{k}") for k in idx],
-                    y=s.hg_me.reindex(idx).values,
-                    marker_color=PAL["you"],
-                )
-            )
-            style_figure(
-                fig,
-                height=260,
-                y_title=t("col_hits"),
-                hover="%{x}: %{y}<extra></extra>",
-            )
-            st.plotly_chart(fig, width="stretch")
-    with right:
-        st.markdown(f"**{t('speed_hist')}**")
-        sv = s.sh_me["speed"].dropna() if len(s.sh_me) else pd.Series(dtype=float)
-        if len(sv):
-            # the threshold is a grey context line: the danger boundary is on the risk
-            # chart
-            fig = go.Figure(go.Histogram(x=sv, nbinsx=40, marker_color=PAL["you"]))
-            fig.add_vline(x=s.thr, line_dash="dot", line_color=PAL["ctx"])
-            style_figure(fig, height=260, x_title=t("speed_x"), y_title=t("speed_y"))
-            st.plotly_chart(fig, width="stretch")
+def _hits_chart(t, s) -> None:
+    """Where the hits land: head in the "good" colour, the share on every bar."""
+    st.markdown(f"**{t('hit_where')}**")
+    if s.hg_me.empty:
+        st.info(t("hit_none"))
+        return
+    idx = [k for k in HG_ORDER if k in s.hg_me.index]
+    idx += [k for k in s.hg_me.index if k not in HG_ORDER]
+    vals = s.hg_me.reindex(idx).fillna(0).to_numpy()
+    total = float(vals.sum()) or 1.0
+    fig = go.Figure(
+        go.Bar(
+            x=[t(f"hg_{k}") for k in idx],
+            y=vals,
+            text=[f"{v / total * 100:.0f}%" for v in vals],
+            textposition="outside",
+            cliponaxis=False,
+            marker_color=[PAL["good"] if k == "head" else PAL["ctx"] for k in idx],
+        )
+    )
+    style_figure(
+        fig, height=260, y_title=t("col_hits"), hover="%{x}: %{y}<extra></extra>",
+        margin=dict(t=24, r=10),
+    )
+    st.plotly_chart(fig, width="stretch")
 
-    _risk_chart(t, s)
+
+def _speed_chart(t, s) -> None:
+    """Speed at every shot, split at the movement threshold: stopped vs on the move,
+    each share in the legend."""
+    st.markdown(f"**{t('speed_hist')}**")
+    sv = s.sh_me["speed"].dropna() if len(s.sh_me) else pd.Series(dtype=float)
+    if not len(sv):
+        st.info(t("risk_none"))
+        return
+    still, moving = sv[sv <= s.thr], sv[sv > s.thr]
+    bins = dict(start=0, end=float(max(sv.max(), s.thr)) + 10, size=10)
+    fig = go.Figure()
+    for part, name, color in (
+        (still, t("speed_still", thr=s.thr, pct=len(still) / len(sv) * 100), PAL["good"]),
+        (moving, t("speed_moving", pct=len(moving) / len(sv) * 100), PAL["bad"]),
+    ):
+        fig.add_trace(go.Histogram(x=part, xbins=bins, name=name, marker_color=color))
+    fig.add_vline(x=s.thr, line_dash="dot", line_color=PAL["ctx"])
+    fig.update_layout(barmode="stack", bargap=0.05)
+    style_figure(fig, height=260, x_title=t("speed_x"), y_title=t("speed_y"))
+    st.plotly_chart(fig, width="stretch")
 
 
 def _risk_chart(t, s) -> None:
     """The "too fast for this distance" scatter: grey misses, blue hits, vermillion
     boundary (colour-blind-safe)."""
-
     st.markdown(f"**{t('risk_title')}**")
     known_r = s.sh_me[s.sh_me["dist"].notna() & s.sh_me["speed"].notna()]
     if not len(known_r):
         st.info(t("risk_none"))
-    else:
-        fig = go.Figure()
-        miss = known_r[~known_r["hit"].astype(bool)]
-        hit = known_r[known_r["hit"].astype(bool)]
+        return
+    fig = go.Figure()
+    hit_mask = known_r["hit"].astype(bool)
+    for part, name, opacity, color in (
+        (known_r[~hit_mask], t("lbl_miss"), 0.45, PAL["ctx"]),
+        (known_r[hit_mask], t("lbl_hit"), 0.8, PAL["good"]),
+    ):
         fig.add_trace(
             go.Scattergl(
-                x=miss["dist"],
-                y=miss["speed"],
-                mode="markers",
-                name=t("lbl_miss"),
-                opacity=0.45,
-                marker=dict(size=5, color=PAL["ctx"]),
+                x=part["dist"], y=part["speed"], mode="markers", name=name,
+                opacity=opacity, marker=dict(size=5, color=color),
             )
         )
-        fig.add_trace(
-            go.Scattergl(
-                x=hit["dist"],
-                y=hit["speed"],
-                mode="markers",
-                name=t("lbl_hit"),
-                opacity=0.8,
-                marker=dict(size=5, color=PAL["good"]),
-            )
+    dmax = float(known_r["dist"].max())
+    xs = np.linspace(0, max(s.strict_dist * 1.3, dmax), 240)
+    fig.add_trace(
+        go.Scatter(
+            x=xs,
+            y=core.allowed_speed(xs, s.thr, s.safe_dist, s.strict_dist),
+            mode="lines",
+            name=t("risk_curve"),
+            line=dict(color=PAL["bad"], dash="dash"),
         )
-        dmax = float(known_r["dist"].max())
-        xs = np.linspace(0, max(s.strict_dist * 1.3, dmax), 240)
-        fig.add_trace(
-            go.Scatter(
-                x=xs,
-                y=core.allowed_speed(xs, s.thr, s.safe_dist, s.strict_dist),
-                mode="lines",
-                name=t("risk_curve"),
-                line=dict(color=PAL["bad"], dash="dash"),
-            )
-        )
-        style_figure(
-            fig,
-            height=380,
-            x_title=t("risk_x"),
-            y_title=t("risk_y"),
-            hover="%{x:.0f} u<br>%{y:.0f} u/s<extra>%{fullData.name}</extra>",
-        )
-        st.plotly_chart(fig, width="stretch")
+    )
+    style_figure(
+        fig,
+        height=340,
+        x_title=t("risk_x"),
+        y_title=t("risk_y"),
+        hover="%{x:.0f} u<br>%{y:.0f} u/s<extra>%{fullData.name}</extra>",
+    )
+    st.plotly_chart(fig, width="stretch")
+
+
+def _charts(t, s) -> None:
+    """Hit placement and the speed split side by side, the risk scatter under them."""
+    left, right = st.columns(2)
+    with left:
+        _hits_chart(t, s)
+    with right:
+        _speed_chart(t, s)
+    _risk_chart(t, s)
 
 
 def _weapons_grid(ctx) -> None:
     """The per-weapon table."""
     t = ctx.t
-
-    st.divider()
     st.markdown(f"**{t('weapons')}**")
     w = core.weapon_stats(
         ctx.demo, ctx.shots_f, ctx.me, ctx.thr, ctx.safe_dist, ctx.strict_dist,
@@ -472,36 +494,12 @@ def _weapons_grid(ctx) -> None:
 
 
 def render(ctx) -> None:
-    """Draw the Shooting page: stats, the coaching card, the metric
-    tiles, the charts, the weapons grid."""
+    """Draw the Shooting page: the coaching card, the graded metric tiles, the
+    shooting charts, the weapons grid."""
     t = ctx.t
     s = _stats(ctx)
-    tips = _build_tips(t, s)
-    _top3_card(t, s, tips, ctx.name_of)
+    _top3_card(t, _build_tips(t, s))
     _metric_tiles(t, s)
+    _angles_warning(t, s)
     _charts(t, s)
     _weapons_grid(ctx)
-
-
-def _events_popover(t, table_id: str, ev_df, name_of) -> None:
-    """The Top-3 evidence behind the "Show" button; empty evidence draws
-    only the caption."""
-    with st.popover(t("top3_show")):
-        st.caption(t(f"top3_{table_id}"))
-        if len(ev_df):
-            w_vals, w_labels, w_icons = icons.weapon_cells(ev_df["weapon"])
-            schema.table(
-                table_id,
-                {
-                    "round": ev_df["round"].to_numpy(),
-                    "opponent": [name_of.get(s, s) for s in ev_df["opponent"]],
-                    "weapon": w_vals,
-                    "weapon_disp": w_labels,
-                    "aim_err": ev_df["my_err"].to_numpy(),
-                    "duration": ev_df["duration_s"].to_numpy(),
-                    "result": [fmt_result(v) for v in ev_df["result"]],
-                    "result_raw": ev_df["result"].astype(str).to_numpy(),
-                },
-                key=f"sh_{table_id}",
-                icons=w_icons,
-            )

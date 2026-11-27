@@ -1,11 +1,6 @@
-"""Guide and debug: the reference page and the diagnostics expander."""
+"""The Guide page: the reference text and the metric glossary."""
 
-import json
-
-import pandas as pd
 import streamlit as st
-
-import core
 
 
 def guide(ctx) -> None:
@@ -30,50 +25,3 @@ def guide(ctx) -> None:
             ("m_dur", "m_dur_help"),
         ):
             st.markdown(f"**{t(_mk)}** — {t(_hk)}")
-
-
-def debug(ctx) -> None:
-    """The diagnostics expander under every page."""
-    t = ctx.t
-    demo = ctx.demo
-    shots = ctx.shots
-    duels_all = ctx.duels_all
-    me = ctx.me
-    thr = ctx.thr
-    window_s = ctx.window_s
-    safe_dist = ctx.safe_dist
-    strict_dist = ctx.strict_dist
-    with st.expander(f"🐞 {t('debug')}"):
-        st.caption(t("dbg_hint"))
-        checks = core.data_checks(demo, shots, duels_all)
-        icons = {"ok": "✅", "warn": "⚠️", "anomaly": "❗"}
-        order = {"anomaly": 0, "warn": 1, "ok": 2}
-        if checks and all(c["level"] == "ok" for c in checks):
-            st.markdown(f"✅ {t('dbg_ok_all')}")
-        for c in sorted(checks, key=lambda c: order[c["level"]]):
-            kw = {"n": c.get("n", 0)}
-            if "pct" in c:
-                kw["pct"] = c["pct"]
-            if "med" in c:
-                kw["med"] = c["med"] if pd.notna(c["med"]) else 0.0
-            kw["vals"] = ", ".join(map(str, c.get("vals") or [])) or "—"
-            st.markdown(f"{icons[c['level']]} {t('chk_' + c['id'], **kw)}")
-        rep = core.debug_report(
-            demo,
-            shots,
-            duels_all,
-            me,
-            {
-                "thr": thr,
-                "window_s": window_s,
-                "safe_dist": safe_dist,
-                "strict_dist": strict_dist,
-            },
-        )
-        st.download_button(
-            t("dbg_download"),
-            data=json.dumps(rep, ensure_ascii=False, indent=1, default=str),
-            file_name=f"cs2_aimaudit_debug_{me}.json",
-            mime="application/json",
-            key="dbg_dl",
-        )

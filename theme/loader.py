@@ -128,6 +128,9 @@ def config_theme_dict(theme: str | None = None) -> dict:
         "baseRadius": tk["radius.sm"],
         "font": tk["font.family-ui"],
         "chartCategoricalColors": [tk[f"chart-{i}"] for i in range(1, 7)],
+        # a compact page: less empty space above the content and below it
+        "paddingTop": "1.5rem",
+        "paddingBottom": "2rem",
     }
 
 

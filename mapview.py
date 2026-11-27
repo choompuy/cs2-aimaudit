@@ -4,6 +4,7 @@ up) with a radar, game units on a plain grid without."""
 from __future__ import annotations
 
 import base64
+import io
 from functools import lru_cache
 
 import numpy as np
@@ -12,11 +13,38 @@ import plotly.graph_objects as go
 import core
 
 
+# The 2D replay's radar tone (ui/roundrep.js prepRadar): half the saturation and every
+# map brought to one brightness, so the markers stand out and the walls stay readable.
+RADAR_LEVEL = 0.4
+
+
+def _toned_png(path: str) -> bytes:
+    """The radar desaturated and dimmed to RADAR_LEVEL; the file as is when it cannot be
+    decoded."""
+    from PIL import Image, ImageEnhance
+
+    try:
+        im = Image.open(path).convert("RGBA")
+    except OSError:
+        with open(path, "rb") as fh:
+            return fh.read()
+    px = np.asarray(im.resize((128, 128)), dtype=float) / 255.0
+    lum = 0.299 * px[..., 0] + 0.587 * px[..., 1] + 0.114 * px[..., 2]
+    art = (px[..., 3] >= 40 / 255) & (lum > 0.06)  # the black gaps are not the art
+    bright = float(np.clip(RADAR_LEVEL / lum[art].mean(), 0.6, 1.6)) if art.any() else 0.8
+    alpha = im.getchannel("A")
+    rgb = ImageEnhance.Color(im.convert("RGB")).enhance(0.5)
+    rgb = ImageEnhance.Brightness(rgb).enhance(bright)
+    rgb.putalpha(alpha)
+    buf = io.BytesIO()
+    rgb.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 @lru_cache(maxsize=8)
 def _data_uri(path: str, mtime: float) -> str:
-    """The radar file as a data URI (cached per file version)."""
-    with open(path, "rb") as fh:
-        return "data:image/png;base64," + base64.b64encode(fh.read()).decode("ascii")
+    """The toned radar as a data URI (cached per file version)."""
+    return "data:image/png;base64," + base64.b64encode(_toned_png(path)).decode("ascii")
 
 
 def radar_uri(path: str) -> str:

@@ -1,0 +1,54 @@
+:host { display: block; }
+.aa-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: inherit;
+}
+.aa-gap {
+  width: 1px;
+  height: 1.3rem;
+  margin: 0 0.2rem;
+  background: var(--border-strong);
+}
+.aa-c {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.9rem;
+  height: 1.9rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  cursor: pointer;
+}
+.aa-c.has-ico { height: 2.2rem; padding: 0 0.6rem; color: var(--text-primary); }
+.aa-c.has-ico.on { color: var(--accent); }
+.aa-c:hover { border-color: var(--accent); color: var(--text-primary); }
+.aa-c.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text-primary);
+}
+.aa-c:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* the silhouette is the mask of a text-coloured box (as in ui/table.css) */
+.aa-c .ic {
+  display: inline-block;
+  height: 1.15rem;
+  width: calc(1.15rem * var(--ar, 3));
+  max-width: 4.2rem;
+  background-color: currentColor;
+  -webkit-mask: var(--ico) center / contain no-repeat;
+  mask: var(--ico) center / contain no-repeat;
+}
+/* round chips keep their side colour in every state (after .on on purpose) */
+.aa-c.tone-t, .aa-c.tone-t:hover { color: var(--side-t); }
+.aa-c.tone-ct, .aa-c.tone-ct:hover { color: var(--side-ct); }

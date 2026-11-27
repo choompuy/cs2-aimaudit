@@ -1,9 +1,11 @@
 """The Settings page: analysis sliders, accounts and the Steam helper, library and storage,
-privacy."""
+privacy and the about line."""
 
 from __future__ import annotations
 
+import functools
 import os
+import subprocess
 
 import streamlit as st
 
@@ -183,3 +185,24 @@ def _privacy(t) -> None:
             st.caption(t("set_offline_on"))
         else:
             st.caption(t("set_offline_off"))
+        st.caption(
+            f"CS2-AimAudit · {_app_version()} · {t('footer_privacy')} · "
+            f"[{t('footer_issues')}](https://github.com/choompuy/cs2-aimaudit/issues)"
+        )
+
+
+@functools.lru_cache(maxsize=1)
+def _app_version() -> str:
+    """Short commit of the running checkout ('dev' outside a repo)."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        )
+        return out.stdout.strip() or "dev"
+    except (OSError, subprocess.SubprocessError):
+        # no git on PATH / not a repo / the call timed out: the line still renders
+        return "dev"

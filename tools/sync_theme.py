@@ -8,7 +8,7 @@ Run from the repo root (after editing tokens):
     AIMAUDIT_THEME=green python tools/sync_theme.py
 
 What it owns in .streamlit/config.toml (and rewrites):
-- the whole [theme] section (colours, baseRadius, font, chart palette)
+- the whole [theme] section (colours, baseRadius, font, chart palette, page padding)
 - every [[theme.fontFaces]] table (local fonts from static/fonts/)
 - server.enableStaticServing = true   (required to serve those fonts)
 
@@ -61,6 +61,8 @@ def theme_block_lines() -> list[str]:
         lines.append(f"{key} = {_tv(cfg[key])}")
     palette = ", ".join(_tv(c) for c in cfg["chartCategoricalColors"])
     lines.append(f"chartCategoricalColors = [{palette}]")
+    for key in ("paddingTop", "paddingBottom"):
+        lines.append(f"{key} = {_tv(cfg[key])}")
     for face in font_faces():
         lines += [
             "",

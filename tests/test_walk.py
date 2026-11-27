@@ -7,7 +7,7 @@ import random
 import pytest
 
 import core
-from app_driver import S1, err_of, goto, make_match, open_demo, pick, ss_get, widget
+from app_driver import S1, err_of, goto, make_match, open_demo, pick, set_chips, ss_get, widget
 from state import MATCH_TABS, NAV_PAGES
 
 
@@ -106,21 +106,25 @@ def _do_sliders(at, rng, page: str, tab: str) -> str:
 
 def _act_flt_panel(at, rng, which: str) -> str:
     """Drive one control of the filter bar."""
+    if which in ("flt_rounds", "flt_weapons"):
+        # chips: a custom component, picked through its session key
+        if widget(at, "pills", "flt_preset") is None:
+            return f"{which}:absent"
+        if which == "flt_rounds":
+            pool = list(range(1, 26))  # the app drops rounds the match does not have
+        else:
+            pool = ["ak47", "awp", "deagle", "glock", "usp_silencer"]
+        set_chips(at, which, rng.sample(pool, k=min(len(pool), rng.randint(0, 2))))
+        return which
     kind = (
-        "slider" if which == "flt_rounds"
-        else "multiselect" if which == "flt_weapons"
-        else "pills" if which == "flt_classes"
-        else "selectbox" if which in ("flt_preset", "flt_dist")
+        "pills" if which in ("flt_classes", "flt_preset")
+        else "selectbox" if which == "flt_dist"
         else "segmented_control"
     )
     w = widget(at, kind, which)
     if not w:
         return f"{which}:absent"
-    if which == "flt_rounds":
-        lo, hi = w.min, w.max
-        a = rng.randint(lo, hi)
-        w.set_value((a, rng.randint(a, hi))).run()
-    elif which in ("flt_weapons", "flt_classes"):
+    if which == "flt_classes":
         options = list(w.options)
         w.set_value(rng.sample(options, k=min(len(options), rng.randint(0, 2)))).run()
     else:

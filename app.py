@@ -2,10 +2,6 @@
 
 The entry point only: page config, theme, the run context and the page dispatch."""
 
-import functools
-import os
-import subprocess
-
 import streamlit as st
 
 import context
@@ -25,23 +21,6 @@ st.set_page_config(
 )
 
 theme.inject_theme()
-
-
-@functools.lru_cache(maxsize=1)
-def _app_version() -> str:
-    """Short commit of the running checkout for the footer ('dev' outside a repo)."""
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-        )
-        return out.stdout.strip() or "dev"
-    except (OSError, subprocess.SubprocessError):
-        # no git on PATH / not a repo / the call timed out: footer still renders
-        return "dev"
 
 
 # --------------------------------------------------------- the page bodies
@@ -103,7 +82,6 @@ def _match(ctx) -> None:
     # a Duels row click asks for the duel window: it is a modal over the page
     if tab == "duels" and state.DU_OPEN.pop():
         views.replay.open_duel_dialog(ctx)
-    views.extras.debug(ctx)
 
 
 def main() -> None:
@@ -115,15 +93,6 @@ def main() -> None:
     ui.format.configure(ctx.t, ctx.name_of)
     pg.run()
     shell.sync_nav_url()
-    _footer(ctx.t)
-
-
-def _footer(t) -> None:
-    st.divider()
-    st.caption(
-        f"CS2-AimAudit · {_app_version()} · {t('footer_privacy')} · "
-        f"[{t('footer_issues')}](https://github.com/choompuy/cs2-aimaudit/issues)"
-    )
 
 
 main()

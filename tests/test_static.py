@@ -40,15 +40,6 @@ APP_CODE = UI_CODE + joined("core", "sources", "store", "mapview", "nativedialog
 
 USED_KEYS = set(re.findall(r'(?<![A-Za-z_0-9])t\("([a-z_0-9]+)"\)', UI_CODE))
 USED_KEYS |= {f"k_{b}" for b in core.BUTTONS}
-USED_KEYS |= {
-    f"hg_{k}"
-    for k in "head neck chest stomach left_arm right_arm left_leg right_leg other".split()
-}
-USED_KEYS |= {
-    f"chk_{k}"
-    for k in "na_ids unknown_shooters missing_pos no_speed no_dist fast_speeds round0 "
-    "duel_dist angles hitgroups sides".split()
-}
 
 
 # -------------------------------------------------------------------- i18n
@@ -59,7 +50,7 @@ def test_used_keys_exist():
 # strings that are the same in both languages
 SAME_IN_RU = {
     "col_hs", "first_none", "k_BACK", "k_FORWARD", "k_LEFT", "k_RIGHT", "kind_faceit",
-    "none_val", "rr_pt_hp", "rr_pt_money", "rr_u_s", "tl_ax_speed", "tl_label", "weapon_none",
+    "none_val", "m_k2", "m_k3", "m_k4", "rr_pt_hp", "rr_pt_money", "rr_u_s", "tl_ax_speed", "tl_label", "weapon_none",
 }
 
 

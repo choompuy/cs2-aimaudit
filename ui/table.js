@@ -23,17 +23,6 @@ export default function (component) {
   const reportChecked = () => setTriggerValue("checked", Array.from(S.checked).join("\n"));
 
   const firstDir = (c) => (c.f === "asc" ? 1 : -1);
-  // quality 0..1 -> colour: tier tokens, evenly spaced, mixed between neighbours
-  const STOPS = ["--tier-bad", "--tier-poor", "--tier-mid", "--text-primary", "--tier-good", "--tier-elite"];
-  const gradeColor = (q) => {
-    const pos = Math.min(Math.max(q, 0), 1) * (STOPS.length - 1);
-    const i = Math.min(Math.floor(pos), STOPS.length - 2);
-    const f = Math.round((pos - i) * 100);
-    return f === 0
-      ? "var(" + STOPS[i] + ")"
-      : "color-mix(in oklab, var(" + STOPS[i + 1] + ") " + f + "%, var(" + STOPS[i] + "))";
-  };
-
   function ordered() {
     const rows = data.rows.slice();
     if (S.col < 0) return rows;

@@ -9,6 +9,14 @@ from ui.charts import PAL, style_figure
 from ui.format import num
 
 
+_MAP_CONFIG = {
+    "scrollZoom": True,
+    "doubleClick": "reset",
+    "displaylogo": False,
+    "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d", "toImage"],
+}
+
+
 def render(ctx) -> None:
     """Draw the Map page."""
     _map_fragment(ctx)
@@ -18,7 +26,7 @@ def _map_controls(radar, t):
     """The show / lines / level controls (their state persists per
     session). Returns (show, lines, level)."""
     level = "upper"
-    with st.container(horizontal=True, vertical_alignment="bottom"):
+    with st.container(horizontal=True, vertical_alignment="center"):
         show = st.segmented_control(
             t("map_show"),
             ["both", "kills", "deaths"],
@@ -26,6 +34,7 @@ def _map_controls(radar, t):
             format_func=lambda v: t(f"map_show_{v}"),
             key="map_show",
             required=True,
+            label_visibility="collapsed",
             persist_state="session",
         )
         if radar and radar.get("lower"):
@@ -36,6 +45,7 @@ def _map_controls(radar, t):
                 format_func=lambda v: t(f"map_level_{v}"),
                 key="map_level",
                 required=True,
+                label_visibility="collapsed",
                 persist_state="session",
             )
         lines = st.toggle(
@@ -48,7 +58,10 @@ def _hover_texts(pts, t, name_of):
     """The per-point hover text (round, opponent, weapon, distance, hs)."""
 
     def _hover(r) -> str:
-        return t(
+        # the map zone (the game's place name) heads the tooltip when known
+        zone = str(r.get("zone") or "")
+        head = f"<b>{zone}</b><br>" if zone else ""
+        return head + t(
             "map_hover_kill" if r["result"] == "kill" else "map_hover_death",
             rd=int(r["round"]),
             opp=name_of.get(r["opponent"], r["opponent"]),
@@ -99,7 +112,10 @@ def _map_fragment(ctx):
         },
     )
     style_figure(fig, height=640, margin=dict(t=48, r=10, l=10, b=10), legend_y=1.08)
-    st.plotly_chart(fig, width="stretch")
+    # the 2D replay's controls: wheel = zoom around the cursor, drag = pan,
+    # double click = reset; the view survives filter changes (same uirevision)
+    fig.update_layout(dragmode="pan", uirevision=f"map-{map_name}-{level}")
+    st.plotly_chart(fig, width="stretch", config=_MAP_CONFIG)
     st.caption(
         t(
             "map_count",

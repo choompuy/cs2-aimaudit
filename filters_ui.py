@@ -1,12 +1,16 @@
-"""The global filter bar: URL state, presets, the controls, the counts.
+"""The global filter bar: URL state, presets, the controls.
 
-The controls render only inside the match view, so they carry persist_state="session"."""
+One compact row: rounds (presets or hand-picked rounds) and weapons (kill-feed icons) sit
+in popovers, side and distance inline. The native controls render only inside the match
+view, so they carry persist_state="session"; the chip selections (flt_weapons,
+flt_rounds) are plain session keys written by the chips' callbacks."""
 
 import streamlit as st
 
 import core
 import i18n
 import state
+from ui import chips, icons
 from ui.format import fmt_result
 
 # the shareable view in plain query params; lists are comma-joined
@@ -47,7 +51,11 @@ def _filter_data(ctx):
     """What this demo offers the filter panel (weapons, classes, rounds,
     halves, and which controls the current tab needs)."""
     demo, shots = ctx.demo, ctx.shots
-    demo_weapons = sorted(shots["weapon"].astype(str).unique())
+    # the player's own guns first (most shots first), the rest alphabetically
+    mine = shots.loc[shots["sid"] == ctx.me, "weapon"].astype(str).value_counts()
+    demo_weapons = sorted(
+        shots["weapon"].astype(str).unique(), key=lambda w: (-int(mine.get(w, 0)), w)
+    )
     present_classes = sorted({core.weapon_class(w) for w in demo_weapons})
     n_rounds = int(shots["round"].max()) if len(shots) else 0
     has_sides = bool(demo.sides)
@@ -102,15 +110,15 @@ def _clamp_filter_state(preset_opts, n_rounds):
         st.session_state["flt_preset"] = "all"
     if st.session_state.get("flt_side") not in ("all", "T", "CT"):
         st.session_state["flt_side"] = "all"
-    # no `value=` below: Streamlit warns about a default next to a session value
-    if n_rounds >= 2:
-        rv = st.session_state.get("flt_rounds") or (1, n_rounds)
+    # the hand-picked rounds: ints of this match only (a link carries strings)
+    picked = set()
+    for v in st.session_state.get("flt_rounds") or []:
         try:
-            lo_r = max(1, min(int(rv[0]), n_rounds))
-            hi_r = max(lo_r, min(int(rv[1]), n_rounds))
-            st.session_state["flt_rounds"] = (lo_r, hi_r)
-        except (TypeError, ValueError, IndexError):
-            st.session_state["flt_rounds"] = (1, n_rounds)
+            if 1 <= int(v) <= n_rounds:
+                picked.add(int(v))
+        except (TypeError, ValueError):
+            pass
+    st.session_state["flt_rounds"] = sorted(picked)
 
 
 def _preset_label(t, p: str, n_rounds: int, halves) -> str:
@@ -138,26 +146,6 @@ def _preset_label(t, p: str, n_rounds: int, halves) -> str:
     return t("fp_all")
 
 
-def _on_preset_change(n_rounds, halves):
-    """Preset on_change: park the preset's round range."""
-
-    def _apply_preset():
-        p = st.session_state.get("flt_preset", "all")
-        if p == "custom":
-            return  # the slider owns the range; keep whatever it holds
-        if p == "pistols":
-            st.session_state["flt_rounds"] = (1, max(n_rounds, 1))
-        else:
-            st.session_state["flt_rounds"] = core.round_bounds(
-                n_rounds, p, halves or None
-            )
-    return _apply_preset
-
-
-def _slider_custom():
-    st.session_state["flt_preset"] = "custom"
-
-
 def _reset_filters(n_rounds):
     def _do_reset():
         st.session_state["flt_weapons"] = []
@@ -165,14 +153,14 @@ def _reset_filters(n_rounds):
         st.session_state["flt_res"] = "both"
         st.session_state["flt_side"] = "all"
         st.session_state["flt_dist"] = "all"
-        st.session_state["flt_rounds"] = (1, n_rounds)
+        st.session_state["flt_rounds"] = []
         st.session_state["flt_preset"] = "all"
 
     return _do_reset
 
 
 def _dist_label(t, v: str) -> str:
-    return t("all") if v == "all" else t(f"flt_dist_{v}")
+    return t("flt_dist_any") if v == "all" else t(f"flt_dist_{v}")
 
 
 def _any_active(has_sides, show_result) -> bool:
@@ -191,10 +179,21 @@ def _any_active(has_sides, show_result) -> bool:
 def _weapons_label(t) -> str:
     """The weapons button names its selection: the one pick, else how many."""
     picks = [t(f"wc_{c}") for c in st.session_state.get("flt_classes") or []]
-    picks += st.session_state.get("flt_weapons") or []
+    picks += [icons.weapon_label(w) for w in st.session_state.get("flt_weapons") or []]
     if not picks:
         return t("flt_weapons")
     return f"{t('flt_weapons')}: {picks[0] if len(picks) == 1 else len(picks)}"
+
+
+def _rounds_label(t, preset, n_rounds, halves) -> str:
+    """The rounds button names its selection: the preset, or the picked rounds."""
+    if preset == "custom":
+        picked = st.session_state.get("flt_rounds") or []
+        if not picked:
+            return t("fp_all")
+        shown = ", ".join(map(str, picked[:4])) + ("…" if len(picked) > 4 else "")
+        return f"{t('flt_rounds')}: {shown}"
+    return _preset_label(t, preset, n_rounds, halves)
 
 
 def _round_kwargs(preset, n_rounds, halves) -> dict:
@@ -203,9 +202,9 @@ def _round_kwargs(preset, n_rounds, halves) -> dict:
     if preset == "pistols":
         round_kwargs["rounds_set"] = core.pistol_rounds(n_rounds, halves or None)
     elif preset == "custom" and n_rounds >= 2:
-        rv = tuple(st.session_state.get("flt_rounds") or (1, n_rounds))
-        if rv != (1, n_rounds):
-            round_kwargs["rounds"] = rv
+        picked = set(st.session_state.get("flt_rounds") or [])
+        if picked and len(picked) < n_rounds:
+            round_kwargs["rounds_set"] = picked
     elif preset in ("first", "second", "ot"):
         # from the preset itself: a URL-restored one never fired its on_change
         rv = core.round_bounds(n_rounds, preset, halves or None)
@@ -215,8 +214,7 @@ def _round_kwargs(preset, n_rounds, halves) -> dict:
 
 
 def _resolve_filters(ctx, preset, n_rounds, halves, has_sides, show_result):
-    """core.Filters from the session state, applied BEFORE the panel renders: it
-    shows the counts."""
+    """core.Filters from the session state (the pages below read the filtered frames)."""
     filters = core.Filters(
         weapons=set(st.session_state.get("flt_weapons") or []) or None,
         classes=set(st.session_state.get("flt_classes") or []) or None,
@@ -238,27 +236,92 @@ def _resolve_filters(ctx, preset, n_rounds, halves, has_sides, show_result):
     return filters, shots_f, duels_f, hurts_f, res_sel
 
 
-def _controls(t, demo_weapons, present_classes, preset_opts, has_sides, n_rounds, halves):
-    """One row, every control showing its own value."""
-    with st.container(horizontal=True, vertical_alignment="bottom"):
-        st.selectbox(
-            t("flt_rounds"),
-            preset_opts,
-            format_func=lambda p: _preset_label(t, p, n_rounds, halves),
-            key="flt_preset",
-            on_change=_on_preset_change(n_rounds, halves),
+def _set_weapons(demo_weapons):
+    def _cb(picked: set) -> None:
+        st.session_state["flt_weapons"] = [w for w in demo_weapons if w in picked]
+
+    return _cb
+
+
+def _set_rounds(picked: set) -> None:
+    st.session_state["flt_rounds"] = sorted(int(r) for r in picked)
+
+
+def _round_chips(t, demo, me, n_rounds, halves) -> None:
+    """Every round of the match as a chip, tinted by the player's side, a divider at
+    each halftime."""
+    starts = {lo for lo, _ in (halves or [])[1:]}
+    items = []
+    for r in range(1, n_rounds + 1):
+        side = demo.side_at(r, me) if me else "?"
+        tone = {"T": "t", "CT": "ct"}.get(side)
+        items.append({
+            "id": str(r),
+            "text": str(r),
+            "tip": t("flt_round_tip", n=r, side=side if tone else "?"),
+            "tone": tone,
+            "gap": r in starts,
+        })
+    chips.chips(
+        items,
+        map(str, st.session_state.get("flt_rounds") or []),
+        key="flt_rounds_pick",
+        on_change=_set_rounds,
+        label=t("flt_rounds"),
+    )
+
+
+def _weapon_chips(t, demo_weapons) -> None:
+    """The demo's weapons as kill-feed silhouettes (the name is the tooltip)."""
+    keys = {w: icons.weapon_key(w) for w in demo_weapons}
+    items = [
+        {"id": w, "text": icons.weapon_label(w), "tip": icons.weapon_label(w), "ico": keys[w]}
+        for w in demo_weapons
+    ]
+    chips.chips(
+        items,
+        st.session_state.get("flt_weapons") or [],
+        key="flt_weapons_pick",
+        on_change=_set_weapons(demo_weapons),
+        icons=icons.payload(k for k in keys.values() if k),
+        label=t("flt_weapons"),
+    )
+
+
+def _controls(ctx, demo_weapons, present_classes, preset_opts, has_sides, n_rounds, halves,
+              active):
+    """One row: every control shows its own value, labels live in the tooltips."""
+    t = ctx.t
+    preset = st.session_state.get("flt_preset", "all")
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+        # the popover bodies stay mounted while closed, so the widgets keep their state
+        with st.popover(
+            _rounds_label(t, preset, n_rounds, halves),
+            icon=":material/flag:",
+            key="flt_rounds_pop",
             help=t("flt_rounds_help"),
-            persist_state="session",
-            width=230,
-        )
+        ):
+            st.pills(
+                t("flt_rounds"),
+                preset_opts,
+                format_func=lambda p: _preset_label(t, p, n_rounds, halves),
+                key="flt_preset",
+                required=True,
+                label_visibility="collapsed",
+                persist_state="session",
+            )
+            if preset == "custom" and n_rounds >= 2:
+                st.caption(t("flt_custom_hint"))
+                _round_chips(t, ctx.demo, ctx.me, n_rounds, halves)
         if has_sides:
             st.segmented_control(
                 t("flt_side"),
                 ["all", "T", "CT"],
-                format_func=lambda v: t("all") if v == "all" else v,
+                format_func=lambda v: t("flt_side_both") if v == "all" else v,
                 key="flt_side",
                 help=t("flt_side_help"),
                 required=True,
+                label_visibility="collapsed",
                 persist_state="session",
             )
         st.selectbox(
@@ -267,11 +330,16 @@ def _controls(t, demo_weapons, present_classes, preset_opts, has_sides, n_rounds
             format_func=lambda v: _dist_label(t, v),
             key="flt_dist",
             help=t("flt_dist_help"),
+            label_visibility="collapsed",
             persist_state="session",
-            width=180,
+            width=190,
         )
-        # the popover body stays mounted while closed, so the widgets keep their state
-        with st.popover(_weapons_label(t), icon=":material/tune:", key="flt_weapons_pop"):
+        with st.popover(
+            _weapons_label(t),
+            icon=":material/swords:",
+            key="flt_weapons_pop",
+            help=t("flt_weapons_help"),
+        ):
             st.pills(
                 t("flt_classes"),
                 present_classes,
@@ -281,31 +349,9 @@ def _controls(t, demo_weapons, present_classes, preset_opts, has_sides, n_rounds
                 help=t("flt_classes_help"),
                 persist_state="session",
             )
-            st.multiselect(
-                t("flt_weapons"),
-                demo_weapons,
-                key="flt_weapons",
-                help=t("flt_weapons_help"),
-                placeholder=t("all"),
-                persist_state="session",
-            )
-    if st.session_state.get("flt_preset") == "custom" and n_rounds >= 2:
-        st.slider(
-            t("flt_rounds"),
-            1,
-            n_rounds,
-            key="flt_rounds",
-            on_change=_slider_custom,
-            label_visibility="collapsed",
-            persist_state="session",
-        )
-
-
-def _counts_row(t, counts: str, active: bool, n_rounds: int) -> None:
-    """How much is in view, and the way back to everything."""
-    with st.container(horizontal=True, vertical_alignment="center"):
-        st.caption(counts, width="content")
-        # always there: the page below must not jump when a filter is set
+            st.caption(t("flt_weapons"))
+            _weapon_chips(t, demo_weapons)
+        # always there: the row must not jump when a filter is set
         st.button(
             t("flt_reset"),
             on_click=_reset_filters(n_rounds),
@@ -352,7 +398,6 @@ def _sync_filter_url(me, preset):
 
 def render(ctx) -> None:
     """The filter bar: resolve, render, sync the URL. The replay tab shows none."""
-    t = ctx.t
     (demo_weapons, present_classes, n_rounds, has_sides, halves,
      show_result, show_panel) = _filter_data(ctx)
 
@@ -365,16 +410,11 @@ def render(ctx) -> None:
         ctx, preset, n_rounds, halves, has_sides, show_result
     )
 
-    counts = t("flt_sum_counts", shots=len(shots_f), duels=len(duels_f))
-    if not filters.empty():
-        counts += " " + t("flt_sum_of", shots=len(ctx.shots), duels=len(ctx.duels_all))
-
     if show_panel:
-        with st.container(border=True):
-            _controls(
-                t, demo_weapons, present_classes, preset_opts, has_sides, n_rounds, halves
-            )
-            _counts_row(t, counts, _any_active(has_sides, show_result), n_rounds)
+        _controls(
+            ctx, demo_weapons, present_classes, preset_opts, has_sides, n_rounds, halves,
+            _any_active(has_sides, show_result),
+        )
 
     _sync_filter_url(ctx.me, preset)
     ctx.filters = filters

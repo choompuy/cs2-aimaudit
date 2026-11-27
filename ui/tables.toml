@@ -20,8 +20,9 @@
 #   fmt    str.format spec for numbers, units inside ("{:.1f}%", "{:.0f} u")
 #   best   high | low | none                 what sorts and grades first
 #   grade  none | auto | [bad, good] | [bad, ok, good]
-#          value colour by quality (tier tokens); "auto" = position in the
-#          column; with ok: below it slides to red, above to green
+#          value colour, three levels only (ui/common.js gradeLevel): below
+#          ok = red, at or past good = green, between = plain text;
+#          "auto" = position in the column
 #   bar    none | pct | rel                  background bar: 0..100 or a
 #          share of the column maximum
 #   tone   colour token name for the bar / badge (accent, context, ...)
@@ -76,42 +77,49 @@ fmt = "{:.1f}%"
 bar = "pct"
 tone = "context"
 best = "high"
+grade = [10, 18, 28]
 
 [metric.hs_hits]
 fmt = "{:.1f}%"
 bar = "pct"
 tone = "context"
 best = "high"
+grade = [15, 25, 40]
 
 [metric.hs_kills]
 fmt = "{:.1f}%"
 bar = "pct"
 tone = "context"
 best = "high"
+grade = [20, 40, 60]
 
 [metric.moving]
 fmt = "{:.1f}%"
 bar = "pct"
 tone = "context"
 best = "low"
+grade = [50, 30, 15]
 
 [metric.risky]
 fmt = "{:.1f}%"
 bar = "pct"
 tone = "context"
 best = "low"
+grade = [30, 15, 5]
 
 [metric.first_shot]
 fmt = "{:.1f}%"
 bar = "pct"
 tone = "context"
 best = "high"
+grade = [35, 50, 65]
 
 [metric.first_acc]
 fmt = "{:.1f}%"
 bar = "pct"
 tone = "context"
 best = "high"
+grade = [15, 25, 40]
 
 [metric.open_rate]
 fmt = "{:.1f}%"
@@ -120,6 +128,7 @@ tone = "context"
 best = "high"
 label = "col_open"
 help = "col_open_help"
+grade = [35, 50, 65]
 
 [metric.sides]
 kind = "text"
@@ -127,10 +136,15 @@ kind = "text"
 [metric.aim_err]
 fmt = "{:.1f}°"
 best = "low"
+grade = [6, 3, 1.5]
+bar = "rel"
+tone = "context"
 
 [metric.duration]
 fmt = "{:.2f} s"
 best = "low"
+bar = "rel"
+tone = "context"
 
 [metric.weapon]
 # the weapon silhouette (CS2 kill-feed style): icon only, the localized
@@ -158,6 +172,7 @@ help = "col_died_to_help"
 [metric.median_speed]
 fmt = "{:.0f} u/s"
 best = "low"
+grade = [100, 40, 15]
 
 [metric.median_dist]
 fmt = "{:.0f} u"
@@ -188,6 +203,8 @@ sticky = true
 
 [metric.distance]
 fmt = "{:.0f} u"
+bar = "rel"
+tone = "context"
 
 [metric.zone]
 kind = "text"
@@ -200,13 +217,20 @@ tones = { me = "positive", opponent = "negative", simultaneous = "warning" }
 
 [metric.my_shots]
 fmt = "{:.0f}"
+bar = "rel"
+tone = "context"
 
 [metric.opp_shots]
 fmt = "{:.0f}"
+bar = "rel"
+tone = "context"
 
 [metric.speed]
 fmt = "{:.0f} u/s"
 best = "low"
+grade = [100, 40, 15]
+bar = "rel"
+tone = "context"
 
 [metric.errhw]
 fmt = "{:.2f}"
@@ -221,23 +245,6 @@ kind = "text"
 [metric.tick]
 fmt = "{:.0f}"
 best = "low"
-
-[metric.killer]
-kind = "text"
-
-[metric.victim]
-kind = "text"
-
-[metric.zone_k]
-kind = "text"
-
-[metric.zone_v]
-kind = "text"
-
-[metric.zone_kd]
-fmt = "{:+.0f}"
-best = "high"
-label = "zone_kd"
 
 # ------------------------------------------------------------------- tables
 # The unified match list (Matches page): one row per match from every
@@ -348,8 +355,10 @@ tone = "context"
 best = "high"
 label = "col_hs_hits"
 sort_by = "none"
+grade = [15, 25, 40]
 
-# ~9 columns by default, "All columns" reveals the detail metrics and the
+# ~9 columns by default (aim error and speed coloured by the same norms as the
+# Shooting tiles), "All columns" reveals the detail metrics and the
 # technical tick column; the opponent name stays pinned when the full
 # table scrolls horizontally.
 [table.duels]
@@ -359,8 +368,8 @@ columns = [
   "errhw", "side", "flags", "tick",
 ]
 basic = [
-  "round", "round_sec", "result", "opponent", "weapon", "hs", "distance",
-  "first", "aim_err",
+  "round", "result", "opponent", "weapon", "hs", "distance", "first", "aim_err",
+  "speed",
 ]
 stripe = { field = "result_raw", map = { kill = "positive", death = "negative" }, default = "negative" }
 extra = ["result_raw", "first_raw", "hs_raw", "weapon_disp"]
@@ -368,32 +377,4 @@ max_height = 720
 selectable = true
 
 [table.duels.override.aim_err]
-label = "col_err"
-
-# The small tables of the Duels page: duels by map zone, round openings.
-[table.zones]
-columns = ["zone", "kills", "deaths", "zone_kd"]
-
-[table.zones.override.zone]
-sticky = true
-
-[table.openings]
-columns = [
-  "round", "round_sec", "killer", "victim", "weapon", "hs", "zone_k", "zone_v",
-]
-extra = ["hs_raw", "weapon_disp"]
-
-# The Top-3 evidence popovers of the Shooting page.
-[table.ev_err]
-columns = ["round", "opponent", "weapon", "aim_err", "result"]
-extra = ["result_raw", "weapon_disp"]
-
-[table.ev_err.override.aim_err]
-label = "col_err"
-
-[table.ev_lost]
-columns = ["round", "opponent", "weapon", "aim_err", "duration"]
-extra = ["weapon_disp"]
-
-[table.ev_lost.override.aim_err]
 label = "col_err"

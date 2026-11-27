@@ -16,10 +16,10 @@ CS2-AimAudit turns a Counter-Strike 2 match demo (`.dem`) into a coach-style aft
 - **Sidebar navigation** — Dashboard, **Matches**, Settings and Guide live in the left rail. A match is opened FROM the Matches list (there is no Match item): click a row, and the analysis pages become the match's tabs.
 - **Matches** — every match of every source in one dense table: map, date, score (coloured by result, with the W/L/D letter), pool (Matchmaking Competitive / Premier / FACEIT / Manual upload), your K/D, accuracy and the action. Click a row to open the match when the demo is in the library — or to download / import it when it is not (a finished download is analyzed right away). Tick the checkbox of several rows and press **Download selected ({n})** to fetch and analyze them all in one go; the newest of them opens at the end. Filters (period, map, pool, result) in one row, **Refresh** and **Add match** (pick demo files) next to it.
 - **Match view** — the open match's header (back to the list, the map and the score, the result, the mode / source / date) with the tabs Overview · Shooting · Duels · Map · 2D replay, the player picker next to them and the analysis filters underneath.
-- **Settings** — the analysis sliders, accounts (SteamID64, the replays folder, the share-code import, the Steam helper), Library and storage (sizes, delete a demo, clear the cache) and privacy.
+- **Settings** — the analysis sliders, accounts (SteamID64, the replays folder, the share-code import, the Steam helper), Library and storage (sizes, delete a demo, clear the cache), privacy, the app version and the link to report a problem.
 - **Overview** — every player in one table: K/D, accuracy, HS%, shots on the move, "risky shots", shoots-first rate, aim error, duel duration, and the best / most-died-to weapon as kill-feed silhouettes (the localized name in the tooltip and as the text fallback). K/D (as kills / deaths and as a ratio), opening duels, trades and assists follow the **Side** and **Rounds** filters. Tick a row's checkbox to analyze that player; the **All columns** toggle adds the detail metrics (incl. first-shot accuracy and opening-duel winrate).
-- **Shooting** — hit zones, speed at each shot, a speed-vs-distance scatter with the acceptable-speed curve, per-weapon stats.
-- **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded. Below: your duels by map zone and how every round started (opening duels, both teams).
+- **Shooting** — the top three things to work on, metric tiles with a fill bar coloured against a rough norm (the tick on the bar), where your hits land, speed at every shot (stopped vs on the move), the speed-vs-distance risk chart and per-weapon stats.
+- **Duels** — every duel with distance, who fired first, aim error at the first shot, and flags: no-scope, through smoke, wallbang, blinded. Aim error and speed are coloured by the same norms, so a badly played duel stands out. Where a duel happened is on the **Map** (the tooltip names the zone; wheel zooms, drag pans, double click resets).
 - **Impact** — per player: opening duels won/lost, trade kills, traded deaths, 2k–5k rounds, assists and flash assists.
 - **Map** — where the selected player killed and died, on the radar: your position (circle), the opponent's (open diamond) and a line between them; blue = kill, red = death; works with every filter, and two-level maps (Nuke, Vertigo) get an Upper / Lower switch. Needs the radar images once, see [Radar images](#radar-images-for-the-map-page).
 - **Duels → click a duel** — a window with the chart: speed (with the moving threshold), yaw turn, pitch and held keys as coloured bars with a legend, around the duel, with the first shot and the death marked, cut at the moment of death (input recorded after death is a demo-parser artifact, not real play). The strip walks all duels (← / → hotkeys, Shift+← / → between rounds) without closing the window; a button shows the duel in the 2D replay.
@@ -155,7 +155,7 @@ The in-app **Guide** tab explains the risk model and the limitations: sensitivit
 
 ## Something looks wrong?
 
-Open the **Data report / debug** expander at the bottom of the page. The built-in checks flag data anomalies, and the downloadable JSON report contains the raw parser fields needed to find the cause — please attach it when you [open an issue](../../issues).
+[Open an issue](../../issues) (the link is also at the bottom of **Settings**): name the match, the player and the number that looks wrong.
 
 ## Development
 
@@ -179,7 +179,7 @@ pytest --full                    # what CI runs: every page and locale
   metric, column, page or filter.
 - `docs/DEMOPARSER_NOTES.md` — notes on the demoparser2 API.
 
-Pull requests are welcome. Bug reports with the debug JSON attached are especially valuable.
+Pull requests are welcome. Bug reports that name the match and the wrong number are especially valuable.
 
 ## Name and trademarks
 

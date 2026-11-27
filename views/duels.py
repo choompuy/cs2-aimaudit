@@ -1,4 +1,7 @@
-"""The Duels page: the duel list, the openings table, the strip."""
+"""The Duels page: the duel list (a row opens the duel window).
+
+Only what the player can train on: where the duels happened is on the Map page
+(its tooltips name the zone)."""
 
 import pandas as pd
 import streamlit as st
@@ -84,83 +87,6 @@ def _duels_grid(ctx, du_full: bool) -> None:
     st.caption(t("du_click_hint"))
 
 
-def _zone_table(my_duels: pd.DataFrame, t) -> None:
-    """Duels by named map zone (at the kill tick; unknown zones are skipped)."""
-    _zd = (
-        my_duels[my_duels["my_zone"].astype(str).str.len() > 0]
-        if len(my_duels)
-        else my_duels
-    )
-    if not len(_zd):
-        return
-    zt = (
-        _zd.groupby("my_zone")
-        .agg(
-            kills=("result", lambda s: int((s == "kill").sum())),
-            deaths=("result", lambda s: int((s == "death").sum())),
-        )
-        .reset_index()
-    )
-    zt["kd"] = zt["kills"] - zt["deaths"]
-    zt = zt.sort_values(["deaths", "kills"], ascending=[False, False])
-    st.divider()
-    st.markdown(f"**{t('zone_title')}**")
-    st.caption(t("zone_caption"))
-    schema.table(
-        "zones",
-        {
-            "zone": zt["my_zone"].to_numpy(),
-            "kills": zt["kills"].to_numpy(),
-            "deaths": zt["deaths"].to_numpy(),
-            "zone_kd": zt["kd"].to_numpy(),
-        },
-        key="du_zones",
-    )
-
-
-def _openings_frame(openings: pd.DataFrame, filters) -> pd.DataFrame:
-    """Openings narrowed by the round filter (weapon/side filters have no
-    meaning for a kill-by-kill view of the round structure)."""
-    op = openings
-    if len(op):
-        if filters.rounds is not None:
-            _lo, _hi = filters.rounds
-            op = op[(op["round"] >= _lo) & (op["round"] <= _hi)]
-        if filters.rounds_set:
-            op = op[op["round"].isin(filters.rounds_set)]
-    return op
-
-
-def _openings_table(op: pd.DataFrame, me: str, name_of: dict, t) -> None:
-    """Opening duels - how every round started, for the whole match (both
-    teams; ★ marks the selected player)."""
-    st.divider()
-    st.markdown(f"**{t('open_title')}**")
-    st.caption(t("open_caption"))
-    w_vals, w_labels, w_icons = icons.weapon_cells(op["weapon"])
-
-    def _names(sids):
-        return [("★ " if s == me else "") + name_of.get(s, s) for s in sids]
-
-    schema.table(
-        "openings",
-        {
-            "round": op["round"].to_numpy(),
-            "round_sec": op["round_sec"].to_numpy(),
-            "killer": _names(op["killer"]),
-            "victim": _names(op["victim"]),
-            "weapon": w_vals,
-            "weapon_disp": w_labels,
-            "hs": ["✓" if v else "" for v in op["headshot"]],
-            "hs_raw": op["headshot"].astype(int).to_numpy(),
-            "zone_k": [z if z else "—" for z in op["killer_zone"]],
-            "zone_v": [z if z else "—" for z in op["victim_zone"]],
-        },
-        key="du_openings",
-        icons=w_icons,
-    )
-
-
 def render(ctx) -> None:
     """Draw the Duels page."""
     t = ctx.t
@@ -172,8 +98,3 @@ def render(ctx) -> None:
         st.info(t("du_none"))
     else:
         _duels_grid(ctx, du_full)
-        _zone_table(ctx.my_duels, t)
-    # shown even when the player has no duels
-    op = _openings_frame(ctx.openings, ctx.filters)
-    if len(op):
-        _openings_table(op, ctx.me, ctx.name_of, t)
