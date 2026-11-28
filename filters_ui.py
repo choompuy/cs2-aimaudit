@@ -26,6 +26,9 @@ _URL_KEYS = {
     "dist": "flt_dist",
 }
 _URL_LISTS = ("weapons", "classes", "rounds")
+# the tab that always reads the whole match: no panel, and the filters set on the other
+# tabs (they stay stored) are not applied either, so nothing narrows it unseen
+_UNFILTERED = "shooting"
 
 
 def load_url_state() -> None:
@@ -64,8 +67,9 @@ def _filter_data(ctx):
     # the panel renders above the tabs, but the tab is already in session_state
     tab_now = state.MATCH_TAB.get()
     show_result = tab_now == "duels"
-    # the replay shows the whole round, so none of the analysis filters apply
-    show_panel = tab_now != "replay"
+    # the replay shows the whole round, so none of the analysis filters apply; Shooting
+    # narrows itself by picking weapons in its own table
+    show_panel = tab_now not in ("replay", _UNFILTERED)
     return demo_weapons, present_classes, n_rounds, has_sides, halves, show_result, show_panel
 
 
@@ -402,9 +406,16 @@ def render(ctx) -> None:
     _clamp_filter_state(preset_opts, n_rounds)
 
     preset = st.session_state.get("flt_preset", "all")
-    filters, shots_f, duels_f, hurts_f, res_sel = _resolve_filters(
-        ctx, preset, n_rounds, halves, has_sides, show_result
-    )
+    if state.MATCH_TAB.get() == _UNFILTERED:
+        filters = core.Filters()
+        shots_f, duels_f, hurts_f = core.apply_filters(
+            ctx.shots, ctx.duels_all, ctx.hurts, filters
+        )
+        res_sel = set()
+    else:
+        filters, shots_f, duels_f, hurts_f, res_sel = _resolve_filters(
+            ctx, preset, n_rounds, halves, has_sides, show_result
+        )
 
     if show_panel:
         _controls(

@@ -8,7 +8,7 @@ import streamlit as st
 from dataclasses import dataclass
 
 import core
-from ui import icons, meters
+from ui import hitbody, icons, meters
 from ui import schema
 from ui.charts import PAL, style_figure
 from ui.format import num, pct
@@ -17,6 +17,7 @@ HG_ORDER = [
     "head", "neck", "chest", "stomach", "left_arm", "right_arm", "left_leg",
     "right_leg", "other",
 ]
+_HG_RARE = {"neck", "other"}
 
 
 @dataclass
@@ -25,6 +26,7 @@ class _Stats:
 
     sh_me: object
     hg_me: object
+    hg_dmg: object
     dd: object
     dth_df: object
     dd_err: object
@@ -119,30 +121,35 @@ def _discipline_stats(sh_me, thr):
     )
 
 
-def _only(df, weapon):
-    """The rows of one weapon (all of them without a focus)."""
-    if weapon is None or df is None or not len(df) or "weapon" not in df.columns:
+def _only(df, weapons):
+    """The rows of the picked weapons (all of them without a pick)."""
+    if not weapons or df is None or not len(df) or "weapon" not in df.columns:
         return df
-    return df[df["weapon"] == weapon]
+    return df[df["weapon"].isin(set(weapons))]
 
 
-def _stats(ctx, weapon=None) -> _Stats:
+def _hurts(ctx):
+    return ctx.hurts_f if ctx.hurts_f is not None else ctx.demo.hurts
+
+
+def _stats(ctx, weapons=None) -> _Stats:
     """Compute the page's numbers once from ctx (hit stats, duel stats,
-    shot discipline, first-shot discipline, the round-impact row); ``weapon``
-    narrows the shots, hits and duels to that gun (round impact has no weapon:
+    shot discipline, first-shot discipline, the round-impact row); ``weapons``
+    narrows the shots, hits and duels to those guns (round impact has no weapon:
     it is left out then)."""
     demo = ctx.demo
     me = ctx.me
     thr = ctx.thr
-    shots_f = _only(ctx.shots_f, weapon)
+    shots_f = _only(ctx.shots_f, weapons)
 
     sh_me = shots_f[shots_f["sid"] == me]
-    hurts = _only(ctx.hurts_f if ctx.hurts_f is not None else demo.hurts, weapon)
+    hurts = _only(_hurts(ctx), weapons)
     hg_me = core.hitgroup_counts(demo, me, hurts)
-    dd = _only(ctx.my_duels, weapon)
+    hg_dmg = core.hitgroup_damage(demo, me, hurts)
+    dd = _only(ctx.my_duels, weapons)
     hits_n = int(sh_me["hit"].sum()) if len(sh_me) else 0
     hs_hits = hg_me.get("head", 0) / hg_me.sum() * 100 if len(hg_me) else np.nan
-    impact = ctx.impact if weapon is None else ctx.impact.iloc[0:0]
+    impact = ctx.impact if not weapons else ctx.impact.iloc[0:0]
     (kills, dths, fs, imp_me, first_pct, dur, err, spd, dd_err,
      onhead_pct) = _duel_stats(dd, impact, me)
     (moving_pct, risky_pct, stops, cs_pct, fl_known, fl_n, sl_known, sl_n,
@@ -152,7 +159,7 @@ def _stats(ctx, weapon=None) -> _Stats:
     dth_df = dd[dd["result"] == "death"] if len(dd) else dd
 
     return _Stats(
-        sh_me=sh_me, hg_me=hg_me, dd=dd, dth_df=dth_df, dd_err=dd_err,
+        sh_me=sh_me, hg_me=hg_me, hg_dmg=hg_dmg, dd=dd, dth_df=dth_df, dd_err=dd_err,
         stops=stops, fs=fs, fs_me=fs_me, fu_me=fu_me, fm=fm, kills=kills,
         dths=dths, hits_n=hits_n, hs_hits=hs_hits, moving_pct=moving_pct,
         risky_pct=risky_pct, first_pct=first_pct, dur=dur, err=err, spd=spd,
@@ -350,7 +357,7 @@ def _duel_impact_rows(t, s) -> dict:
         _tile(t, "m_dur", "m_dur_help", num(s.dur, 2)),
     ]
     if s.imp_me is None:
-        # one weapon in focus: openings, multi-kills, trades are per round, not per gun
+        # weapons picked: openings, multi-kills, trades are per round, not per gun
         return {"sec_duels": [duels[0], duels[2]]}
     return {
         "sec_duels": duels,
@@ -389,75 +396,95 @@ def _angles_warning(t, s) -> None:
             st.warning(t("warn_angles"))
 
 
-def _hits_chart(t, s) -> None:
-    """Where the hits land: head in the "good" colour, the share on every bar."""
-    st.markdown(f"**{t('hit_where')}**")
-    if s.hg_me.empty:
-        st.info(t("hit_none"))
-        return
-    idx = [k for k in HG_ORDER if k in s.hg_me.index]
-    idx += [k for k in s.hg_me.index if k not in HG_ORDER]
-    vals = s.hg_me.reindex(idx).fillna(0).to_numpy()
-    total = float(vals.sum()) or 1.0
-    fig = go.Figure(
-        go.Bar(
-            x=[t(f"hg_{k}") for k in idx],
-            y=vals,
-            text=[f"{v / total * 100:.0f}%" for v in vals],
-            textposition="outside",
-            cliponaxis=False,
-            marker_color=[PAL["good"] if k == "head" else PAL["ctx"] for k in idx],
-        )
+def _hit_view(t, hg, dmg, kills: int, sub: str) -> dict:
+    """One state of the hit card: every body zone, hit or not; the neck (~0.2% of hits in
+    CS2 demos), "other" and unknown groups only when they were hit."""
+    idx = [k for k in HG_ORDER if k not in _HG_RARE or k in hg.index]
+    idx += [k for k in hg.index if k not in HG_ORDER]
+    hits = hg.reindex(idx).fillna(0)
+    dmg = dmg.reindex(idx).fillna(0)
+    return hitbody.view(
+        sub,
+        [
+            (t("col_kills"), str(kills)),
+            (t("col_hits"), str(int(hits.sum()))),
+            (t("hit_dmg"), str(int(round(float(dmg.sum()))))),
+        ],
+        [
+            {"k": k, "n": t(f"hg_{k}"), "h": int(hits[k]), "d": int(round(dmg[k]))}
+            for k in idx
+        ],
     )
-    style_figure(
-        fig, height=260, y_title=t("col_hits"), hover="%{x}: %{y}<extra></extra>",
-        margin=dict(t=24, r=10),
+
+
+def _weapon_view(t, ctx, weapon: str) -> dict:
+    """The hit card for one gun alone (the hover preview of its table row)."""
+    hurts = _only(_hurts(ctx), [weapon])
+    dd = _only(ctx.my_duels, [weapon])
+    kills = int((dd["result"] == "kill").sum()) if len(dd) else 0
+    return _hit_view(
+        t,
+        core.hitgroup_counts(ctx.demo, ctx.me, hurts),
+        core.hitgroup_damage(ctx.demo, ctx.me, hurts),
+        kills,
+        icons.weapon_label(weapon),
     )
-    st.plotly_chart(fig, width="stretch")
 
 
-def _speed_chart(t, s) -> None:
-    """Speed at every shot, split at the movement threshold: stopped vs on the move,
-    each share in the legend."""
-    st.markdown(f"**{t('speed_hist')}**")
-    sv = s.sh_me["speed"].dropna() if len(s.sh_me) else pd.Series(dtype=float)
-    if not len(sv):
-        st.info(t("risk_none"))
-        return
-    still, moving = sv[sv <= s.thr], sv[sv > s.thr]
-    bins = dict(start=0, end=float(max(sv.max(), s.thr)) + 10, size=10)
-    fig = go.Figure()
-    for part, name, color in (
-        (still, t("speed_still", thr=s.thr, pct=len(still) / len(sv) * 100), PAL["good"]),
-        (moving, t("speed_moving", pct=len(moving) / len(sv) * 100), PAL["bad"]),
-    ):
-        fig.add_trace(go.Histogram(x=part, xbins=bins, name=name, marker_color=color))
-    fig.add_vline(x=s.thr, line_dash="dot", line_color=PAL["ctx"])
-    fig.update_layout(barmode="stack", bargap=0.05)
-    style_figure(fig, height=260, x_title=t("speed_x"), y_title=t("speed_y"))
-    st.plotly_chart(fig, width="stretch")
+def _hits_chart(t, ctx, s, picks, weapons) -> None:
+    """Where the hits land: the body silhouette shaded by each region's share, kills /
+    hits / damage over it, hits / damage / share per region beside it. Pointing at a
+    weapon row below previews that gun here without a rerun."""
+    hitbody.hitbody(
+        key="sh_hitbody",
+        title=t("hit_where"),
+        cols=[t("hit_region"), t("col_hits"), t("hit_dmg"), "%"],
+        base=_hit_view(t, s.hg_me, s.hg_dmg, s.kills, _scope_label(t, picks)),
+        previews={w: _weapon_view(t, ctx, w) for w in weapons},
+        channel=_HOVER,
+    )
 
 
-def _risk_chart(t, s) -> None:
+def _risk_chart(t, s, sh_all, picks) -> None:
     """The "too fast for this distance" scatter: grey misses, blue hits, vermillion
-    boundary (colour-blind-safe)."""
+    boundary (colour-blind-safe). The picked weapons (all without a pick) are the
+    visible points; the other guns ride along in transparent, hover-less "pool" traces,
+    so pointing at any weapon row shows its points (ui/table.js) - a gun outside the
+    pick included."""
     st.markdown(f"**{t('risk_title')}**")
-    known_r = s.sh_me[s.sh_me["dist"].notna() & s.sh_me["speed"].notna()]
+    known_r = sh_all[sh_all["dist"].notna() & sh_all["speed"].notna()]
     if not len(known_r):
         st.info(t("risk_none"))
         return
     fig = go.Figure()
     hit_mask = known_r["hit"].astype(bool)
-    for part, name, opacity, color in (
-        (known_r[~hit_mask], t("lbl_miss"), 0.45, PAL["ctx"]),
-        (known_r[hit_mask], t("lbl_hit"), 0.8, PAL["good"]),
+    in_pick = known_r["weapon"].isin(set(picks or known_r["weapon"]))
+    pools = []
+    for mask, name, opacity, color in (
+        (~hit_mask, t("lbl_miss"), 0.45, PAL["ctx"]),
+        (hit_mask, t("lbl_hit"), 0.8, PAL["good"]),
     ):
-        fig.add_trace(
-            go.Scattergl(
+        for pool in (False, True):
+            part = known_r[mask & (~in_pick if pool else in_pick)]
+            if pool and not len(part):
+                continue
+            # SVG, not WebGL: the weapons table hides other guns' points one by one,
+            # by customdata[0]
+            tr = go.Scatter(
                 x=part["dist"], y=part["speed"], mode="markers", name=name,
-                opacity=opacity, marker=dict(size=5, color=color),
+                opacity=0 if pool else opacity, marker=dict(size=5, color=color),
+                customdata=[[k, icons.weapon_label(k)] for k in part["weapon"].astype(str)],
+                hovertemplate=(
+                    "%{customdata[1]}<br>%{x:.0f} u · %{y:.0f} u/s"
+                    "<extra>%{fullData.name}</extra>"
+                ),
             )
-        )
+            if pool:
+                tr.update(hoverinfo="skip", showlegend=False,
+                          meta={"pool": 1, "op": opacity})
+                pools.append(tr)
+            else:
+                fig.add_trace(tr)
     dmax = float(known_r["dist"].max())
     xs = np.linspace(0, max(s.strict_dist * 1.3, dmax), 240)
     fig.add_trace(
@@ -467,29 +494,37 @@ def _risk_chart(t, s) -> None:
             mode="lines",
             name=t("risk_curve"),
             line=dict(color=PAL["bad"], dash="dash"),
+            hovertemplate="%{x:.0f} u<br>%{y:.0f} u/s<extra>%{fullData.name}</extra>",
         )
     )
-    style_figure(
-        fig,
-        height=340,
-        x_title=t("risk_x"),
-        y_title=t("risk_y"),
-        hover="%{x:.0f} u<br>%{y:.0f} u/s<extra>%{fullData.name}</extra>",
-    )
-    st.plotly_chart(fig, width="stretch")
+    for tr in pools:
+        fig.add_trace(tr)
+    style_figure(fig, height=340, x_title=t("risk_x"), y_title=t("risk_y"))
+    st.plotly_chart(fig, width="stretch", key=_RISK_KEY)
 
 
-def _charts(t, s) -> None:
-    """Hit placement and the speed split side by side, the risk scatter under them."""
-    left, right = st.columns(2)
-    with left:
-        _hits_chart(t, s)
-    with right:
-        _speed_chart(t, s)
-    _risk_chart(t, s)
+def _charts(t, ctx, s, picks, weapons) -> None:
+    """Hit placement and the speed-vs-distance risk side by side. A grid, not st.columns:
+    it stacks as soon as its own width runs out (columns wait for a <=640px window)."""
+    grid = st.grid(2, min_column_width=440)
+    with grid.cell():
+        _hits_chart(t, ctx, s, picks, weapons)
+    with grid.cell():
+        _risk_chart(t, s, ctx.shots_f[ctx.shots_f["sid"] == ctx.me], picks)
 
 
-_FOCUS = "sh_weapon"  # the weapon the page is narrowed to (this page only)
+_FOCUS = "sh_weapons"  # the weapons the page is narrowed to (this page only)
+_HOVER = "sh_weapons"  # the table rows announce the hovered weapon on this channel
+_RISK_KEY = "sh_risk"  # the scatter the hovered weapon row narrows to its own points
+
+
+def _scope_label(t, picks) -> str:
+    """What the numbers describe: every weapon, the picked ones, or how many."""
+    if not picks:
+        return t("sh_scope_all")
+    if len(picks) <= 3:
+        return ", ".join(icons.weapon_label(w) for w in picks)
+    return t("sh_scope_n", n=len(picks))
 
 
 def _weapon_table(ctx):
@@ -499,15 +534,17 @@ def _weapon_table(ctx):
     )
 
 
-def _weapons_grid(ctx, w, focus) -> None:
-    """The per-weapon table: a row click narrows the page to that weapon, a second
-    click (or "All weapons") widens it back."""
-    t = ctx.t
+def _weapons_grid(ctx, w, picks) -> None:
+    """The per-weapon table: pointing at a row previews that gun in the hit card, a click
+    adds it to the weapons the page is narrowed to or takes it out."""
     names = w["weapon"].astype(str).tolist()
 
-    def _pick(i):
+    def _toggle(i):
         if 0 <= i < len(names):
-            st.session_state[_FOCUS] = None if focus == names[i] else names[i]
+            cur = list(st.session_state.get(_FOCUS) or [])
+            st.session_state[_FOCUS] = (
+                [x for x in cur if x != names[i]] if names[i] in cur else cur + [names[i]]
+            )
 
     w_vals, w_labels, w_icons = icons.weapon_cells(w["weapon"])
     cells = {c: w[c].to_numpy() for c in schema.columns("weapons")}
@@ -516,39 +553,41 @@ def _weapons_grid(ctx, w, focus) -> None:
         {**cells, "weapon": w_vals, "weapon_disp": w_labels},
         key="w_grid",
         icons=w_icons,
-        selected=names.index(focus) if focus in names else None,
-        on_click=_pick,
+        selected={i for i, n in enumerate(names) if n in picks},
+        on_click=_toggle,
+        row_keys=names,
+        hover=_HOVER,
+        hover_plots=[_RISK_KEY],
     )
 
 
-def _focus_bar(t, focus) -> None:
-    """What the numbers below describe: every weapon or the picked one."""
+def _focus_bar(t, picks) -> None:
+    """What the numbers below describe: every weapon or the picked ones."""
     with st.container(horizontal=True, vertical_alignment="center", gap="small"):
-        if focus is None:
-            st.markdown(f"**{t('sh_scope_all')}**")
-            st.caption(t("sh_scope_hint"))
-        else:
-            st.markdown(f"**{t('sh_scope_one', w=icons.weapon_label(focus))}**")
+        st.markdown(f"**{_scope_label(t, picks)}**")
+        if picks:
             st.button(
                 t("sh_scope_clear"), key="sh_weapon_clear", icon=":material/close:",
-                type="tertiary", on_click=lambda: st.session_state.update({_FOCUS: None}),
+                type="tertiary", on_click=lambda: st.session_state.update({_FOCUS: []}),
             )
 
 
 def render(ctx) -> None:
-    """Draw the Shooting page: the coaching card, the weapons (a row narrows the
-    page to that gun), the graded metric tiles and the shooting charts."""
+    """Draw the Shooting page: the coaching card, the graded metric tiles, the hit card
+    and the risk chart, then the weapons (a click narrows the page to the picked guns,
+    pointing at one previews it in the hit card). The match filters do not apply here."""
     t = ctx.t
     _top3_card(t, _build_tips(t, _stats(ctx)))
     w = _weapon_table(ctx)
-    focus = st.session_state.get(_FOCUS)
-    if focus not in set(w["weapon"].astype(str)):
-        focus = st.session_state[_FOCUS] = None
-    if len(w):
-        st.markdown(f"**{t('weapons')}**", help=t("sh_weapons_help"))
-        _weapons_grid(ctx, w, focus)
-    _focus_bar(t, focus)
-    s = _stats(ctx, focus)
+    weapons = w["weapon"].astype(str).tolist()
+    picks = [x for x in (st.session_state.get(_FOCUS) or []) if x in set(weapons)]
+    st.session_state[_FOCUS] = picks
+    _focus_bar(t, picks)
+    s = _stats(ctx, picks)
     _metric_tiles(t, s)
     _angles_warning(t, s)
-    _charts(t, s)
+    _charts(t, ctx, s, picks, weapons)
+    if len(w):
+        st.markdown(f"**{t('weapons')}**", help=t("sh_weapons_help"))
+        st.caption(t("sh_scope_hint"))
+        _weapons_grid(ctx, w, picks)

@@ -122,7 +122,7 @@ def table(
     rows: dict,
     *,
     key: str,
-    selected: int | None = None,
+    selected=None,
     on_click=None,
     all_columns: bool = False,
     t=None,
@@ -132,6 +132,8 @@ def table(
     row_keys: "Sequence[str] | None" = None,
     checked=None,
     on_check=None,
+    hover: str = "",
+    hover_plots: "Sequence[str]" = (),
 ) -> None:
     """data_table() with cols, stripe and height from tables.toml. ``icons``: {key:
     [data-uri, w, h]} of the icon columns; the rest see ui.table.data_table."""
@@ -165,6 +167,8 @@ def table(
         row_keys=row_keys,
         checked=checked,
         on_check=on_check,
+        hover=hover,
+        hover_plots=hover_plots,
     )
 
 

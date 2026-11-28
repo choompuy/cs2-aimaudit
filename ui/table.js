@@ -6,6 +6,49 @@ const MARKS = {
   death: MARK_SVG + '<path d="m12.5 17-.5-1-.5 1h1z"/><path d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="12" r="1"/></svg>',
 };
 
+// A linked st.plotly_chart(key=...): its scatter points carry the row key in
+// customdata[0]. While a row is under the pointer only that row's points show. Traces
+// with meta.pool hold the rows outside the page's pick: transparent and without hover
+// (the server draws them so), they appear at opacity meta.op just for the hovered row.
+// SVG scatter only; the state is re-applied after every Plotly redraw (resize, zoom).
+const plotOf = (key) => document.querySelector(".st-key-" + key + " .js-plotly-plot");
+
+function plotApply(gd) {
+  const hov = gd.__aaHov;
+  gd.querySelectorAll(".scatterlayer .trace").forEach((g) => {
+    const cd0 = g.__data__ && g.__data__[0];
+    const tr = cd0 && cd0.trace;
+    if (!tr || !tr.customdata) return;
+    if (tr.meta && tr.meta.pool) g.style.opacity = hov != null ? String(tr.meta.op) : "0";
+    g.querySelectorAll("path.point").forEach((p) => {
+      const row = p.__data__ ? tr.customdata[p.__data__.i] : null;
+      p.style.display = hov == null || (row && row[0] === hov) ? "" : "none";
+    });
+  });
+}
+
+// the chart may render after the table, so look for it a while
+function plotLink(key, tries = 40) {
+  const gd = plotOf(key);
+  if (!gd) {
+    if (tries > 0) setTimeout(() => plotLink(key, tries - 1), 150);
+    return;
+  }
+  gd.__aaHov = null;
+  if (!gd.__aaHooked && typeof gd.on === "function") {
+    gd.on("plotly_afterplot", () => plotApply(gd));
+    gd.__aaHooked = true;
+  }
+  plotApply(gd);
+}
+
+function plotHover(key, k) {
+  const gd = plotOf(key);
+  if (!gd) return;
+  gd.__aaHov = k;
+  plotApply(gd);
+}
+
 export default function (component) {
   const { data, parentElement, setTriggerValue } = component;
   const markEl = (raw) => {
@@ -118,12 +161,22 @@ export default function (component) {
     const thead = el("thead");
     thead.appendChild(trh);
     const tbody = el("tbody");
+    const sels = new Set(Array.isArray(data.sel) ? data.sel : data.sel == null ? [] : [data.sel]);
+    // announce the row under the pointer to whoever previews it (ui/hitbody.js), and
+    // keep only its points in the linked charts
+    const hover = (k) => {
+      if (data.hov) window.dispatchEvent(new CustomEvent("aa-hover", { detail: { ch: data.hov, k } }));
+      (data.hovp || []).forEach((key) => plotHover(key, k));
+    };
+    (data.hovp || []).forEach((key) => plotLink(key));
+    if (data.hov || (data.hovp || []).length) tbody.addEventListener("mouseleave", () => hover(null));
     ordered().forEach((r) => {
       const cls = [];
       if (r.s) cls.push("stripe", "stripe-" + r.s);
-      if (r.i === data.sel) cls.push("sel");
+      if (sels.has(r.i)) cls.push("sel");
       if (data.click) cls.push("clk");
       const tr = el("tr", cls.join(" "));
+      if (data.hov || (data.hovp || []).length) tr.addEventListener("mouseenter", () => hover(r.k));
       if (data.click) {
         tr.tabIndex = 0;
         const go = () => setTriggerValue("clicked", r.i);

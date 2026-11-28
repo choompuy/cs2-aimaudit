@@ -168,7 +168,7 @@ def table_payload(
     rows: Mapping[str, Sequence],
     cols: Sequence[Col],
     *,
-    selected: int | None = None,
+    selected: int | Collection[int] | None = None,
     stripe: Sequence[str | None] | None = None,
     clickable: bool = False,
     max_height: int = 620,
@@ -177,12 +177,19 @@ def table_payload(
     checkable: Sequence[bool] | None = None,
     row_keys: Sequence[str] | None = None,
     checked: Collection[str] | None = None,
+    hover: str = "",
+    hover_plots: Sequence[str] = (),
 ) -> dict:
     """JSON-ready model of the table.
 
-    ``icons``: {key: [data-uri, w, h]} the icon cells reference. ``checkable`` (one bool
-    per row) adds the checkbox column: ``row_keys`` identify the rows, ``checked`` is
-    the selection, reported back whole."""
+    ``selected``: one row index or several (all highlighted). ``icons``: {key: [data-uri,
+    w, h]} the icon cells reference. ``checkable`` (one bool per row) adds the checkbox
+    column: ``row_keys`` identify the rows, ``checked`` is the selection, reported back
+    whole. ``hover``: a channel name; the row under the pointer is announced on it as
+    a window "aa-hover" event {ch, k: row key | null} for other components to preview.
+    ``hover_plots``: keys of st.plotly_chart elements whose points carry a row key in
+    customdata[0]; while a row is under the pointer only that row's points show,
+    including those of transparent meta={"pool": 1, "op": opacity} traces."""
     n = len(next(iter(rows.values()))) if rows else 0
     col_max = _rel_maxima(rows, cols)
     col_rng = _auto_ranges(rows, cols)
@@ -208,13 +215,15 @@ def table_payload(
     return {
         "cols": out_cols,
         "rows": out_rows,
-        "sel": selected,
+        "sel": selected if selected is None or isinstance(selected, int) else sorted(selected),
         "click": bool(clickable),
         "maxh": int(max_height),
         "empty": empty,
         "icons": {str(k): list(v) for k, v in (icons or {}).items()},
         "chk": has_checks,
         "checked": sorted(k for k in (checked or set()) if k),
+        "hov": hover,
+        "hovp": list(hover_plots),
     }
 
 
@@ -223,7 +232,7 @@ def data_table(
     cols: Sequence[Col],
     *,
     key: str,
-    selected: int | None = None,
+    selected: int | Collection[int] | None = None,
     stripe: Sequence[str | None] | None = None,
     on_click: Callable[[int], None] | None = None,
     max_height: int = 620,
@@ -233,6 +242,8 @@ def data_table(
     row_keys: Sequence[str] | None = None,
     checked: Collection[str] | None = None,
     on_check: Callable[[set], None] | None = None,
+    hover: str = "",
+    hover_plots: Sequence[str] = (),
 ) -> None:
     payload = table_payload(
         rows,
@@ -246,6 +257,8 @@ def data_table(
         checkable=checkable,
         row_keys=row_keys,
         checked=checked,
+        hover=hover,
+        hover_plots=hover_plots,
     )
     events = {}
     if on_check is not None:

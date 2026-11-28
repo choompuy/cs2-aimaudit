@@ -21,7 +21,7 @@ from core.duels import duels_for
 from core.impact import impact_stats
 from core.openings import _enemy_kill_rows, _round_side_keep, _top_weapon
 
-__all__ = ["hitgroup_counts", "player_summary", "weapon_stats"]
+__all__ = ["hitgroup_counts", "hitgroup_damage", "player_summary", "weapon_stats"]
 
 
 def _hurts_of(demo: Demo, me: str, hurts: pd.DataFrame | None = None) -> pd.DataFrame:
@@ -261,3 +261,14 @@ def hitgroup_counts(
     if not len(hi) or "hitgroup" not in hi.columns:
         return pd.Series(dtype="int64")
     return hi["hitgroup"].value_counts()
+
+
+def hitgroup_damage(
+    demo: Demo, me: str, hurts: pd.DataFrame | None = None
+) -> pd.Series:
+    """Health damage dealt per hitgroup (overkill already clipped by the parser)."""
+    hi = _hurts_of(demo, me, hurts)
+    if not len(hi) or not {"hitgroup", "dmg_health"} <= set(hi.columns):
+        return pd.Series(dtype="float64")
+    dmg = pd.to_numeric(hi["dmg_health"], errors="coerce").fillna(0)
+    return dmg.groupby(hi["hitgroup"]).sum()
